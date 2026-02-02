@@ -1,0 +1,110 @@
+version: "3.8"
+
+services:
+  # ===================
+  # Ghost CMS
+  # ===================
+  ghost:
+    image: ghost:5-alpine
+    restart: always
+    ports:
+      - "80:2368"
+    environment:
+      url: http://95.163.230.43
+      database__client: mysql
+      database__connection__host: ghost-db
+      database__connection__user: ghost
+      database__connection__password: ghostdbpass
+      database__connection__database: ghost
+    volumes:
+      - ghost-content:/var/lib/ghost/content
+    depends_on:
+      - ghost-db
+    networks:
+      - internal
+
+  ghost-db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_USER: ghost
+      MYSQL_PASSWORD: ghostdbpass
+      MYSQL_DATABASE: ghost
+    volumes:
+      - ghost-db-data:/var/lib/mysql
+    networks:
+      - internal
+
+  # ===================
+  # SEO Blog Service
+  # ===================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://seo:seopass@postgres:5432/seoblog
+      REDIS_URL: redis://redis:6379/0
+      GHOST_URL: http://ghost:2368
+      GHOST_ADMIN_KEY: ${GHOST_ADMIN_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    volumes:
+      - ./src:/app/src
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - internal
+
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: seo
+      POSTGRES_PASSWORD: seopass
+      POSTGRES_DB: seoblog
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      - internal
+
+  # ===================
+  # Task Worker (будет позже)
+  # ===================
+  # worker:
+  #   build: .
+  #   command: python -m src.worker
+  #   environment:
+  #     DATABASE_URL: postgresql://seo:seopass@postgres:5432/seoblog
+  #     REDIS_URL: redis://redis:6379/0
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #   networks:
+  #     - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  ghost-content:
+  ghost-db-data:
+  postgres-data:
+  redis-data:
