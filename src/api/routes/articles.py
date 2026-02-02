@@ -27,9 +27,10 @@ class ArticleResponse(BaseModel):
     """Ответ с данными статьи."""
     id: UUID
     title: str
-    slug: str
+    slug: str | None = None
     status: str
-    word_count: int | None
+    word_count: int | None = None
+    content_md: str | None = None
 
     class Config:
         from_attributes = True
