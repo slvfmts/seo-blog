@@ -1791,5 +1791,91 @@ curl -X POST http://localhost:8000/api/v1/sites \
 
 ---
 
-*Document version: 1.0*
+## Appendix C: Development Progress Log
+
+### Phase 0: Foundation — ТЕКУЩИЙ СТАТУС
+
+**Дата:** 2026-02-02
+
+#### Выполнено:
+
+1. **Инфраструктура на сервере (95.163.230.43)**
+   - Ghost CMS развёрнут и работает: http://95.163.230.43
+   - MySQL для Ghost
+   - PostgreSQL для API
+   - Redis для кэша
+   - FastAPI приложение в Docker
+
+2. **Структура проекта:**
+   ```
+   /src
+     /api
+       /routes
+         - health.py      # Health check endpoint
+         - sites.py       # CRUD для сайтов
+         - articles.py    # Генерация и публикация статей
+       - main.py          # FastAPI app factory
+     /db
+       - models.py        # SQLAlchemy models (Site, Draft, Post)
+       - session.py       # Database session
+     /services
+       - generator.py     # ArticleGenerator (Claude API)
+       - publisher.py     # GhostPublisher (Ghost Admin API)
+     - config.py          # Settings from env
+   ```
+
+3. **Работающие эндпоинты:**
+   - `GET /health` — проверка здоровья
+   - `POST /api/v1/articles/generate` — запуск генерации (фоновая задача)
+   - `GET /api/v1/articles/{id}` — получение статьи
+   - `POST /api/v1/articles/{id}/publish` — публикация в Ghost
+
+4. **PoC скрипты:**
+   - `poc/generate_article.py` — тест генерации через Claude
+   - `poc/publish_to_ghost.py` — тест публикации в Ghost
+
+#### Проблемы и решения:
+
+| Проблема | Решение |
+|----------|---------|
+| Ghost требует MySQL (не SQLite) | Добавлен MySQL в docker-compose |
+| Dockerfile: apt-get failed | Убраны системные зависимости (psycopg2-binary не требует libpq-dev) |
+| Таблицы не созданы | `Base.metadata.create_all(engine)` в session.py |
+| ArticleResponse validation error | Сделаны поля `slug`, `content_md` optional |
+| Ghost "Host not allowed" | Деплой API на тот же сервер для localhost доступа |
+| Anthropic 403 "Request not allowed" | **Исправлено:** модель `claude-sonnet-4-20250514` → `claude-3-5-sonnet-20241022` |
+
+#### Конфигурация на сервере (.env):
+
+```env
+DATABASE_URL=postgresql://seo:seopass@postgres:5432/seoblog
+REDIS_URL=redis://redis:6379/0
+GHOST_URL=http://ghost:2368
+GHOST_ADMIN_KEY=69810b7b23ec7d0001526cd5:b64dd47c3cf03456615984d7c0f5f79a486bb049cf1fd86a6de434ce16da373e
+ANTHROPIC_API_KEY=<ваш ключ>
+DEBUG=true
+```
+
+#### Следующие шаги:
+
+1. **Немедленно (продолжение Phase 0):**
+   - [ ] Обновить код на сервере (git pull)
+   - [ ] Обновить Ghost API key в .env
+   - [ ] Протестировать генерацию статьи end-to-end
+   - [ ] Протестировать публикацию в Ghost
+   - [ ] Добавить endpoint для approve статьи (изменение status на "approved")
+
+2. **Phase 1: Validation Pipeline:**
+   - [ ] SEO lint проверки
+   - [ ] Базовая проверка на плагиат (простой similarity check)
+   - [ ] Проверка источников
+
+3. **Инфраструктурные улучшения:**
+   - [ ] Alembic миграции вместо create_all
+   - [ ] Логирование в файл
+   - [ ] Health check для всех сервисов в docker-compose
+
+---
+
+*Document version: 1.1*
 *Last updated: 2026-02-02*
