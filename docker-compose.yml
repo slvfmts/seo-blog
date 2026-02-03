@@ -54,6 +54,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       ANTHROPIC_PROXY_URL: ${ANTHROPIC_PROXY_URL}
       ANTHROPIC_PROXY_SECRET: ${ANTHROPIC_PROXY_SECRET}
+      SERPER_API_KEY: ${SERPER_API_KEY}
     volumes:
       - ./src:/app/src
     depends_on:
