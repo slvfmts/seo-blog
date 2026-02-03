@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from src.config import get_settings
-from src.api.routes import health, sites, articles, briefs, ui
+from src.api.routes import health, sites, articles, briefs, ui, discovery
 
 
 @asynccontextmanager
@@ -48,6 +48,7 @@ def create_app() -> FastAPI:
     app.include_router(sites.router, prefix="/api/v1/sites", tags=["sites"])
     app.include_router(articles.router, prefix="/api/v1/articles", tags=["articles"])
     app.include_router(briefs.router, prefix="/api/v1/briefs", tags=["briefs"])
+    app.include_router(discovery.router, prefix="/api/v1/discovery", tags=["discovery"])
 
     # UI Роуты
     app.include_router(ui.router, prefix="/ui", tags=["ui"])
