@@ -22,6 +22,7 @@ class Brief(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=True)
+    cluster_id = Column(UUID(as_uuid=True), ForeignKey("clusters.id"), nullable=True)
 
     # Основное
     title = Column(String(500), nullable=False)
@@ -48,6 +49,7 @@ class Brief(Base):
 
     # Relationships
     site = relationship("Site", back_populates="briefs")
+    cluster = relationship("Cluster", back_populates="briefs")
     drafts = relationship("Draft", back_populates="brief")
 
 
@@ -73,6 +75,10 @@ class Site(Base):
     drafts = relationship("Draft", back_populates="site")
     posts = relationship("Post", back_populates="site")
     briefs = relationship("Brief", back_populates="site")
+    competitors = relationship("Competitor", back_populates="site")
+    keywords = relationship("Keyword", back_populates="site")
+    clusters = relationship("Cluster", back_populates="site")
+    roadmap = relationship("ContentRoadmap", back_populates="site")
 
 
 class Draft(Base):
@@ -135,3 +141,122 @@ class Post(Base):
 
     # Relationships
     site = relationship("Site", back_populates="posts")
+
+
+# ============ Discovery Pipeline Models ============
+
+class Competitor(Base):
+    """Конкурент сайта."""
+    __tablename__ = "competitors"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=False)
+
+    domain = Column(String(255), nullable=False)
+    relevance_score = Column(Float)  # 0.0 - 1.0
+    monthly_traffic = Column(Integer)
+    top_keywords = Column(JSON)  # [{keyword, position, volume}]
+
+    status = Column(String(50), default="active")  # active | ignored | analyzed
+
+    discovered_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    site = relationship("Site", back_populates="competitors")
+    keywords = relationship("Keyword", back_populates="source_competitor")
+
+
+class Keyword(Base):
+    """Ключевое слово."""
+    __tablename__ = "keywords"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=False)
+
+    keyword = Column(Text, nullable=False)
+    search_volume = Column(Integer)
+    difficulty = Column(Float)  # 0-100
+    cpc = Column(Float)
+
+    # Intent: informational | transactional | navigational | commercial
+    intent = Column(String(50))
+
+    # SERP features
+    serp_features = Column(JSON)  # ["featured_snippet", "paa", "video"]
+    current_position = Column(Integer)  # наша позиция (null если не ранжируемся)
+
+    # Связи
+    competitor_id = Column(UUID(as_uuid=True), ForeignKey("competitors.id"), nullable=True)
+    cluster_id = Column(UUID(as_uuid=True), ForeignKey("clusters.id"), nullable=True)
+
+    status = Column(String(50), default="new")  # new | clustered | targeted | achieved | abandoned
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    site = relationship("Site", back_populates="keywords")
+    source_competitor = relationship("Competitor", back_populates="keywords")
+    cluster = relationship("Cluster", back_populates="keywords")
+
+
+class Cluster(Base):
+    """Кластер (тематическая группа ключевых слов)."""
+    __tablename__ = "clusters"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=False)
+
+    name = Column(String(255), nullable=False)
+    primary_keyword_id = Column(UUID(as_uuid=True), nullable=True)  # FK добавим позже
+
+    # Intent: informational | transactional | navigational | commercial
+    intent = Column(String(50))
+
+    # Topic type: pillar | cluster | supporting
+    topic_type = Column(String(50))
+
+    # Иерархия
+    parent_cluster_id = Column(UUID(as_uuid=True), ForeignKey("clusters.id"), nullable=True)
+
+    # Метрики
+    priority_score = Column(Float)  # 0-100, рассчитывается Strategy
+    estimated_traffic = Column(Integer)
+    competition_level = Column(String(20))  # low | medium | high
+
+    status = Column(String(50), default="new")  # new | planned | in_progress | published | monitoring
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    site = relationship("Site", back_populates="clusters")
+    keywords = relationship("Keyword", back_populates="cluster")
+    parent = relationship("Cluster", remote_side=[id], backref="children")
+    roadmap_items = relationship("ContentRoadmap", back_populates="cluster")
+    briefs = relationship("Brief", back_populates="cluster")
+
+
+class ContentRoadmap(Base):
+    """План публикаций (roadmap)."""
+    __tablename__ = "content_roadmap"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=False)
+    cluster_id = Column(UUID(as_uuid=True), ForeignKey("clusters.id"), nullable=False)
+
+    scheduled_week = Column(DateTime)  # начало недели
+    priority = Column(Integer)  # 1 = highest
+
+    reasoning = Column(Text)  # почему такой приоритет
+    dependencies = Column(JSON)  # [cluster_id, ...] - clusters that should be published first
+
+    expected_traffic = Column(Integer)
+    expected_time_to_rank_weeks = Column(Integer)
+
+    status = Column(String(50), default="planned")  # planned | in_progress | completed | skipped
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    site = relationship("Site", back_populates="roadmap")
+    cluster = relationship("Cluster", back_populates="roadmap_items")
