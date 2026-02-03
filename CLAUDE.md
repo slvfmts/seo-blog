@@ -1843,7 +1843,7 @@ curl -X POST http://localhost:8000/api/v1/sites \
 | Таблицы не созданы | `Base.metadata.create_all(engine)` в session.py |
 | ArticleResponse validation error | Сделаны поля `slug`, `content_md` optional |
 | Ghost "Host not allowed" | Деплой API на тот же сервер для localhost доступа |
-| Anthropic 403 "Request not allowed" | **Исправлено:** модель `claude-sonnet-4-20250514` → `claude-3-5-sonnet-20241022` |
+| Anthropic 404 "model not found" | **Исправлено:** модель `claude-3-5-sonnet-20241022` устарела → используем `claude-sonnet-4-20250514` |
 
 #### Конфигурация на сервере (.env):
 
