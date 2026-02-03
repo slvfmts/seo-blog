@@ -65,7 +65,11 @@ async def generate_article(
     db.refresh(draft)
 
     # Запускаем генерацию в фоне
-    generator = ArticleGenerator(settings.anthropic_api_key)
+    generator = ArticleGenerator(
+        api_key=settings.anthropic_api_key,
+        proxy_url=settings.anthropic_proxy_url or None,
+        proxy_secret=settings.anthropic_proxy_secret or None,
+    )
     background_tasks.add_task(
         generator.generate_and_save,
         draft_id=draft.id,

@@ -21,6 +21,8 @@ class Settings(BaseSettings):
 
     # Anthropic
     anthropic_api_key: str = ""
+    anthropic_proxy_url: str = ""  # Cloudflare Worker URL для обхода geo-блокировки
+    anthropic_proxy_secret: str = ""  # Секрет для авторизации на proxy
 
     # App
     debug: bool = False
