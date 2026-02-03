@@ -16,6 +16,7 @@ services:
       database__connection__user: ghost
       database__connection__password: ghostdbpass
       database__connection__database: ghost
+      mail__transport: Direct
     volumes:
       - ghost-content:/var/lib/ghost/content
     depends_on:
