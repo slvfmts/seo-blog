@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.config import get_settings
-from src.api.routes import health, sites, articles
+from src.api.routes import health, sites, articles, briefs
 
 
 @asynccontextmanager
@@ -46,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router, tags=["health"])
     app.include_router(sites.router, prefix="/api/v1/sites", tags=["sites"])
     app.include_router(articles.router, prefix="/api/v1/articles", tags=["articles"])
+    app.include_router(briefs.router, prefix="/api/v1/briefs", tags=["briefs"])
 
     return app
 

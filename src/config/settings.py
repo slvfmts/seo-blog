@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     anthropic_proxy_url: str = ""  # Cloudflare Worker URL для обхода geo-блокировки
     anthropic_proxy_secret: str = ""  # Секрет для авторизации на proxy
 
+    # Serper.dev (SERP API)
+    serper_api_key: str = ""
+
     # App
     debug: bool = False
     log_level: str = "INFO"

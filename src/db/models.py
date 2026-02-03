@@ -16,6 +16,41 @@ from sqlalchemy.orm import declarative_base, relationship
 Base = declarative_base()
 
 
+class Brief(Base):
+    """ТЗ (Brief) для статьи."""
+    __tablename__ = "briefs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=True)
+
+    # Основное
+    title = Column(String(500), nullable=False)
+    target_keyword = Column(String(500), nullable=False)
+    secondary_keywords = Column(JSON)  # ["keyword1", "keyword2"]
+
+    # Объём
+    word_count_min = Column(Integer, default=1500)
+    word_count_max = Column(Integer, default=2500)
+
+    # Структура
+    structure = Column(JSON)  # {sections: [{heading, key_points}]}
+    required_sources = Column(JSON)  # [{type: "statistic", min_count: 2}]
+    competitor_urls = Column(JSON)  # ["url1", "url2"]
+
+    # SEO
+    serp_analysis = Column(JSON)  # {paa_questions: [], featured_snippet_target: bool}
+
+    # Статус
+    status = Column(String(50), default="draft")  # draft → approved → in_writing → completed
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    approved_at = Column(DateTime)
+
+    # Relationships
+    site = relationship("Site", back_populates="briefs")
+    drafts = relationship("Draft", back_populates="brief")
+
+
 class Site(Base):
     """Сайт/проект."""
     __tablename__ = "sites"
@@ -37,6 +72,7 @@ class Site(Base):
     # Relationships
     drafts = relationship("Draft", back_populates="site")
     posts = relationship("Post", back_populates="site")
+    briefs = relationship("Brief", back_populates="site")
 
 
 class Draft(Base):
@@ -45,6 +81,7 @@ class Draft(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=True)
+    brief_id = Column(UUID(as_uuid=True), ForeignKey("briefs.id"), nullable=True)
 
     title = Column(String(500), nullable=False)
     slug = Column(String(255))
@@ -75,6 +112,7 @@ class Draft(Base):
 
     # Relationships
     site = relationship("Site", back_populates="drafts")
+    brief = relationship("Brief", back_populates="drafts")
 
 
 class Post(Base):
