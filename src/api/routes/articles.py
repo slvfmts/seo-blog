@@ -93,6 +93,21 @@ async def get_article(draft_id: UUID, db: Session = Depends(get_db)):
     return draft
 
 
+@router.post("/{draft_id}/approve")
+async def approve_article(draft_id: UUID, db: Session = Depends(get_db)):
+    """Одобряет статью для публикации."""
+    draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    if draft.status != "generated":
+        raise HTTPException(status_code=400, detail=f"Draft status is '{draft.status}', expected 'generated'")
+
+    draft.status = "approved"
+    db.commit()
+    return {"status": "approved", "draft_id": str(draft.id)}
+
+
 @router.post("/{draft_id}/publish")
 async def publish_article(draft_id: UUID, db: Session = Depends(get_db)):
     """Публикует статью в Ghost."""
