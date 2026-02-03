@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}Drafts - SEO Blog{% endblock %}
+
+{% block content %}
+<div class="mb-6 flex justify-between items-center">
+    <h1 class="text-2xl font-bold text-gray-900">Drafts</h1>
+</div>
+
+{% if drafts %}
+<div class="bg-white shadow overflow-hidden rounded-lg">
+    <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Title
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Word Count
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Created
+                </th>
+                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                </th>
+            </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+            {% for draft in drafts %}
+            <tr class="hover:bg-gray-50 cursor-pointer" onclick="window.location='/ui/drafts/{{ draft.id }}'">
+                <td class="px-6 py-4">
+                    <div class="text-sm font-medium text-gray-900">{{ draft.title }}</div>
+                    {% if draft.slug %}
+                    <div class="text-xs text-gray-500 font-mono">/{{ draft.slug }}</div>
+                    {% endif %}
+                </td>
+                <td class="px-6 py-4">
+                    <div class="text-sm text-gray-500">
+                        {{ draft.word_count or '-' }}
+                    </div>
+                </td>
+                <td class="px-6 py-4">
+                    {% if draft.status == 'generating' %}
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                        <svg class="animate-spin h-3 w-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        Generating
+                    </span>
+                    {% elif draft.status == 'generated' %}
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                        Generated
+                    </span>
+                    {% elif draft.status == 'approved' %}
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                        Approved
+                    </span>
+                    {% elif draft.status == 'published' %}
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
+                        Published
+                    </span>
+                    {% elif draft.status == 'failed' %}
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                        Failed
+                    </span>
+                    {% else %}
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-600">
+                        {{ draft.status }}
+                    </span>
+                    {% endif %}
+                </td>
+                <td class="px-6 py-4">
+                    <div class="text-sm text-gray-500">
+                        {{ draft.created_at.strftime('%Y-%m-%d %H:%M') }}
+                    </div>
+                </td>
+                <td class="px-6 py-4 text-right text-sm font-medium">
+                    <a href="/ui/drafts/{{ draft.id }}" class="text-blue-600 hover:text-blue-900">
+                        View
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="bg-white shadow rounded-lg p-6 text-center">
+    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+    </svg>
+    <h3 class="mt-2 text-sm font-medium text-gray-900">No drafts</h3>
+    <p class="mt-1 text-sm text-gray-500">Create a brief first to generate articles.</p>
+    <div class="mt-6">
+        <a href="/ui/briefs/new" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
+            Create Brief
+        </a>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

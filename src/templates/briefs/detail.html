@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block title %}{{ brief.title }} - SEO Blog{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <a href="/ui/briefs" class="text-blue-600 hover:text-blue-800 text-sm">&larr; Back to Briefs</a>
+</div>
+
+<div class="bg-white shadow rounded-lg overflow-hidden">
+    <!-- Header -->
+    <div class="px-6 py-4 border-b border-gray-200">
+        <div class="flex justify-between items-start">
+            <div>
+                <h1 class="text-xl font-semibold text-gray-900">{{ brief.title }}</h1>
+                <p class="mt-1 text-sm text-gray-500">
+                    Target keyword: <span class="font-medium">{{ brief.target_keyword }}</span>
+                </p>
+            </div>
+            <div>
+                {% if brief.status == 'draft' %}
+                <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
+                    Draft
+                </span>
+                {% elif brief.status == 'approved' %}
+                <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                    Approved
+                </span>
+                {% elif brief.status == 'in_writing' %}
+                <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                    Writing...
+                </span>
+                {% elif brief.status == 'completed' %}
+                <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                    Completed
+                </span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Content -->
+    <div class="px-6 py-4 space-y-6">
+        <!-- Meta Info -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="bg-gray-50 rounded-lg p-3">
+                <p class="text-xs text-gray-500 uppercase">Word Count</p>
+                <p class="mt-1 text-lg font-semibold text-gray-900">{{ brief.word_count_min }} - {{ brief.word_count_max }}</p>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-3">
+                <p class="text-xs text-gray-500 uppercase">Created</p>
+                <p class="mt-1 text-sm font-medium text-gray-900">{{ brief.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+            </div>
+            {% if brief.approved_at %}
+            <div class="bg-gray-50 rounded-lg p-3">
+                <p class="text-xs text-gray-500 uppercase">Approved</p>
+                <p class="mt-1 text-sm font-medium text-gray-900">{{ brief.approved_at.strftime('%Y-%m-%d %H:%M') }}</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Secondary Keywords -->
+        {% if brief.secondary_keywords %}
+        <div>
+            <h3 class="text-sm font-medium text-gray-700 mb-2">Secondary Keywords</h3>
+            <div class="flex flex-wrap gap-2">
+                {% for keyword in brief.secondary_keywords %}
+                <span class="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded">{{ keyword }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Structure -->
+        {% if brief.structure and brief.structure.sections %}
+        <div>
+            <h3 class="text-sm font-medium text-gray-700 mb-2">Article Structure</h3>
+            <div class="bg-gray-50 rounded-lg p-4">
+                <ol class="space-y-3">
+                    {% for section in brief.structure.sections %}
+                    <li class="border-l-2 border-blue-400 pl-4">
+                        <p class="font-medium text-gray-900">{{ section.heading }}</p>
+                        {% if section.key_points %}
+                        <ul class="mt-1 text-sm text-gray-600 list-disc list-inside">
+                            {% for point in section.key_points %}
+                            <li>{{ point }}</li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ol>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- SERP Analysis -->
+        {% if brief.serp_analysis %}
+        <div>
+            <h3 class="text-sm font-medium text-gray-700 mb-2">SERP Analysis</h3>
+            <div class="bg-gray-50 rounded-lg p-4 space-y-4">
+                {% if brief.serp_analysis.paa_questions %}
+                <div>
+                    <p class="text-xs text-gray-500 uppercase mb-2">People Also Ask</p>
+                    <ul class="space-y-1">
+                        {% for question in brief.serp_analysis.paa_questions %}
+                        <li class="text-sm text-gray-700 flex items-start">
+                            <span class="text-blue-500 mr-2">Q:</span>
+                            {{ question }}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+
+                {% if brief.serp_analysis.featured_snippet_target %}
+                <div>
+                    <span class="px-2 py-1 text-xs bg-green-100 text-green-800 rounded">
+                        Featured Snippet Opportunity
+                    </span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Competitor URLs -->
+        {% if brief.competitor_urls %}
+        <div>
+            <h3 class="text-sm font-medium text-gray-700 mb-2">Analyzed Competitors</h3>
+            <ul class="space-y-1">
+                {% for url in brief.competitor_urls %}
+                <li>
+                    <a href="{{ url }}" target="_blank" class="text-sm text-blue-600 hover:text-blue-800 break-all">
+                        {{ url }}
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Actions -->
+    <div class="px-6 py-4 bg-gray-50 border-t border-gray-200">
+        {% if brief.status == 'draft' %}
+        <form method="POST" action="/ui/briefs/{{ brief.id }}/approve" class="inline">
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                Approve Brief
+            </button>
+        </form>
+        {% elif brief.status == 'approved' %}
+        <form method="POST" action="/ui/briefs/{{ brief.id }}/generate-draft" class="inline" id="generate-form">
+            <button type="submit" id="generate-btn" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                <span id="gen-btn-text">Generate Article</span>
+                <span id="gen-btn-loading" class="hidden">
+                    <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Generating...
+                </span>
+            </button>
+        </form>
+        {% elif brief.status == 'in_writing' %}
+        <div class="flex items-center text-yellow-700">
+            <svg class="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Article is being generated...
+            <a href="" onclick="location.reload(); return false;" class="ml-4 text-blue-600 hover:text-blue-800 text-sm">
+                Refresh
+            </a>
+        </div>
+        {% elif brief.status == 'completed' and draft %}
+        <a href="/ui/drafts/{{ draft.id }}" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium inline-block">
+            View Generated Article
+        </a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    {% if brief.status == 'approved' %}
+    document.getElementById('generate-form').addEventListener('submit', function() {
+        document.getElementById('generate-btn').disabled = true;
+        document.getElementById('gen-btn-text').classList.add('hidden');
+        document.getElementById('gen-btn-loading').classList.remove('hidden');
+    });
+    {% endif %}
+
+    {% if brief.status == 'in_writing' %}
+    // Auto-refresh while generating
+    setTimeout(function() {
+        location.reload();
+    }, 10000);
+    {% endif %}
+</script>
+{% endblock %}
