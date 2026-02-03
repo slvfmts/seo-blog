@@ -3,16 +3,19 @@ UI routes for Brief workflow web interface.
 """
 
 from uuid import UUID
+from typing import List
 from fastapi import APIRouter, Depends, Request, Form, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 import markdown
 
 from src.db.session import get_db
 from src.db import models
 from src.services.brief_generator import BriefGenerator
 from src.services.generator import ArticleGenerator
+from src.services.discovery import DiscoveryAgent
 from src.config import get_settings
 
 router = APIRouter()
@@ -28,6 +31,322 @@ def md_to_html(text: str) -> str:
 
 # Register custom filter
 templates.env.filters['markdown'] = md_to_html
+
+
+# ============ Topics Pages ============
+
+@router.get("/topics", response_class=HTMLResponse)
+async def list_topics(request: Request, db: Session = Depends(get_db)):
+    """List all topics (sites)."""
+    # Get all sites with keyword and brief counts
+    sites = db.query(models.Site).order_by(models.Site.created_at.desc()).all()
+
+    topics = []
+    for site in sites:
+        keyword_count = db.query(models.Keyword).filter(models.Keyword.site_id == site.id).count()
+        selected_count = db.query(models.Keyword).filter(
+            models.Keyword.site_id == site.id,
+            models.Keyword.status == 'selected'
+        ).count()
+        brief_count = db.query(models.Brief).filter(models.Brief.site_id == site.id).count()
+
+        topics.append({
+            "id": site.id,
+            "name": site.name,
+            "domain": site.domain,
+            "status": site.status,
+            "language": site.language,
+            "country": site.country,
+            "created_at": site.created_at,
+            "keyword_count": keyword_count,
+            "selected_count": selected_count,
+            "brief_count": brief_count,
+        })
+
+    return templates.TemplateResponse("topics/list.html", {
+        "request": request,
+        "topics": topics,
+    })
+
+
+@router.get("/topics/new", response_class=HTMLResponse)
+async def new_topic_form(request: Request):
+    """Show form to create a new topic."""
+    return templates.TemplateResponse("topics/create.html", {
+        "request": request,
+    })
+
+
+@router.post("/topics/new", response_class=HTMLResponse)
+async def create_topic(
+    request: Request,
+    niche: str = Form(...),
+    country: str = Form("ru"),
+    language: str = Form("ru"),
+    db: Session = Depends(get_db),
+):
+    """Create a new topic by running Discovery Agent."""
+    settings = get_settings()
+
+    if not settings.serper_api_key:
+        return templates.TemplateResponse("topics/create.html", {
+            "request": request,
+            "error": "SERPER_API_KEY not configured",
+            "niche": niche,
+            "country": country,
+            "language": language,
+        })
+
+    if not settings.anthropic_api_key:
+        return templates.TemplateResponse("topics/create.html", {
+            "request": request,
+            "error": "ANTHROPIC_API_KEY not configured",
+            "niche": niche,
+            "country": country,
+            "language": language,
+        })
+
+    try:
+        # Run Discovery Agent
+        discovery = DiscoveryAgent(
+            serper_api_key=settings.serper_api_key,
+            anthropic_api_key=settings.anthropic_api_key,
+            proxy_url=settings.anthropic_proxy_url or None,
+            proxy_secret=settings.anthropic_proxy_secret or None,
+        )
+
+        result = await discovery.discover(
+            niche=niche,
+            country=country,
+            language=language,
+        )
+
+        # Create Site
+        site = models.Site(
+            name=niche,
+            status="active",
+            language=language,
+            country=country.upper(),
+            niche_boundaries=result.get("niche_boundaries"),
+        )
+        db.add(site)
+        db.flush()  # Get site.id
+
+        # Create Competitors
+        for comp_data in result.get("competitors", []):
+            competitor = models.Competitor(
+                site_id=site.id,
+                domain=comp_data.get("domain", ""),
+                relevance_score=comp_data.get("relevance_score"),
+                status="active",
+            )
+            db.add(competitor)
+
+        # Create Keywords from seed_keywords
+        for kw_text in result.get("seed_keywords", []):
+            keyword = models.Keyword(
+                site_id=site.id,
+                keyword=kw_text,
+                status="new",
+            )
+            db.add(keyword)
+
+        db.commit()
+        db.refresh(site)
+
+        return RedirectResponse(
+            url=f"/ui/topics/{site.id}",
+            status_code=303,
+        )
+
+    except Exception as e:
+        return templates.TemplateResponse("topics/create.html", {
+            "request": request,
+            "error": str(e),
+            "niche": niche,
+            "country": country,
+            "language": language,
+        })
+
+
+@router.get("/topics/{topic_id}", response_class=HTMLResponse)
+async def topic_detail(
+    request: Request,
+    topic_id: UUID,
+    error: str = None,
+    success: str = None,
+    db: Session = Depends(get_db),
+):
+    """Show topic details with keywords."""
+    topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    # Get keywords with their briefs
+    keywords = db.query(models.Keyword).filter(
+        models.Keyword.site_id == topic_id
+    ).order_by(models.Keyword.status, models.Keyword.keyword).all()
+
+    # Calculate stats
+    stats = {
+        "total": len(keywords),
+        "new": sum(1 for kw in keywords if kw.status == "new"),
+        "selected": sum(1 for kw in keywords if kw.status == "selected"),
+        "rejected": sum(1 for kw in keywords if kw.status == "rejected"),
+        "brief_created": sum(1 for kw in keywords if kw.status == "brief_created"),
+    }
+
+    return templates.TemplateResponse("topics/detail.html", {
+        "request": request,
+        "topic": topic,
+        "keywords": keywords,
+        "stats": stats,
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+    })
+
+
+@router.post("/topics/{topic_id}/keywords/select", response_class=HTMLResponse)
+async def select_keywords(
+    request: Request,
+    topic_id: UUID,
+    keyword_ids: List[str] = Form(default=[]),
+    db: Session = Depends(get_db),
+):
+    """Mark selected keywords as 'selected'."""
+    if not keyword_ids:
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error=Не выбраны ключевые слова",
+            status_code=303,
+        )
+
+    count = 0
+    for kw_id in keyword_ids:
+        keyword = db.query(models.Keyword).filter(
+            models.Keyword.id == kw_id,
+            models.Keyword.site_id == topic_id,
+            models.Keyword.status.in_(["new", "rejected"]),
+        ).first()
+        if keyword:
+            keyword.status = "selected"
+            count += 1
+
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/ui/topics/{topic_id}?success=Выбрано {count} ключевых слов",
+        status_code=303,
+    )
+
+
+@router.post("/topics/{topic_id}/keywords/reject", response_class=HTMLResponse)
+async def reject_keywords(
+    request: Request,
+    topic_id: UUID,
+    keyword_ids: List[str] = Form(default=[]),
+    db: Session = Depends(get_db),
+):
+    """Mark selected keywords as 'rejected'."""
+    if not keyword_ids:
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error=Не выбраны ключевые слова",
+            status_code=303,
+        )
+
+    count = 0
+    for kw_id in keyword_ids:
+        keyword = db.query(models.Keyword).filter(
+            models.Keyword.id == kw_id,
+            models.Keyword.site_id == topic_id,
+            models.Keyword.status.in_(["new", "selected"]),
+        ).first()
+        if keyword:
+            keyword.status = "rejected"
+            count += 1
+
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/ui/topics/{topic_id}?success=Отклонено {count} ключевых слов",
+        status_code=303,
+    )
+
+
+@router.post("/topics/{topic_id}/generate-briefs", response_class=HTMLResponse)
+async def generate_briefs_for_topic(
+    request: Request,
+    topic_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Generate briefs for all selected keywords."""
+    settings = get_settings()
+
+    topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    # Get selected keywords
+    keywords = db.query(models.Keyword).filter(
+        models.Keyword.site_id == topic_id,
+        models.Keyword.status == "selected",
+    ).all()
+
+    if not keywords:
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error=Нет выбранных ключевых слов для генерации",
+            status_code=303,
+        )
+
+    try:
+        generator = BriefGenerator(
+            serper_api_key=settings.serper_api_key,
+            anthropic_api_key=settings.anthropic_api_key,
+            proxy_url=settings.anthropic_proxy_url or None,
+            proxy_secret=settings.anthropic_proxy_secret or None,
+        )
+
+        count = 0
+        for keyword in keywords:
+            # Generate brief
+            brief_data = await generator.generate(
+                topic=keyword.keyword,
+                country=topic.country.lower(),
+                language=topic.language,
+            )
+
+            # Create Brief with keyword_id
+            db_brief = models.Brief(
+                site_id=topic.id,
+                keyword_id=keyword.id,
+                title=brief_data.get("title", keyword.keyword),
+                target_keyword=brief_data.get("target_keyword", keyword.keyword),
+                secondary_keywords=brief_data.get("secondary_keywords"),
+                word_count_min=brief_data.get("word_count_min", 1500),
+                word_count_max=brief_data.get("word_count_max", 2500),
+                structure=brief_data.get("structure"),
+                competitor_urls=brief_data.get("competitor_urls"),
+                serp_analysis=brief_data.get("serp_analysis"),
+                status="draft",
+            )
+            db.add(db_brief)
+
+            # Update keyword status
+            keyword.status = "brief_created"
+            count += 1
+
+        db.commit()
+
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?success=Создано {count} Briefs",
+            status_code=303,
+        )
+
+    except Exception as e:
+        db.rollback()
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error={str(e)}",
+            status_code=303,
+        )
 
 
 # ============ Briefs Pages ============

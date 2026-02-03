@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}Новая тема — SEO Blog{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <a href="/ui/topics" class="text-sm text-gray-500 hover:text-gray-700">&larr; Назад к темам</a>
+</div>
+
+<div class="bg-white shadow sm:rounded-lg">
+    <div class="px-4 py-5 sm:p-6">
+        <h3 class="text-lg leading-6 font-medium text-gray-900">
+            Новая тема
+        </h3>
+        <p class="mt-1 text-sm text-gray-500">
+            Введите описание ниши. Discovery Agent проанализирует SERP и найдёт конкурентов и ключевые слова.
+        </p>
+
+        {% if error %}
+        <div class="mt-4 bg-red-50 border border-red-200 rounded-md p-4">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium text-red-800">{{ error }}</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <form method="POST" action="/ui/topics/new" class="mt-5 space-y-4">
+            <div>
+                <label for="niche" class="block text-sm font-medium text-gray-700">
+                    Ниша / Тема
+                </label>
+                <textarea
+                    id="niche"
+                    name="niche"
+                    rows="3"
+                    required
+                    class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="контент-маркетинг для IT-компаний, digital-маркетинг для стартапов..."
+                >{{ niche if niche else '' }}</textarea>
+                <p class="mt-1 text-xs text-gray-500">
+                    Опишите нишу как можно точнее. Примеры: "SEO для e-commerce", "финтех стартапы в России"
+                </p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label for="country" class="block text-sm font-medium text-gray-700">
+                        Страна
+                    </label>
+                    <select
+                        id="country"
+                        name="country"
+                        class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    >
+                        <option value="ru" {{ 'selected' if country == 'ru' else '' }}>Россия (RU)</option>
+                        <option value="us" {{ 'selected' if country == 'us' else '' }}>США (US)</option>
+                        <option value="uk" {{ 'selected' if country == 'uk' else '' }}>Великобритания (UK)</option>
+                        <option value="de" {{ 'selected' if country == 'de' else '' }}>Германия (DE)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label for="language" class="block text-sm font-medium text-gray-700">
+                        Язык
+                    </label>
+                    <select
+                        id="language"
+                        name="language"
+                        class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    >
+                        <option value="ru" {{ 'selected' if language == 'ru' else '' }}>Русский</option>
+                        <option value="en" {{ 'selected' if language == 'en' else '' }}>English</option>
+                        <option value="de" {{ 'selected' if language == 'de' else '' }}>Deutsch</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="pt-4">
+                <button
+                    type="submit"
+                    class="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                >
+                    <span class="htmx-indicator mr-2">
+                        <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </span>
+                    Анализировать
+                </button>
+                <p class="mt-2 text-xs text-center text-gray-500">
+                    Анализ может занять 20-30 секунд
+                </p>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

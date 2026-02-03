@@ -23,6 +23,7 @@ class Brief(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=True)
     cluster_id = Column(UUID(as_uuid=True), ForeignKey("clusters.id"), nullable=True)
+    keyword_id = Column(UUID(as_uuid=True), ForeignKey("keywords.id"), nullable=True)
 
     # Основное
     title = Column(String(500), nullable=False)
@@ -50,6 +51,7 @@ class Brief(Base):
     # Relationships
     site = relationship("Site", back_populates="briefs")
     cluster = relationship("Cluster", back_populates="briefs")
+    keyword = relationship("Keyword", back_populates="briefs")
     drafts = relationship("Draft", back_populates="brief")
 
 
@@ -63,6 +65,9 @@ class Site(Base):
     status = Column(String(50), default="setup")  # setup | active | paused
     language = Column(String(10), default="ru")
     country = Column(String(2), default="RU")
+
+    # Discovery
+    niche_boundaries = Column(JSON, nullable=True)  # {include: [], exclude: [], target_audience: ""}
 
     # Ghost integration
     ghost_url = Column(String(500))
@@ -198,6 +203,7 @@ class Keyword(Base):
     site = relationship("Site", back_populates="keywords")
     source_competitor = relationship("Competitor", back_populates="keywords")
     cluster = relationship("Cluster", back_populates="keywords")
+    briefs = relationship("Brief", back_populates="keyword")
 
 
 class Cluster(Base):
