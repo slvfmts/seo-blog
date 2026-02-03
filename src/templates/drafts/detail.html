@@ -13,7 +13,7 @@
 
 <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
     <!-- Main Content -->
-    <div class="lg:col-span-3">
+    <div class="lg:col-span-3 space-y-6">
         <div class="bg-white shadow rounded-lg overflow-hidden">
             <div class="px-6 py-4 border-b border-gray-200">
                 <div class="flex justify-between items-start">
@@ -26,6 +26,18 @@
                         {% elif draft.status == 'generated' %}
                         <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
                             Generated
+                        </span>
+                        {% elif draft.status == 'validating' %}
+                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                            Validating...
+                        </span>
+                        {% elif draft.status == 'validated' %}
+                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                            Validated
+                        </span>
+                        {% elif draft.status == 'validation_failed' %}
+                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                            Validation Failed
                         </span>
                         {% elif draft.status == 'approved' %}
                         <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-green-100 text-green-800">
@@ -69,6 +81,130 @@
             </div>
             {% endif %}
         </div>
+
+        <!-- Validation Results -->
+        {% if draft.validation_report and draft.validation_report.checks %}
+        <div class="bg-white shadow rounded-lg overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-lg font-semibold text-gray-900">Validation Results</h2>
+                    <div class="flex items-center space-x-3">
+                        <span class="text-sm text-gray-500">Score:</span>
+                        {% set score = draft.validation_score or 0 %}
+                        <span class="text-lg font-bold {% if score >= 80 %}text-green-600{% elif score >= 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                            {{ score }}/100
+                        </span>
+                        {% if draft.validation_report.overall_status == 'passed' %}
+                        <span class="px-2 py-1 text-xs font-semibold rounded bg-green-100 text-green-800">PASSED</span>
+                        {% elif draft.validation_report.overall_status == 'warning' %}
+                        <span class="px-2 py-1 text-xs font-semibold rounded bg-yellow-100 text-yellow-800">WARNING</span>
+                        {% else %}
+                        <span class="px-2 py-1 text-xs font-semibold rounded bg-red-100 text-red-800">FAILED</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="px-6 py-4 space-y-6">
+                <!-- SEO Lint Results -->
+                {% if draft.validation_report.checks.seo_lint %}
+                {% set seo = draft.validation_report.checks.seo_lint %}
+                <div>
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-sm font-medium text-gray-700">SEO Lint</h3>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm text-gray-500">{{ seo.score }}/100</span>
+                            {% if seo.status == 'passed' %}
+                            <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                            {% elif seo.status == 'warning' %}
+                            <span class="w-2 h-2 bg-yellow-500 rounded-full"></span>
+                            {% else %}
+                            <span class="w-2 h-2 bg-red-500 rounded-full"></span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="space-y-2">
+                        {% for issue in seo.issues %}
+                        <div class="flex items-start space-x-2 text-sm">
+                            {% if issue.severity == 'pass' %}
+                            <span class="text-green-500 mt-0.5">
+                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                                </svg>
+                            </span>
+                            <span class="text-gray-600">{{ issue.message }}</span>
+                            {% elif issue.severity == 'warning' %}
+                            <span class="text-yellow-500 mt-0.5">
+                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                                </svg>
+                            </span>
+                            <span class="text-yellow-700">{{ issue.message }}</span>
+                            {% else %}
+                            <span class="text-red-500 mt-0.5">
+                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                                </svg>
+                            </span>
+                            <span class="text-red-700">{{ issue.message }}</span>
+                            {% endif %}
+                            {% if issue.value and issue.expected %}
+                            <span class="text-gray-400 text-xs">({{ issue.value }} / expected: {{ issue.expected }})</span>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Plagiarism Results -->
+                {% if draft.validation_report.checks.plagiarism %}
+                {% set plag = draft.validation_report.checks.plagiarism %}
+                <div class="border-t pt-4">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-sm font-medium text-gray-700">Plagiarism Check</h3>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm text-gray-500">{{ plag.score }}/100</span>
+                            {% if plag.status == 'passed' %}
+                            <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                            {% elif plag.status == 'warning' %}
+                            <span class="w-2 h-2 bg-yellow-500 rounded-full"></span>
+                            {% else %}
+                            <span class="w-2 h-2 bg-red-500 rounded-full"></span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">
+                        Max similarity: <span class="font-medium {% if plag.max_similarity < 0.15 %}text-green-600{% elif plag.max_similarity < 0.3 %}text-yellow-600{% else %}text-red-600{% endif %}">{{ plag.max_similarity_percent }}</span>
+                    </p>
+                    {% if plag.matches %}
+                    <div class="space-y-2">
+                        {% for match in plag.matches %}
+                        <div class="text-sm bg-gray-50 p-2 rounded">
+                            <div class="flex justify-between">
+                                <a href="{{ match.url }}" target="_blank" class="text-blue-600 hover:text-blue-800 truncate max-w-md">{{ match.url }}</a>
+                                <span class="font-medium {% if match.similarity < 0.15 %}text-green-600{% elif match.similarity < 0.3 %}text-yellow-600{% else %}text-red-600{% endif %}">{{ match.similarity_percent }}</span>
+                            </div>
+                            {% if match.matched_text %}
+                            <p class="text-xs text-gray-500 mt-1 truncate">Match: "{{ match.matched_text[:100] }}..."</p>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                <!-- Error -->
+                {% if draft.validation_report.error %}
+                <div class="border-t pt-4">
+                    <div class="bg-red-50 p-3 rounded">
+                        <p class="text-sm text-red-700">Error: {{ draft.validation_report.error }}</p>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <!-- Sidebar -->
@@ -119,11 +255,61 @@
             <h3 class="text-sm font-medium text-gray-700 mb-3">Actions</h3>
             <div class="space-y-2">
                 {% if draft.status == 'generated' %}
+                <!-- Validate first -->
+                <form method="POST" action="/ui/drafts/{{ draft.id }}/validate" id="validate-form">
+                    <button type="submit" id="validate-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                        <span id="val-btn-text">Validate</span>
+                        <span id="val-btn-loading" class="hidden">
+                            <svg class="animate-spin h-4 w-4 inline mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Validating...
+                        </span>
+                    </button>
+                </form>
                 <form method="POST" action="/ui/drafts/{{ draft.id }}/approve">
-                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                    <button type="submit" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
+                        Skip Validation & Approve
+                    </button>
+                </form>
+
+                {% elif draft.status == 'validated' %}
+                <!-- Re-validate or Approve -->
+                <form method="POST" action="/ui/drafts/{{ draft.id }}/validate" id="validate-form">
+                    <button type="submit" id="validate-btn" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
+                        <span id="val-btn-text">Re-validate</span>
+                        <span id="val-btn-loading" class="hidden">
+                            <svg class="animate-spin h-4 w-4 inline mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Validating...
+                        </span>
+                    </button>
+                </form>
+                <form method="POST" action="/ui/drafts/{{ draft.id }}/approve">
+                    <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
                         Approve Draft
                     </button>
                 </form>
+
+                {% elif draft.status == 'validation_failed' %}
+                <!-- Re-validate or Force Approve -->
+                <form method="POST" action="/ui/drafts/{{ draft.id }}/validate" id="validate-form">
+                    <button type="submit" id="validate-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                        <span id="val-btn-text">Re-validate</span>
+                        <span id="val-btn-loading" class="hidden">
+                            <svg class="animate-spin h-4 w-4 inline mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Validating...
+                        </span>
+                    </button>
+                </form>
+                <p class="text-xs text-red-600 text-center py-1">Validation failed - fix issues first</p>
+
                 {% elif draft.status == 'approved' %}
                 <form method="POST" action="/ui/drafts/{{ draft.id }}/publish" id="publish-form">
                     <button type="submit" id="publish-btn" class="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
@@ -137,6 +323,7 @@
                         </span>
                     </button>
                 </form>
+
                 {% elif draft.status == 'published' %}
                 <div class="text-center py-2">
                     <span class="text-green-600 font-medium">Published!</span>
@@ -173,11 +360,22 @@
 
 {% block scripts %}
 <script>
-    {% if draft.status == 'generating' %}
-    // Auto-refresh while generating
+    {% if draft.status == 'generating' or draft.status == 'validating' %}
+    // Auto-refresh while processing
     setTimeout(function() {
         location.reload();
     }, 5000);
+    {% endif %}
+
+    {% if draft.status in ['generated', 'validated', 'validation_failed'] %}
+    const validateForm = document.getElementById('validate-form');
+    if (validateForm) {
+        validateForm.addEventListener('submit', function() {
+            document.getElementById('validate-btn').disabled = true;
+            document.getElementById('val-btn-text').classList.add('hidden');
+            document.getElementById('val-btn-loading').classList.remove('hidden');
+        });
+    }
     {% endif %}
 
     {% if draft.status == 'approved' %}

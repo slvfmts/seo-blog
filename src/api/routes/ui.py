@@ -546,6 +546,28 @@ async def draft_detail(request: Request, draft_id: UUID, db: Session = Depends(g
     })
 
 
+@router.post("/drafts/{draft_id}/validate", response_class=HTMLResponse)
+async def validate_draft(request: Request, draft_id: UUID, db: Session = Depends(get_db)):
+    """Run validation pipeline on draft."""
+    from src.services.validation_pipeline import ValidationPipeline
+
+    draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    if draft.status not in ("generated", "validated", "validation_failed"):
+        return RedirectResponse(url=f"/ui/drafts/{draft_id}", status_code=303)
+
+    try:
+        pipeline = ValidationPipeline()
+        await pipeline.run(draft.id)
+    except Exception as e:
+        # Error handling is done in pipeline
+        pass
+
+    return RedirectResponse(url=f"/ui/drafts/{draft_id}", status_code=303)
+
+
 @router.post("/drafts/{draft_id}/approve", response_class=HTMLResponse)
 async def approve_draft(request: Request, draft_id: UUID, db: Session = Depends(get_db)):
     """Approve a draft for publishing."""
@@ -553,7 +575,8 @@ async def approve_draft(request: Request, draft_id: UUID, db: Session = Depends(
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
 
-    if draft.status == "generated":
+    # Allow approve from generated (skip validation) or validated status
+    if draft.status in ("generated", "validated"):
         draft.status = "approved"
         db.commit()
 
