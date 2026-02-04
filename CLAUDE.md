@@ -1919,6 +1919,73 @@ DEBUG=true
      - Никогда не FAIL на keyword_density — только WARNING
    - [x] Задеплоено на сервер
 
+9. **Writing Pipeline — Multi-Stage Article Generation:**
+   - [x] Архитектура: Pipeline + Stage Registry с контрактами между этапами
+   - [x] Все промпты созданы в `src/services/writing_pipeline/prompts/`:
+     - `intent_v1.txt` — анализ интента и редакционный контракт
+     - `research_queries_v1.txt` — генерация поисковых запросов
+     - `research_packer_v1.txt` — обработка результатов поиска в research_pack
+     - `structure_v1.txt` — архитектура статьи (outline)
+     - `drafting_v1.txt` — написание текста по outline
+     - `editing_v1.txt` — редактура и markdown-вёрстка
+   - [x] Контракты определены: `src/services/writing_pipeline/contracts/__init__.py`
+   - [x] PipelineRunner реализован: `src/services/writing_pipeline/core/runner.py`
+   - [x] Все stages реализованы: `src/services/writing_pipeline/stages/`
+   - [x] Serper.dev интеграция: `src/services/writing_pipeline/data_sources/serper.py`
+   - [ ] Интеграция с существующим generator.py — TODO (deprecate постепенно)
+
+   **Структура модуля:**
+   ```
+   src/services/writing_pipeline/
+   ├── __init__.py           # Exports: PipelineRunner, WritingContext, contracts
+   ├── cli.py                # CLI для тестирования pipeline
+   ├── core/
+   │   ├── __init__.py
+   │   ├── context.py        # WritingContext (shared state)
+   │   ├── runner.py         # PipelineRunner (orchestrator)
+   │   └── stage.py          # WritingStage ABC
+   ├── stages/
+   │   ├── __init__.py
+   │   ├── intent.py         # IntentStage
+   │   ├── research.py       # ResearchStage (queries + packer)
+   │   ├── structure.py      # StructureStage
+   │   ├── drafting.py       # DraftingStage
+   │   └── editing.py        # EditingStage
+   ├── contracts/
+   │   └── __init__.py       # IntentResult, ResearchResult, OutlineResult, etc.
+   ├── data_sources/
+   │   ├── __init__.py
+   │   └── serper.py         # SerperDataSource
+   └── prompts/
+       ├── intent_v1.txt
+       ├── research_queries_v1.txt
+       ├── research_packer_v1.txt
+       ├── structure_v1.txt
+       ├── drafting_v1.txt
+       └── editing_v1.txt
+   ```
+
+   **Pipeline flow:**
+   ```
+   topic → Intent → Research (queries → search → packer) → Structure → Drafting → Editing → article.md
+   ```
+
+   **Использование CLI:**
+   ```bash
+   # С Serper.dev (рекомендуется)
+   ANTHROPIC_API_KEY=... SERPER_API_KEY=... python -m src.services.writing_pipeline.cli "Тема статьи" -o ./output
+
+   # Без Serper.dev (только LLM knowledge)
+   ANTHROPIC_API_KEY=... python -m src.services.writing_pipeline.cli "Тема статьи" -o ./output
+   ```
+
+   **Принципы архитектуры:**
+   - Каждый этап — независимый subagent с минимальным контекстом
+   - Контракт определяет inputs/outputs для каждого этапа
+   - Research использует двухшаговый процесс (queries → WebSearch → packer)
+   - Все промежуточные результаты логируются
+   - Модуль можно обособить в отдельный пакет
+
 ---
 
 ## ⚠️ ВАЖНО: Доступ к серверу
@@ -1943,5 +2010,5 @@ Claude имеет SSH-доступ и должен:
 
 ---
 
-*Document version: 1.3*
+*Document version: 1.6*
 *Last updated: 2026-02-04*
