@@ -1932,6 +1932,23 @@ DEBUG=true
    - [x] PipelineRunner реализован: `src/services/writing_pipeline/core/runner.py`
    - [x] Все stages реализованы: `src/services/writing_pipeline/stages/`
    - [x] Serper.dev интеграция: `src/services/writing_pipeline/data_sources/serper.py`
+
+10. **UI Integration for Writing Pipeline (2026-02-04):**
+    - [x] Draft model updated with pipeline fields (`pipeline_status`, `pipeline_stages`, etc.)
+    - [x] `/ui/pipeline/new` — форма запуска pipeline (topic, region, depth)
+    - [x] Background task runner для async pipeline execution
+    - [x] Progress display in `/ui/drafts/{id}` with stage indicators
+    - [x] `+ New Article` button added to navigation
+    - [x] Error display if pipeline fails
+    - [x] Deployed to server 95.163.230.43
+
+   **Использование через UI:**
+   1. Открыть http://95.163.230.43:8000/ui/pipeline/new
+   2. Ввести тему статьи, выбрать регион и глубину
+   3. Нажать "Generate Article"
+   4. Страница перенаправит на draft detail с progress indicator
+   5. Через 2-5 минут статья будет готова
+
    - [ ] Интеграция с существующим generator.py — TODO (deprecate постепенно)
 
    **Структура модуля:**
@@ -2010,5 +2027,5 @@ Claude имеет SSH-доступ и должен:
 
 ---
 
-*Document version: 1.6*
+*Document version: 1.7*
 *Last updated: 2026-02-04*
