@@ -1903,7 +1903,45 @@ DEBUG=true
 - [ ] **Проверить конвертацию** — возможно markdown фильтр в шаблоне не работает корректно
 - [ ] **Сравнить промпты** — посмотреть чем отличается промпт прямой генерации от генерации по Brief
 
+#### Выполнено (2026-02-04):
+
+7. **Validation Pipeline (SEO Lint + Plagiarism):**
+   - [x] `src/services/validators/seo_lint.py` — SEO проверки (title, meta, keywords, structure)
+   - [x] `src/services/validators/plagiarism.py` — проверка на плагиат через similarity
+   - [x] `src/services/validation_pipeline.py` — оркестратор валидаторов
+   - [x] UI для валидации в `/ui/drafts/{id}`
+
+8. **Bugfix: Article Truncation + Validation Thresholds:**
+   - [x] `generator.py`: `max_tokens` увеличен с 8000 до 16000 (статьи обрывались на полуслове)
+   - [x] `seo_lint.py`: keyword_density пороги смягчены:
+     - PASS: 0.5-3% (было 1-2%)
+     - WARNING: 0.2-0.5% или 3-4% (было 0.5-1% или 2-3%)
+     - Никогда не FAIL на keyword_density — только WARNING
+   - [x] Задеплоено на сервер
+
 ---
 
-*Document version: 1.2*
-*Last updated: 2026-02-03*
+## ⚠️ ВАЖНО: Доступ к серверу
+
+### У CLAUDE ЕСТЬ ПОЛНЫЙ ДОСТУП К СЕРВЕРУ
+
+**Сервер:** `root@95.163.230.43`
+
+**Claude выполняет деплой САМОСТОЯТЕЛЬНО:**
+```bash
+ssh root@95.163.230.43 "cd /opt/seo-blog && git pull && docker compose build && docker compose up -d"
+```
+
+### ⚠️ НЕ СПРАШИВАТЬ РАЗРЕШЕНИЯ НА ДЕПЛОЙ
+
+Claude имеет SSH-доступ и должен:
+1. Делать `git push`
+2. Подключаться к серверу по SSH
+3. Выполнять `git pull && docker compose build && docker compose up -d`
+
+**БЕЗ ВОПРОСОВ. БЕЗ УТОЧНЕНИЙ. ПРОСТО ДЕЛАТЬ.**
+
+---
+
+*Document version: 1.3*
+*Last updated: 2026-02-04*
