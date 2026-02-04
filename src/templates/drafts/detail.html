@@ -61,13 +61,64 @@
             </div>
 
             {% if draft.status == 'generating' %}
-            <div class="px-6 py-12 text-center">
-                <svg class="animate-spin h-12 w-12 mx-auto text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <p class="mt-4 text-gray-600">Article is being generated...</p>
-                <p class="mt-2 text-sm text-gray-500">This may take 1-2 minutes. Page will refresh automatically.</p>
+            <div class="px-6 py-8">
+                {% if draft.pipeline_stages %}
+                <!-- Pipeline Progress -->
+                <div class="mb-6">
+                    <h3 class="text-sm font-medium text-gray-700 mb-4">Pipeline Progress</h3>
+                    <div class="space-y-3">
+                        {% set stages = [
+                            ('intent', 'Intent Analysis', 'Determining user goal, content type, tone'),
+                            ('research', 'Research', 'Collecting facts from web search'),
+                            ('structure', 'Structure', 'Building article outline'),
+                            ('drafting', 'Drafting', 'Writing the article'),
+                            ('editing', 'Editing', 'Polishing text and formatting')
+                        ] %}
+                        {% for key, name, desc in stages %}
+                        {% set status = draft.pipeline_stages.get(key, 'pending') if draft.pipeline_stages else 'pending' %}
+                        <div class="flex items-center space-x-3">
+                            {% if status == 'completed' %}
+                            <span class="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-green-100">
+                                <svg class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                                </svg>
+                            </span>
+                            <span class="text-sm text-gray-600">{{ name }}</span>
+                            {% elif status == 'running' %}
+                            <span class="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                                <svg class="animate-spin w-5 h-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                            </span>
+                            <span class="text-sm font-medium text-blue-600">{{ name }} - {{ desc }}</span>
+                            {% elif status == 'failed' %}
+                            <span class="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-red-100">
+                                <svg class="w-4 h-4 text-red-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                                </svg>
+                            </span>
+                            <span class="text-sm text-red-600">{{ name }}</span>
+                            {% else %}
+                            <span class="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-gray-100">
+                                <span class="w-2 h-2 rounded-full bg-gray-400"></span>
+                            </span>
+                            <span class="text-sm text-gray-400">{{ name }}</span>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="text-center">
+                    <svg class="animate-spin h-8 w-8 mx-auto text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <p class="mt-4 text-gray-600">Article is being generated...</p>
+                    <p class="mt-2 text-sm text-gray-500">This may take 2-5 minutes. Page will refresh automatically.</p>
+                </div>
             </div>
             {% elif draft.content_md %}
             <div class="px-6 py-4">
@@ -81,6 +132,23 @@
             </div>
             {% endif %}
         </div>
+
+        <!-- Pipeline Error -->
+        {% if draft.pipeline_error %}
+        <div class="bg-red-50 shadow rounded-lg overflow-hidden">
+            <div class="px-6 py-4 border-b border-red-200">
+                <h2 class="text-lg font-semibold text-red-800">Pipeline Error</h2>
+            </div>
+            <div class="px-6 py-4">
+                <pre class="text-sm text-red-700 whitespace-pre-wrap">{{ draft.pipeline_error }}</pre>
+                <div class="mt-4">
+                    <a href="/ui/pipeline/new" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700">
+                        Try Again
+                    </a>
+                </div>
+            </div>
+        </div>
+        {% endif %}
 
         <!-- Validation Results -->
         {% if draft.validation_report and draft.validation_report.checks %}

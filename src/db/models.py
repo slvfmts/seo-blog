@@ -110,10 +110,19 @@ class Draft(Base):
     # Статус
     status = Column(String(50), default="draft")
     # draft | generating | generated | validating | approved | published | rejected
+    # pipeline_running | pipeline_completed | pipeline_failed
 
     # Валидация
     validation_score = Column(Float)
     validation_report = Column(JSON)
+
+    # Writing Pipeline fields
+    pipeline_status = Column(String(50))  # None | running | completed | failed
+    pipeline_stages = Column(JSON)  # {"intent": "completed", "research": "running", ...}
+    pipeline_started_at = Column(DateTime)
+    pipeline_completed_at = Column(DateTime)
+    pipeline_error = Column(Text)
+    pipeline_output_dir = Column(String(500))  # Path to intermediate files
 
     # CMS
     cms_post_id = Column(String(255))

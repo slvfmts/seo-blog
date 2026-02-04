@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}New Article - SEO Blog{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="mb-6">
+        <a href="/ui/drafts" class="text-blue-600 hover:text-blue-800 text-sm">&larr; Back to Drafts</a>
+    </div>
+
+    <div class="bg-white shadow rounded-lg">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h1 class="text-xl font-semibold text-gray-900">Generate New Article</h1>
+            <p class="mt-1 text-sm text-gray-500">
+                Multi-stage article generation using the Writing Pipeline.
+            </p>
+        </div>
+
+        {% if error %}
+        <div class="px-6 py-4 bg-red-50 border-b border-red-200">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm text-red-700">{{ error }}</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <form method="POST" action="/ui/pipeline/new" class="px-6 py-4 space-y-6" id="pipeline-form">
+            <div>
+                <label for="topic" class="block text-sm font-medium text-gray-700">
+                    Topic
+                </label>
+                <input
+                    type="text"
+                    name="topic"
+                    id="topic"
+                    value="{{ topic or '' }}"
+                    required
+                    placeholder="e.g., How to start a blog in 2024"
+                    class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                >
+                <p class="mt-1 text-xs text-gray-500">
+                    The main topic for the article. Be specific for best results.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label for="region" class="block text-sm font-medium text-gray-700">
+                        Region / Language
+                    </label>
+                    <select
+                        name="region"
+                        id="region"
+                        class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                    >
+                        <option value="ru" {% if region == 'ru' %}selected{% endif %}>Russian (RU)</option>
+                        <option value="en" {% if region == 'en' %}selected{% endif %}>English (EN)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label for="depth" class="block text-sm font-medium text-gray-700">
+                        Depth
+                    </label>
+                    <select
+                        name="depth"
+                        id="depth"
+                        class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                    >
+                        <option value="standard" {% if depth == 'standard' %}selected{% endif %}>Standard (1500-2500 words)</option>
+                        <option value="overview" {% if depth == 'overview' %}selected{% endif %}>Overview (500-1000 words)</option>
+                        <option value="deep-dive" {% if depth == 'deep-dive' %}selected{% endif %}>Deep Dive (3000-5000 words)</option>
+                    </select>
+                    <p class="mt-1 text-xs text-gray-500">
+                        Depth affects article length and detail level.
+                    </p>
+                </div>
+            </div>
+
+            <div class="pt-4 border-t border-gray-200">
+                <button
+                    type="submit"
+                    id="submit-btn"
+                    class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    <span id="btn-text">Generate Article</span>
+                    <span id="btn-loading" class="hidden">
+                        <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Starting pipeline...
+                    </span>
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <div class="mt-6 bg-blue-50 rounded-lg p-4">
+        <h3 class="text-sm font-medium text-blue-800">Pipeline Stages</h3>
+        <ol class="mt-2 text-sm text-blue-700 list-decimal list-inside space-y-1">
+            <li><strong>Intent Analysis</strong> - Determine user goal, content type, tone</li>
+            <li><strong>Research</strong> - Collect facts from web search</li>
+            <li><strong>Structure</strong> - Build article outline with word counts</li>
+            <li><strong>Drafting</strong> - Write the article following the outline</li>
+            <li><strong>Editing</strong> - Polish text and markdown formatting</li>
+        </ol>
+        <p class="mt-3 text-xs text-blue-600">
+            Generation takes 2-5 minutes depending on depth.
+        </p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById('pipeline-form').addEventListener('submit', function() {
+        document.getElementById('submit-btn').disabled = true;
+        document.getElementById('btn-text').classList.add('hidden');
+        document.getElementById('btn-loading').classList.remove('hidden');
+    });
+</script>
+{% endblock %}

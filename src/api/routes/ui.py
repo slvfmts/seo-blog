@@ -2,20 +2,25 @@
 UI routes for Brief workflow web interface.
 """
 
+import asyncio
+import os
+import uuid as uuid_lib
 from uuid import UUID
+from datetime import datetime
 from typing import List
-from fastapi import APIRouter, Depends, Request, Form, HTTPException
+from fastapi import APIRouter, Depends, Request, Form, HTTPException, BackgroundTasks
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 import markdown
 
-from src.db.session import get_db
+from src.db.session import get_db, SessionLocal
 from src.db import models
 from src.services.brief_generator import BriefGenerator
 from src.services.generator import ArticleGenerator
 from src.services.discovery import DiscoveryAgent
+from src.services.writing_pipeline import PipelineRunner
 from src.config import get_settings
 
 router = APIRouter()
@@ -613,3 +618,176 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
         pass  # Handle error silently for now
 
     return RedirectResponse(url=f"/ui/drafts/{draft_id}", status_code=303)
+
+
+# ============ Pipeline Pages ============
+
+def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str):
+    """
+    Run writing pipeline synchronously.
+    Called from background task.
+    """
+    settings = get_settings()
+    db = SessionLocal()
+
+    try:
+        # Get draft
+        draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+        if not draft:
+            return
+
+        # Update status to running
+        draft.pipeline_status = "running"
+        draft.status = "generating"
+        draft.pipeline_stages = {
+            "intent": "pending",
+            "research": "pending",
+            "structure": "pending",
+            "drafting": "pending",
+            "editing": "pending",
+        }
+        db.commit()
+
+        # Initialize pipeline runner
+        runner = PipelineRunner(
+            anthropic_api_key=settings.anthropic_api_key,
+            serper_api_key=settings.serper_api_key or None,
+            proxy_url=settings.anthropic_proxy_url or None,
+            proxy_secret=settings.anthropic_proxy_secret or None,
+        )
+
+        # Run pipeline (need to run async in sync context)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        async def run_with_progress():
+            # Run the pipeline
+            result = await runner.run(
+                topic=topic,
+                region=region,
+                output_dir=output_dir,
+                save_intermediate=True,
+            )
+            return result
+
+        result = loop.run_until_complete(run_with_progress())
+        loop.close()
+
+        # Update draft with results
+        draft.title = result.title
+        draft.content_md = result.article_md
+        draft.word_count = result.word_count
+        draft.status = "generated"
+        draft.pipeline_status = "completed"
+        draft.pipeline_completed_at = datetime.utcnow()
+        draft.pipeline_stages = {
+            "intent": "completed",
+            "research": "completed",
+            "structure": "completed",
+            "drafting": "completed",
+            "editing": "completed",
+        }
+
+        # Extract sources from research
+        if result.research and result.research.sources:
+            draft.sources_used = [
+                {
+                    "url": s.url,
+                    "title": s.title,
+                    "publisher": s.publisher,
+                }
+                for s in result.research.sources
+            ]
+
+        db.commit()
+
+    except Exception as e:
+        # Update draft with error
+        draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+        if draft:
+            draft.pipeline_status = "failed"
+            draft.pipeline_error = str(e)
+            draft.status = "failed"
+            draft.pipeline_completed_at = datetime.utcnow()
+            db.commit()
+    finally:
+        db.close()
+
+
+@router.get("/pipeline/new", response_class=HTMLResponse)
+async def new_pipeline_form(request: Request):
+    """Show form to start new article via pipeline."""
+    return templates.TemplateResponse("pipeline/new.html", {
+        "request": request,
+    })
+
+
+@router.post("/pipeline/new", response_class=HTMLResponse)
+async def create_pipeline(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    topic: str = Form(...),
+    region: str = Form("ru"),
+    depth: str = Form("standard"),
+    db: Session = Depends(get_db),
+):
+    """Start a new article generation via Writing Pipeline."""
+    settings = get_settings()
+
+    if not settings.anthropic_api_key:
+        return templates.TemplateResponse("pipeline/new.html", {
+            "request": request,
+            "error": "ANTHROPIC_API_KEY not configured",
+            "topic": topic,
+            "region": region,
+            "depth": depth,
+        })
+
+    try:
+        # Generate output directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_topic = "".join(c if c.isalnum() else "_" for c in topic[:30])
+        output_dir = f"/tmp/pipeline_output/{timestamp}_{safe_topic}"
+
+        # Create draft
+        draft = models.Draft(
+            title=topic,  # Will be updated after pipeline
+            topic=topic,
+            status="generating",
+            pipeline_status="pending",
+            pipeline_started_at=datetime.utcnow(),
+            pipeline_output_dir=output_dir,
+            pipeline_stages={
+                "intent": "pending",
+                "research": "pending",
+                "structure": "pending",
+                "drafting": "pending",
+                "editing": "pending",
+            },
+        )
+        db.add(draft)
+        db.commit()
+        db.refresh(draft)
+
+        # Start background task
+        background_tasks.add_task(
+            run_pipeline_sync,
+            str(draft.id),
+            topic,
+            region,
+            output_dir,
+        )
+
+        return RedirectResponse(
+            url=f"/ui/drafts/{draft.id}",
+            status_code=303,
+        )
+
+    except Exception as e:
+        return templates.TemplateResponse("pipeline/new.html", {
+            "request": request,
+            "error": str(e),
+            "topic": topic,
+            "region": region,
+            "depth": depth,
+        })
