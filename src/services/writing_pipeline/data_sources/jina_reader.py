@@ -124,13 +124,15 @@ class JinaReader:
                         )
 
                     else:
+                        error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+                        logger.warning(f"Failed to fetch {url}: {error_msg}")
                         return PageContent(
                             url=url,
                             title="",
                             content="",
                             word_count=0,
                             success=False,
-                            error=f"HTTP {response.status_code}: {response.text[:200]}",
+                            error=error_msg,
                         )
 
             except httpx.TimeoutException:

@@ -354,7 +354,7 @@ class ResearchStage(WritingStage):
         if not urls_to_fetch:
             return search_results
 
-        logger.info(f"Fetching content from {len(urls_to_fetch)} pages")
+        logger.info(f"Fetching content from {len(urls_to_fetch)} pages: {urls_to_fetch}")
 
         # Try Jina Reader first
         jina = self._get_jina_reader()
@@ -390,7 +390,13 @@ class ResearchStage(WritingStage):
                 except Exception as e:
                     logger.warning(f"Trafilatura fallback failed for {url}: {e}")
 
-        # Add content to search results
+        # Log results and add content to search results
+        success_count = sum(1 for c in contents if c.success)
+        logger.info(f"Content fetch results: {success_count}/{len(contents)} successful")
+        for url, content in zip(urls_to_fetch, contents):
+            if not content.success:
+                logger.warning(f"Failed to fetch {url}: {content.error}")
+
         for url, content in zip(urls_to_fetch, contents):
             if content.success and url in url_to_result_indices:
                 # Truncate content to avoid token limits

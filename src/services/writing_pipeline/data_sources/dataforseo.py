@@ -83,7 +83,7 @@ class DataForSEO:
         self,
         login: str,
         password: str,
-        timeout: float = 60.0,
+        timeout: float = 120.0,
     ):
         """
         Initialize DataForSEO client.
