@@ -11,7 +11,7 @@ Writing Pipeline - Multi-Stage Article Generation
 
 from .core.runner import PipelineRunner
 from .core.context import WritingContext
-from .contracts import IntentResult, ResearchResult, OutlineResult
+from .contracts import IntentResult, ResearchResult, OutlineResult, TopicBoundaries
 
 __all__ = [
     "PipelineRunner",
@@ -19,4 +19,5 @@ __all__ = [
     "IntentResult",
     "ResearchResult",
     "OutlineResult",
+    "TopicBoundaries",
 ]

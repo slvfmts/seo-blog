@@ -2,9 +2,12 @@
 Intent Stage - Analyzes topic and creates editorial contract.
 """
 
+import logging
 from ..core.stage import WritingStage
 from ..core.context import WritingContext
 from ..contracts import IntentResult
+
+logger = logging.getLogger(__name__)
 
 
 class IntentStage(WritingStage):
@@ -16,6 +19,7 @@ class IntentStage(WritingStage):
     - Content type and format
     - Target audience
     - Tone and depth
+    - Topic boundaries (scope guard)
     - Required questions to answer
     """
 
@@ -45,6 +49,21 @@ class IntentStage(WritingStage):
 
             # Validate and create result
             context.intent = IntentResult.from_dict(data)
+
+            # Log topic scope guard results
+            if context.intent.topic_boundaries:
+                logger.info(
+                    f"Topic scope guard: in_scope={len(context.intent.topic_boundaries.in_scope)}, "
+                    f"out_of_scope={len(context.intent.topic_boundaries.out_of_scope)}"
+                )
+                if context.intent.topic_boundaries.out_of_scope:
+                    logger.debug(f"Out of scope topics: {context.intent.topic_boundaries.out_of_scope}")
+
+            # Warn if topic was changed (scope drift detected)
+            if context.intent.topic != context.topic:
+                logger.warning(
+                    f"Topic drift detected! Input: '{context.topic}' -> Output: '{context.intent.topic}'"
+                )
 
             # Save intermediate result if configured
             if context.save_intermediate and context.output_dir:

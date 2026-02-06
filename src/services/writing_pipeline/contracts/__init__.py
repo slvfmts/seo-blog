@@ -101,6 +101,19 @@ class WordCountRange:
 
 
 @dataclass
+class TopicBoundaries:
+    """
+    Topic scope guard - defines what is in/out of scope for the article.
+
+    Prevents topic drift by explicitly listing:
+    - in_scope: aspects that MUST be covered (3-5 items)
+    - out_of_scope: related topics that should NOT be covered (3-5 items)
+    """
+    in_scope: List[str]
+    out_of_scope: List[str]
+
+
+@dataclass
 class IntentResult:
     """
     Output of Intent Analysis stage.
@@ -109,12 +122,14 @@ class IntentResult:
     - What the user is looking for (intent)
     - What the article should achieve
     - Tone, depth, and format requirements
+    - Topic boundaries to prevent scope drift
     """
     topic: str
     region: str
     primary_intent: Literal["informational", "transactional", "commercial", "navigational"]
     user_goal: str
     article_goal: str
+    topic_boundaries: TopicBoundaries
     content_type: Literal["guide", "how-to", "listicle", "comparison", "review", "explainer", "news", "opinion"]
     audience: AudienceInfo
     tone: ToneInfo
@@ -127,12 +142,20 @@ class IntentResult:
     @classmethod
     def from_dict(cls, data: dict) -> "IntentResult":
         """Create IntentResult from dict (e.g., parsed JSON)."""
+        # Handle topic_boundaries - use defaults if not present (backwards compatibility)
+        topic_boundaries_data = data.get("topic_boundaries", {})
+        topic_boundaries = TopicBoundaries(
+            in_scope=topic_boundaries_data.get("in_scope", []),
+            out_of_scope=topic_boundaries_data.get("out_of_scope", []),
+        )
+
         return cls(
             topic=data["topic"],
             region=data["region"],
             primary_intent=data["primary_intent"],
             user_goal=data["user_goal"],
             article_goal=data["article_goal"],
+            topic_boundaries=topic_boundaries,
             content_type=data["content_type"],
             audience=AudienceInfo(
                 role=data["audience"]["role"],
@@ -160,6 +183,10 @@ class IntentResult:
             "primary_intent": self.primary_intent,
             "user_goal": self.user_goal,
             "article_goal": self.article_goal,
+            "topic_boundaries": {
+                "in_scope": self.topic_boundaries.in_scope,
+                "out_of_scope": self.topic_boundaries.out_of_scope,
+            },
             "content_type": self.content_type,
             "audience": {
                 "role": self.audience.role,
