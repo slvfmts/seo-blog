@@ -10,6 +10,17 @@
 (результаты WebSearch + WebFetch, выполненные runner-ом)
 {{search_and_fetch_results_json}}
 
+3) keyword_metrics.json (опционально)
+{{keyword_metrics_json}}
+
+ВАЖНО: Формат входных данных
+— Каждый organic result может содержать поле `page_content` с полным
+  markdown-текстом страницы (извлечённым через Jina Reader).
+— Если `page_content` присутствует — используй его как ОСНОВНОЙ источник
+  информации, он содержит полный контент страницы.
+— Если `page_content` отсутствует — используй `snippet` как краткую выжимку.
+— Поле `page_word_count` показывает размер оригинального контента.
+
 Ограничения:
 — не пиши статью
 — не формируй outline
@@ -18,6 +29,7 @@
 — если информация не подтверждена источником — не включай её
 — если данные противоречат друг другу — зафиксируй это явно
 — не копируй длинные фрагменты текста; используй краткие выжимки своими словами
+— при наличии page_content извлекай БОЛЬШЕ фактов и деталей чем из snippets
 
 Допустимые значения:
 
@@ -36,33 +48,39 @@ definition | rule | process | best_practice | risk | example | legal | pricing |
    — content_type
    — depth
    — must_answer_questions
-2. Проанализируй search_and_fetch_results.json и отфильтруй:
-   — 8–12 наиболее релевантных источников
-   — с разными типами source_type
-3. Извлеки и зафиксируй:
-   — определения ключевых терминов
+2. Проанализируй search_and_fetch_results.json:
+   — ПРИОРИТЕТ: organic results с page_content (полный контент страницы)
+   — Для результатов с page_content: тщательно извлекай факты, цифры, примеры
+   — Отбери 8–15 наиболее релевантных источников
+   — Обеспечь разнообразие типов source_type
+3. Если есть keyword_metrics.json:
+   — Учитывай search volume при определении важности терминов
+   — Отмечай высокочастотные ключи в relevance_notes источников
+4. Извлеки и зафиксируй:
+   — определения ключевых терминов (из page_content — более детальные)
    — атомарные факты и правила
    — числовые значения и ограничения (если есть)
-   — практические примеры
+   — практические примеры (из page_content можно найти больше)
    — риски, ошибки и мифы
    — edge cases (если применимо)
    — противоречия (если источники расходятся)
-4. Для каждого must_answer_question:
+5. Для каждого must_answer_question:
    — убедись, что есть достаточная фактура
    — зафиксируй покрытие в coverage_map
-5. Self-check:
+6. Self-check:
    — нет ли неподтверждённых утверждений
    — нет ли выдуманных URL
    — покрыты ли все must_answer_questions
    — соответствует ли объём ограничениям
+   — использованы ли page_content источники максимально эффективно
 
 Ограничения по объёму:
-— definitions: 3–5
-— facts: 10–16
-— numbers: 3–8 (если применимо)
-— examples: 2–4
+— definitions: 3–6
+— facts: 12–20 (больше если есть page_content)
+— numbers: 4–10 (если применимо)
+— examples: 3–6 (больше если есть page_content)
 — pitfalls_and_myths: 3–6 (если применимо)
-— edge_cases: 0–2
+— edge_cases: 0–3
 — contradictions: 0–2
 
 Выход:
@@ -84,7 +102,8 @@ definition | rule | process | best_practice | risk | example | legal | pricing |
       "url": "string",
       "published_date": "YYYY-MM-DD or null",
       "source_type": "official | documentation | expert | media | community | other",
-      "relevance_notes": "string"
+      "relevance_notes": "string",
+      "has_full_content": true/false
     }
   ],
 

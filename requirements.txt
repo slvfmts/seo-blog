@@ -29,3 +29,6 @@ beautifulsoup4==4.12.3
 # Utils
 python-dotenv==1.0.1
 structlog==24.1.0
+
+# Content extraction (optional - for Trafilatura fallback)
+trafilatura==1.12.0

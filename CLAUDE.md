@@ -1964,15 +1964,18 @@ DEBUG=true
    ├── stages/
    │   ├── __init__.py
    │   ├── intent.py         # IntentStage
-   │   ├── research.py       # ResearchStage (queries + packer)
+   │   ├── research.py       # ResearchStage (queries + packer + content fetch)
    │   ├── structure.py      # StructureStage
    │   ├── drafting.py       # DraftingStage
    │   └── editing.py        # EditingStage
    ├── contracts/
-   │   └── __init__.py       # IntentResult, ResearchResult, OutlineResult, etc.
+   │   └── __init__.py       # IntentResult, ResearchResult, KeywordMetricsResult, etc.
    ├── data_sources/
    │   ├── __init__.py
-   │   └── serper.py         # SerperDataSource
+   │   ├── serper.py         # SerperDataSource (SERP data)
+   │   ├── jina_reader.py    # JinaReader (full page content extraction)
+   │   ├── trafilatura_ext.py# TrafilaturaExtractor (fallback content extraction)
+   │   └── dataforseo.py     # DataForSEO (keyword metrics)
    └── prompts/
        ├── intent_v1.txt
        ├── research_queries_v1.txt
@@ -1984,24 +1987,54 @@ DEBUG=true
 
    **Pipeline flow:**
    ```
-   topic → Intent → Research (queries → search → packer) → Structure → Drafting → Editing → article.md
+   topic → Intent → Research (queries → search → PAA expansion → content fetch → keyword metrics → packer) → Structure → Drafting → Editing → article.md
    ```
 
    **Использование CLI:**
    ```bash
-   # С Serper.dev (рекомендуется)
+   # С полной интеграцией (рекомендуется)
+   ANTHROPIC_API_KEY=... SERPER_API_KEY=... DATAFORSEO_LOGIN=... DATAFORSEO_PASSWORD=... \
+     python -m src.services.writing_pipeline.cli "Тема статьи" -o ./output
+
+   # С Serper.dev + Jina Reader (бесплатно)
    ANTHROPIC_API_KEY=... SERPER_API_KEY=... python -m src.services.writing_pipeline.cli "Тема статьи" -o ./output
 
-   # Без Serper.dev (только LLM knowledge)
+   # Без внешних API (только LLM knowledge)
    ANTHROPIC_API_KEY=... python -m src.services.writing_pipeline.cli "Тема статьи" -o ./output
+
+   # Отключить PAA expansion и content fetch
+   python -m src.services.writing_pipeline.cli "Тема статьи" --no-paa --no-content-fetch
    ```
 
    **Принципы архитектуры:**
    - Каждый этап — независимый subagent с минимальным контекстом
    - Контракт определяет inputs/outputs для каждого этапа
-   - Research использует двухшаговый процесс (queries → WebSearch → packer)
+   - Research использует многошаговый процесс (queries → WebSearch → PAA expansion → content fetch → keyword metrics → packer)
    - Все промежуточные результаты логируются
    - Модуль можно обособить в отдельный пакет
+
+11. **Enhanced Research Stage (2026-02-06):**
+    - [x] Jina Reader integration for full page content extraction
+    - [x] Trafilatura fallback for content extraction when Jina unavailable
+    - [x] DataForSEO integration for keyword metrics (volume, difficulty, CPC)
+    - [x] PAA (People Also Ask) query expansion
+    - [x] Updated research_packer prompt to handle page_content
+    - [x] New CLI options: --no-paa, --no-content-fetch, --max-pages
+    - [x] New environment variables: JINA_API_KEY, DATAFORSEO_LOGIN, DATAFORSEO_PASSWORD
+
+   **Новые возможности Research stage:**
+   - **Full page content:** Извлечение полного markdown-контента через Jina Reader (бесплатно: 10M tokens/мес, 100 RPM)
+   - **PAA expansion:** Автоматическое расширение запросов через "People Also Ask" вопросы
+   - **Keyword metrics:** Search volume, difficulty, CPC через DataForSEO (~$0.05/keyword)
+   - **Trafilatura fallback:** Локальная библиотека для extraction если Jina недоступен
+
+   **Ожидаемые улучшения:**
+   | Метрика | До | После |
+   |---------|-----|-------|
+   | Facts per article | 10-16 | 15-25 |
+   | Sources with full content | 0% | 60-80% |
+   | Keyword metrics available | Нет | Да |
+   | PAA coverage | Частичное | Полное |
 
 ---
 
@@ -2027,5 +2060,5 @@ Claude имеет SSH-доступ и должен:
 
 ---
 
-*Document version: 1.7*
-*Last updated: 2026-02-04*
+*Document version: 1.8*
+*Last updated: 2026-02-06*

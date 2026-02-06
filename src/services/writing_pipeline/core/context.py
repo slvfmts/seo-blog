@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Any, Dict, List
 from datetime import datetime
 
-from ..contracts import IntentResult, ResearchResult, OutlineResult, QueryPlannerResult
+from ..contracts import IntentResult, ResearchResult, OutlineResult, QueryPlannerResult, KeywordMetricsResult
 
 
 @dataclass
@@ -40,6 +40,7 @@ class WritingContext:
     outline: Optional[OutlineResult] = None
     draft_md: Optional[str] = None
     edited_md: Optional[str] = None
+    keyword_metrics: Optional[KeywordMetricsResult] = None
 
     # Execution metadata
     started_at: Optional[datetime] = None
@@ -50,6 +51,7 @@ class WritingContext:
     # Configuration
     output_dir: Optional[str] = None  # Directory for saving intermediate results
     save_intermediate: bool = True  # Whether to save intermediate results to files
+    config: Dict[str, Any] = field(default_factory=dict)  # Pipeline configuration
 
     def start_stage(self, stage_name: str) -> StageLog:
         """Mark the start of a stage."""

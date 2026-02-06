@@ -5,8 +5,74 @@ Each stage has a strictly defined contract for what it receives and produces.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict
 from datetime import datetime
+
+
+# =============================================================================
+# Keyword Metrics Contract
+# =============================================================================
+
+@dataclass
+class KeywordMetricsData:
+    """Keyword metrics from DataForSEO or similar service."""
+    keyword: str
+    search_volume: int
+    difficulty: float  # 0-100
+    cpc: float
+    competition: float  # 0-1
+    competition_level: str  # LOW, MEDIUM, HIGH
+
+
+@dataclass
+class KeywordMetricsResult:
+    """Result of keyword metrics fetch for research stage."""
+    metrics: Dict[str, KeywordMetricsData]  # keyword -> metrics
+    source: str  # "dataforseo", "estimated", etc.
+
+    def get_volume(self, keyword: str) -> int:
+        """Get search volume for keyword."""
+        if keyword.lower() in self.metrics:
+            return self.metrics[keyword.lower()].search_volume
+        return 0
+
+    def get_difficulty(self, keyword: str) -> float:
+        """Get difficulty for keyword."""
+        if keyword.lower() in self.metrics:
+            return self.metrics[keyword.lower()].difficulty
+        return 0
+
+    def to_dict(self) -> dict:
+        """Convert to dict for JSON serialization."""
+        return {
+            "metrics": {
+                k: {
+                    "keyword": v.keyword,
+                    "search_volume": v.search_volume,
+                    "difficulty": v.difficulty,
+                    "cpc": v.cpc,
+                    "competition": v.competition,
+                    "competition_level": v.competition_level,
+                }
+                for k, v in self.metrics.items()
+            },
+            "source": self.source,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "KeywordMetricsResult":
+        """Create from dict."""
+        metrics = {}
+        for k, v in data.get("metrics", {}).items():
+            metrics[k] = KeywordMetricsData(
+                keyword=v["keyword"],
+                search_volume=v["search_volume"],
+                difficulty=v["difficulty"],
+                cpc=v["cpc"],
+                competition=v["competition"],
+                competition_level=v["competition_level"],
+            )
+        return cls(metrics=metrics, source=data.get("source", "unknown"))
 
 
 # =============================================================================

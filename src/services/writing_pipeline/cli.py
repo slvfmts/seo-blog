@@ -7,7 +7,10 @@ Usage:
 
 Environment variables:
     ANTHROPIC_API_KEY: Required
-    SERPER_API_KEY: Optional (for better research)
+    SERPER_API_KEY: Optional (for SERP data)
+    JINA_API_KEY: Optional (for higher Jina Reader limits)
+    DATAFORSEO_LOGIN: Optional (for keyword metrics)
+    DATAFORSEO_PASSWORD: Optional (for keyword metrics)
 """
 
 import asyncio
@@ -50,6 +53,22 @@ async def main():
         default="claude-sonnet-4-20250514",
         help="Claude model to use"
     )
+    parser.add_argument(
+        "--no-paa",
+        action="store_true",
+        help="Disable PAA query expansion"
+    )
+    parser.add_argument(
+        "--no-content-fetch",
+        action="store_true",
+        help="Disable full page content fetching"
+    )
+    parser.add_argument(
+        "--max-pages",
+        type=int,
+        default=5,
+        help="Max pages to fetch content from (default: 5)"
+    )
 
     args = parser.parse_args()
 
@@ -60,6 +79,9 @@ async def main():
         sys.exit(1)
 
     serper_key = os.environ.get("SERPER_API_KEY")
+    jina_key = os.environ.get("JINA_API_KEY")
+    dataforseo_login = os.environ.get("DATAFORSEO_LOGIN")
+    dataforseo_password = os.environ.get("DATAFORSEO_PASSWORD")
     proxy_url = os.environ.get("ANTHROPIC_PROXY_URL")
     proxy_secret = os.environ.get("ANTHROPIC_PROXY_SECRET")
 
@@ -75,16 +97,32 @@ async def main():
     print(f"Model: {args.model}")
     print(f"Output: {output_dir or '(none)'}")
     print(f"Serper API: {'yes' if serper_key else 'no'}")
+    print(f"Jina Reader: {'yes (with key)' if jina_key else 'yes (free tier)'}")
+    print(f"DataForSEO: {'yes' if dataforseo_login else 'no'}")
+    print(f"PAA expansion: {'yes' if not args.no_paa else 'no'}")
+    print(f"Content fetch: {'yes' if not args.no_content_fetch else 'no'}")
+    print(f"Max pages: {args.max_pages}")
     print("-" * 50)
 
     # Initialize and run pipeline
     runner = PipelineRunner(
         anthropic_api_key=anthropic_key,
         serper_api_key=serper_key,
+        jina_api_key=jina_key,
+        dataforseo_login=dataforseo_login,
+        dataforseo_password=dataforseo_password,
         model=args.model,
         proxy_url=proxy_url,
         proxy_secret=proxy_secret,
     )
+
+    # Pipeline configuration
+    config = {
+        "expand_paa": not args.no_paa,
+        "fetch_page_content": not args.no_content_fetch,
+        "max_pages_to_fetch": args.max_pages,
+        "max_paa_queries": 3,
+    }
 
     print("Starting pipeline...")
     result = await runner.run(
@@ -92,6 +130,7 @@ async def main():
         region=args.region,
         output_dir=output_dir,
         save_intermediate=not args.no_intermediate,
+        config=config,
     )
 
     print("-" * 50)
@@ -107,6 +146,7 @@ async def main():
         print(f"  - 01_intent.json")
         print(f"  - 02_queries.json")
         print(f"  - 03_search_results.json")
+        print(f"  - 03a_keyword_metrics.json (if DataForSEO configured)")
         print(f"  - 04_research_pack.json")
         print(f"  - 05_outline.json")
         print(f"  - 06_draft.md")

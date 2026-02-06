@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     # Serper.dev (SERP API)
     serper_api_key: str = ""
 
+    # Jina Reader (content extraction)
+    jina_api_key: str = ""  # Optional - free tier available without key
+
+    # DataForSEO (keyword metrics)
+    dataforseo_login: str = ""
+    dataforseo_password: str = ""
+
     # App
     debug: bool = False
     log_level: str = "INFO"

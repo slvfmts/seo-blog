@@ -652,6 +652,9 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str):
         runner = PipelineRunner(
             anthropic_api_key=settings.anthropic_api_key,
             serper_api_key=settings.serper_api_key or None,
+            jina_api_key=getattr(settings, 'jina_api_key', None),
+            dataforseo_login=getattr(settings, 'dataforseo_login', None),
+            dataforseo_password=getattr(settings, 'dataforseo_password', None),
             proxy_url=settings.anthropic_proxy_url or None,
             proxy_secret=settings.anthropic_proxy_secret or None,
         )

@@ -38,6 +38,9 @@ class PipelineRunner:
         self,
         anthropic_api_key: str,
         serper_api_key: Optional[str] = None,
+        jina_api_key: Optional[str] = None,
+        dataforseo_login: Optional[str] = None,
+        dataforseo_password: Optional[str] = None,
         model: str = "claude-sonnet-4-20250514",
         proxy_url: Optional[str] = None,
         proxy_secret: Optional[str] = None,
@@ -48,6 +51,9 @@ class PipelineRunner:
         Args:
             anthropic_api_key: Anthropic API key
             serper_api_key: Optional Serper.dev API key for search
+            jina_api_key: Optional Jina Reader API key for higher limits
+            dataforseo_login: Optional DataForSEO API login for keyword metrics
+            dataforseo_password: Optional DataForSEO API password
             model: Claude model to use
             proxy_url: Optional proxy URL for API calls
             proxy_secret: Optional proxy secret
@@ -64,6 +70,9 @@ class PipelineRunner:
 
         self.model = model
         self.serper_api_key = serper_api_key
+        self.jina_api_key = jina_api_key
+        self.dataforseo_login = dataforseo_login
+        self.dataforseo_password = dataforseo_password
 
         # Initialize stages
         self.stages = [
@@ -72,6 +81,9 @@ class PipelineRunner:
                 client=self.client,
                 model=self.model,
                 serper_api_key=self.serper_api_key,
+                jina_api_key=self.jina_api_key,
+                dataforseo_login=self.dataforseo_login,
+                dataforseo_password=self.dataforseo_password,
             ),
             StructureStage(client=self.client, model=self.model),
             DraftingStage(client=self.client, model=self.model),
@@ -84,6 +96,7 @@ class PipelineRunner:
         region: str = "ru",
         output_dir: Optional[str] = None,
         save_intermediate: bool = True,
+        config: Optional[dict] = None,
     ) -> PipelineResult:
         """
         Run the full writing pipeline.
@@ -93,6 +106,11 @@ class PipelineRunner:
             region: Target region (affects language, search locale)
             output_dir: Directory for intermediate results
             save_intermediate: Whether to save intermediate files
+            config: Optional pipeline configuration:
+                - expand_paa: bool (default True) - expand queries with PAA
+                - fetch_page_content: bool (default True) - fetch full page content
+                - max_pages_to_fetch: int (default 5) - max pages for content fetch
+                - max_paa_queries: int (default 3) - max PAA queries to expand
 
         Returns:
             PipelineResult with final article and metadata
@@ -101,6 +119,16 @@ class PipelineRunner:
         if output_dir and save_intermediate:
             os.makedirs(output_dir, exist_ok=True)
 
+        # Default config
+        pipeline_config = {
+            "expand_paa": True,
+            "fetch_page_content": True,
+            "max_pages_to_fetch": 5,
+            "max_paa_queries": 3,
+        }
+        if config:
+            pipeline_config.update(config)
+
         # Initialize context
         context = WritingContext(
             topic=topic,
@@ -108,6 +136,7 @@ class PipelineRunner:
             output_dir=output_dir,
             save_intermediate=save_intermediate,
             started_at=datetime.now(),
+            config=pipeline_config,
         )
 
         # Run all stages
