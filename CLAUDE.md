@@ -2036,6 +2036,24 @@ DEBUG=true
    | Keyword metrics available | Нет | Да |
    | PAA coverage | Частичное | Полное |
 
+12. **Topic Scope Guard (2026-02-06):**
+    - [x] New `TopicBoundaries` dataclass with in_scope/out_of_scope lists
+    - [x] Updated `intent_v1.txt` prompt with strict focus rules
+    - [x] Intent stage logs scope guard results and warns on topic drift
+    - [x] Prevents narrow topics from being expanded to generic guides
+
+   **Проблема решена:**
+   - До: Тема "Где найти клиентов на фрилансе" → статья "Как заработать на фрилансе"
+   - После: Тема сохраняется точно, must_answer_questions строго по теме
+
+   **Новые поля в IntentResult:**
+   ```json
+   "topic_boundaries": {
+     "in_scope": ["платформы для поиска", "методы привлечения", ...],
+     "out_of_scope": ["портфолио", "ценообразование", "навыки", ...]
+   }
+   ```
+
 ---
 
 ## ⚠️ ВАЖНО: Доступ к серверу
@@ -2060,5 +2078,5 @@ Claude имеет SSH-доступ и должен:
 
 ---
 
-*Document version: 1.8*
+*Document version: 1.9*
 *Last updated: 2026-02-06*
