@@ -118,7 +118,9 @@ class ResearchStage(WritingStage):
             fetch_content = context.config.get("fetch_page_content", True)
             max_pages = context.config.get("max_pages_to_fetch", 5)
             if fetch_content:
-                search_results = await self._fetch_page_contents(search_results, max_pages)
+                search_results = await self._fetch_page_contents(
+                    search_results, max_pages, region=context.region
+                )
 
             context.search_results = search_results
 
@@ -324,13 +326,18 @@ class ResearchStage(WritingStage):
         self,
         search_results: List[Dict[str, Any]],
         max_pages: int = 5,
+        region: str = "ru",
     ) -> List[Dict[str, Any]]:
         """
         Fetch full page content for top organic results.
 
+        For Russian regions, uses Trafilatura (direct requests) first since Jina Reader
+        gets blocked with HTTP 451 by Russian websites. For other regions, uses Jina first.
+
         Args:
             search_results: Search results with organic listings
             max_pages: Maximum number of pages to fetch
+            region: Region code to determine fetch strategy
 
         Returns:
             Search results with page_content added to organic items
@@ -354,41 +361,84 @@ class ResearchStage(WritingStage):
         if not urls_to_fetch:
             return search_results
 
-        logger.info(f"Fetching content from {len(urls_to_fetch)} pages: {urls_to_fetch}")
+        logger.info(f"Fetching content from {len(urls_to_fetch)} pages")
 
-        # Try Jina Reader first
-        jina = self._get_jina_reader()
-        contents = await jina.fetch_batch(urls_to_fetch, max_concurrent=3)
+        # Determine fetch strategy based on region
+        # For Russian sites, use Trafilatura first (direct requests from our Russian server)
+        # because Jina Reader gets blocked with HTTP 451
+        is_russian = region.lower() in ["ru", "россия", "russia"]
 
-        # Fallback to Trafilatura for failed fetches
-        trafilatura = self._get_trafilatura()
-        failed_urls = [
-            (url, content)
-            for url, content in zip(urls_to_fetch, contents)
-            if not content.success
-        ]
+        from ..data_sources.jina_reader import PageContent
+        contents: List[PageContent] = []
 
-        if failed_urls and trafilatura:
-            logger.info(f"Using Trafilatura fallback for {len(failed_urls)} URLs")
-            for url, _ in failed_urls:
-                try:
-                    extracted = await trafilatura.extract_from_url(url)
-                    if extracted.success:
-                        # Find and update the content
-                        for i, (u, c) in enumerate(zip(urls_to_fetch, contents)):
-                            if u == url:
-                                # Convert to PageContent format
-                                from ..data_sources.jina_reader import PageContent
-                                contents[i] = PageContent(
-                                    url=url,
-                                    title=extracted.title,
-                                    content=extracted.content,
-                                    word_count=extracted.word_count,
-                                    success=True,
-                                )
-                                break
-                except Exception as e:
-                    logger.warning(f"Trafilatura fallback failed for {url}: {e}")
+        if is_russian:
+            # Try Trafilatura first for Russian content
+            trafilatura = self._get_trafilatura()
+            if trafilatura:
+                logger.info("Using Trafilatura (direct) for Russian content")
+                extracted_list = await trafilatura.extract_batch(
+                    urls_to_fetch,
+                    max_concurrent=3,
+                    delay_between=0.5,
+                )
+                contents = [
+                    PageContent(
+                        url=ext.url,
+                        title=ext.title,
+                        content=ext.content,
+                        word_count=ext.word_count,
+                        success=ext.success,
+                        error=ext.error,
+                    )
+                    for ext in extracted_list
+                ]
+            else:
+                # Fallback to Jina if Trafilatura not available
+                jina = self._get_jina_reader()
+                contents = await jina.fetch_batch(urls_to_fetch, max_concurrent=3)
+
+            # For still-failed URLs, try Jina as backup
+            jina = self._get_jina_reader()
+            failed_urls = [
+                (i, url) for i, (url, content) in enumerate(zip(urls_to_fetch, contents))
+                if not content.success
+            ]
+            if failed_urls:
+                logger.info(f"Trying Jina Reader for {len(failed_urls)} failed URLs")
+                for i, url in failed_urls:
+                    try:
+                        result = await jina.fetch_content(url)
+                        if result.success:
+                            contents[i] = result
+                    except Exception as e:
+                        logger.warning(f"Jina fallback failed for {url}: {e}")
+        else:
+            # For non-Russian content, use Jina first (better quality)
+            jina = self._get_jina_reader()
+            contents = await jina.fetch_batch(urls_to_fetch, max_concurrent=3)
+
+            # Fallback to Trafilatura for failed fetches
+            trafilatura = self._get_trafilatura()
+            failed_urls = [
+                (i, url) for i, (url, content) in enumerate(zip(urls_to_fetch, contents))
+                if not content.success
+            ]
+
+            if failed_urls and trafilatura:
+                logger.info(f"Using Trafilatura fallback for {len(failed_urls)} URLs")
+                for i, url in failed_urls:
+                    try:
+                        extracted = await trafilatura.extract_from_url(url)
+                        if extracted.success:
+                            contents[i] = PageContent(
+                                url=url,
+                                title=extracted.title,
+                                content=extracted.content,
+                                word_count=extracted.word_count,
+                                success=True,
+                            )
+                    except Exception as e:
+                        logger.warning(f"Trafilatura fallback failed for {url}: {e}")
 
         # Log results and add content to search results
         success_count = sum(1 for c in contents if c.success)
@@ -396,6 +446,9 @@ class ResearchStage(WritingStage):
         for url, content in zip(urls_to_fetch, contents):
             if not content.success:
                 logger.warning(f"Failed to fetch {url}: {content.error}")
+
+        # Get Jina reader for truncation utility (always available)
+        jina = self._get_jina_reader()
 
         for url, content in zip(urls_to_fetch, contents):
             if content.success and url in url_to_result_indices:
