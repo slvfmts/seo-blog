@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
 LOCATIONS = {
     "us": 2840,
     "usa": 2840,
-    "ru": 2643,
-    "russia": 2643,
+    "ru": 2398,      # Kazakhstan — Russia not available in Google SERP API
+    "russia": 2398,
+    "kz": 2398,
     "uk": 2826,
     "gb": 2826,
     "de": 2276,
@@ -64,7 +65,7 @@ class DataForSEOSerpClient:
         self,
         keyword: str,
         domain: str,
-        location_code: int = 2643,
+        location_code: int = 2398,
         language_code: str = "ru",
         depth: int = 100,
     ) -> RankingResult:
@@ -84,7 +85,7 @@ class DataForSEOSerpClient:
         self,
         keywords: List[str],
         domain: str,
-        location_code: int = 2643,
+        location_code: int = 2398,
         language_code: str = "ru",
         depth: int = 100,
         batch_size: int = 100,

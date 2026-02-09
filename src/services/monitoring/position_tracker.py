@@ -54,7 +54,7 @@ class PositionTracker:
                 return {"error": "Site not found or no domain configured"}
 
             domain = site.domain
-            location_code = LOCATIONS.get(site.country.lower(), 2643) if site.country else 2643
+            location_code = LOCATIONS.get(site.country.lower(), 2398) if site.country else 2398
             language_code = site.language or "ru"
 
             # 2. Get keywords to check (targeted or achieved)
