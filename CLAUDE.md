@@ -1870,38 +1870,44 @@ DEBUG=true
    - [x] Serper.dev API для SERP данных
    - [x] Claude анализирует и генерирует структуру ТЗ
 
-#### Следующие шаги:
+#### Следующие шаги (актуальный план):
 
-1. **Phase 1: Validation Pipeline:**
-   - [ ] SEO lint проверки
-   - [ ] Базовая проверка на плагиат (простой similarity check)
-   - [ ] Проверка источников
+**Выполнено ранее (Phase 1):**
+- [x] SEO lint проверки
+- [x] Базовая проверка на плагиат
+- [x] Writing Pipeline с multi-stage генерацией
+- [x] Парсинг контента конкурентов (Jina + Trafilatura)
+- [x] Search volume / difficulty (DataForSEO)
+- [x] Topic Scope Guard (защита от дрифта темы)
 
-2. **Инфраструктурные улучшения:**
-   - [ ] Alembic миграции вместо create_all
-   - [ ] Логирование в файл
-   - [ ] Health check для всех сервисов в docker-compose
+**Phase 2: SEO-оптимизация pipeline (ВЫПОЛНЕНО 2026-02-08):**
 
-#### TODO: Улучшения Brief Generator
+1. **Meta Stage — генерация SEO-метаданных** *(влияние на CTR и индексацию)*
+   - [x] Новый 6-й этап pipeline (после Editing) — `stages/meta.py`
+   - [x] Генерация `meta_title` (до 60 символов, с target keyword)
+   - [x] Генерация `meta_description` (до 160 символов, с CTA)
+   - [x] Генерация SEO-friendly `slug` (транслитерация для русского)
+   - [x] Сохранение в Draft model (поля уже есть, теперь заполняются)
+   - [x] Передача meta_title + meta_description + slug при публикации в Ghost
+   - [x] Промпт: `prompts/meta_v1.txt`, контракт: `MetaResult`
 
-Сейчас Brief использует только данные из Serper.dev (organic, PAA, related searches).
+2. **Internal Linking — внутренняя перелинковка** *(ключевой фактор индексации)*
+   - [x] `GhostPublisher.get_posts()` — получение всех опубликованных постов из Ghost API
+   - [x] Передача списка URL+title в Drafting stage через `existing_posts` в context
+   - [x] Промпт `drafting_v1.txt` обновлён: LLM вставляет 2-5 релевантных внутренних ссылок
+   - [x] Graceful degradation: если Ghost недоступен — статья генерируется без ссылок
+   - [x] PipelineRunner принимает `ghost_url` + `ghost_admin_key`
 
-**Что можно добавить:**
-- [ ] **Парсинг контента конкурентов** — получать реальный текст страниц, а не только snippet
-- [ ] **Search volume / difficulty** — интеграция с Ahrefs/DataForSEO для частотности
-- [ ] **Текущие позиции** — проверять где сайт уже ранжируется
-- [ ] **Анализ внутренних ссылок** — какие статьи уже есть, чтобы избежать каннибализации
-- [ ] **Автоматические internal links** — предлагать ссылки на существующие статьи
+   **Контекст из анализа "SEO Agency In A Box" (2026-02-08):**
+   - Meta генерируется из готовой статьи (не из brief) — LLM видит финальный текст
+   - Writer получает sitemap (список существующих страниц) для internal linking
+   - Content Audit pipeline (scrape → detect keyword → audit) — основа для будущего Iteration module
 
-#### TODO: Вёрстка и форматирование статей
-
-**Проблема:** После генерации статьи через Brief workflow получается сплошной текст без заголовков и структуры. При прямой генерации в Ghost было лучше.
-
-**Что нужно исправить:**
-- [ ] **Генератор не использует структуру из Brief** — промпт должен явно требовать H2/H3 заголовки из `brief.structure.sections`
-- [ ] **Markdown форматирование** — убедиться что генератор возвращает правильный Markdown с `##`, `###`, списками, **bold**
-- [ ] **Проверить конвертацию** — возможно markdown фильтр в шаблоне не работает корректно
-- [ ] **Сравнить промпты** — посмотреть чем отличается промпт прямой генерации от генерации по Brief
+**Phase 3: Инфраструктура и качество:**
+- [ ] Alembic миграции вместо create_all
+- [ ] Логирование в файл
+- [ ] Health check для всех сервисов в docker-compose
+- [ ] Deprecate старый generator.py в пользу Writing Pipeline
 
 #### Выполнено (2026-02-04):
 
@@ -1967,7 +1973,8 @@ DEBUG=true
    │   ├── research.py       # ResearchStage (queries + packer + content fetch)
    │   ├── structure.py      # StructureStage
    │   ├── drafting.py       # DraftingStage
-   │   └── editing.py        # EditingStage
+   │   ├── editing.py        # EditingStage
+   │   └── meta.py           # MetaStage
    ├── contracts/
    │   └── __init__.py       # IntentResult, ResearchResult, KeywordMetricsResult, etc.
    ├── data_sources/
@@ -1987,7 +1994,7 @@ DEBUG=true
 
    **Pipeline flow:**
    ```
-   topic → Intent → Research (queries → search → PAA expansion → content fetch → keyword metrics → packer) → Structure → Drafting → Editing → article.md
+   topic → Intent → Research (queries → search → PAA expansion → content fetch → keyword metrics → packer) → Structure → Drafting (+ internal links) → Editing → Meta (meta_title, meta_description, slug) → article.md
    ```
 
    **Использование CLI:**

@@ -62,6 +62,64 @@ class GhostPublisher:
         }
         return json.dumps(mobiledoc)
 
+    def get_posts(self) -> list[dict]:
+        """
+        Fetch all published posts from Ghost.
+
+        Returns list of {title, url, slug, published_at, excerpt} dicts.
+        Handles pagination (Ghost returns 15 per page by default).
+        """
+        token = self._create_jwt_token()
+        headers = {
+            "Authorization": f"Ghost {token}",
+            "Content-Type": "application/json",
+        }
+
+        all_posts = []
+        page = 1
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                while True:
+                    response = client.get(
+                        f"{self.ghost_url}/ghost/api/admin/posts/",
+                        headers=headers,
+                        params={
+                            "status": "published",
+                            "fields": "title,url,slug,published_at,custom_excerpt",
+                            "limit": 100,
+                            "page": page,
+                        },
+                    )
+
+                    if response.status_code != 200:
+                        break
+
+                    data = response.json()
+                    posts = data.get("posts", [])
+                    if not posts:
+                        break
+
+                    for post in posts:
+                        all_posts.append({
+                            "title": post.get("title", ""),
+                            "url": post.get("url", ""),
+                            "slug": post.get("slug", ""),
+                            "published_at": post.get("published_at", ""),
+                            "excerpt": post.get("custom_excerpt") or "",
+                        })
+
+                    # Check if there are more pages
+                    meta = data.get("meta", {}).get("pagination", {})
+                    if page >= meta.get("pages", 1):
+                        break
+                    page += 1
+
+        except Exception:
+            pass  # Graceful degradation — return what we have
+
+        return all_posts
+
     def publish(
         self,
         title: str,

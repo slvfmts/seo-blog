@@ -7,6 +7,7 @@ from .research import ResearchStage
 from .structure import StructureStage
 from .drafting import DraftingStage
 from .editing import EditingStage
+from .meta import MetaStage
 
 __all__ = [
     "IntentStage",
@@ -14,4 +15,5 @@ __all__ = [
     "StructureStage",
     "DraftingStage",
     "EditingStage",
+    "MetaStage",
 ]

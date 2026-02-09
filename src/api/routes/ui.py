@@ -607,6 +607,7 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
             title=draft.title,
             content=draft.content_md,
             slug=draft.slug,
+            meta_title=draft.meta_title,
             meta_description=draft.meta_description,
         )
 
@@ -645,6 +646,7 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str):
             "structure": "pending",
             "drafting": "pending",
             "editing": "pending",
+            "meta": "pending",
         }
         db.commit()
 
@@ -657,6 +659,8 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str):
             dataforseo_password=getattr(settings, 'dataforseo_password', None),
             proxy_url=settings.anthropic_proxy_url or None,
             proxy_secret=settings.anthropic_proxy_secret or None,
+            ghost_url=settings.ghost_url or None,
+            ghost_admin_key=settings.ghost_admin_key or None,
         )
 
         # Run pipeline (need to run async in sync context)
@@ -689,7 +693,14 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str):
             "structure": "completed",
             "drafting": "completed",
             "editing": "completed",
+            "meta": "completed",
         }
+
+        # Save SEO metadata from Meta stage
+        if result.meta:
+            draft.meta_title = result.meta.meta_title
+            draft.meta_description = result.meta.meta_description
+            draft.slug = result.meta.slug
 
         # Extract sources from research
         if result.research and result.research.sources:
@@ -766,6 +777,7 @@ async def create_pipeline(
                 "structure": "pending",
                 "drafting": "pending",
                 "editing": "pending",
+                "meta": "pending",
             },
         )
         db.add(draft)

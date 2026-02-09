@@ -42,9 +42,20 @@ class DraftingStage(WritingStage):
             outline_json = json.dumps(context.outline.to_dict(), ensure_ascii=False, indent=2)
             research_json = json.dumps(context.research.to_dict(), ensure_ascii=False, indent=2)
 
+            # Format existing posts for internal linking
+            if context.existing_posts:
+                posts_for_prompt = [
+                    {"title": p["title"], "url": p["url"]}
+                    for p in context.existing_posts
+                ]
+                existing_posts_json = json.dumps(posts_for_prompt, ensure_ascii=False, indent=2)
+            else:
+                existing_posts_json = "[]"
+
             prompt = prompt_template.replace("{{intent_spec_json}}", intent_json)
             prompt = prompt.replace("{{outline_json}}", outline_json)
             prompt = prompt.replace("{{research_pack_json}}", research_json)
+            prompt = prompt.replace("{{existing_posts}}", existing_posts_json)
 
             # Call LLM with high token limit for full article
             response_text, tokens = self._call_llm(

@@ -84,6 +84,8 @@ async def main():
     dataforseo_password = os.environ.get("DATAFORSEO_PASSWORD")
     proxy_url = os.environ.get("ANTHROPIC_PROXY_URL")
     proxy_secret = os.environ.get("ANTHROPIC_PROXY_SECRET")
+    ghost_url = os.environ.get("GHOST_URL")
+    ghost_admin_key = os.environ.get("GHOST_ADMIN_KEY")
 
     # Generate output directory if not specified
     output_dir = args.output_dir
@@ -102,6 +104,7 @@ async def main():
     print(f"PAA expansion: {'yes' if not args.no_paa else 'no'}")
     print(f"Content fetch: {'yes' if not args.no_content_fetch else 'no'}")
     print(f"Max pages: {args.max_pages}")
+    print(f"Ghost CMS: {'yes' if ghost_url else 'no (no internal linking)'}")
     print("-" * 50)
 
     # Initialize and run pipeline
@@ -114,6 +117,8 @@ async def main():
         model=args.model,
         proxy_url=proxy_url,
         proxy_secret=proxy_secret,
+        ghost_url=ghost_url,
+        ghost_admin_key=ghost_admin_key,
     )
 
     # Pipeline configuration
@@ -137,6 +142,10 @@ async def main():
     print(f"Title: {result.title}")
     print(f"Subtitle: {result.subtitle}")
     print(f"Word count: {result.word_count}")
+    if result.meta:
+        print(f"Meta title: {result.meta.meta_title}")
+        print(f"Meta desc: {result.meta.meta_description}")
+        print(f"Slug: {result.meta.slug}")
     print(f"Stages: {', '.join(result.stages_completed)}")
     print(f"Duration: {result.started_at} - {result.completed_at}")
 
@@ -151,6 +160,7 @@ async def main():
         print(f"  - 05_outline.json")
         print(f"  - 06_draft.md")
         print(f"  - 07_edited.md")
+        print(f"  - 08_meta.json")
 
     print("\n=== FINAL ARTICLE ===\n")
     print(result.article_md)

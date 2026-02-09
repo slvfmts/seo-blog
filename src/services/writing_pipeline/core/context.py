@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Any, Dict, List
 from datetime import datetime
 
-from ..contracts import IntentResult, ResearchResult, OutlineResult, QueryPlannerResult, KeywordMetricsResult
+from ..contracts import IntentResult, ResearchResult, OutlineResult, QueryPlannerResult, KeywordMetricsResult, MetaResult
 
 
 @dataclass
@@ -40,7 +40,11 @@ class WritingContext:
     outline: Optional[OutlineResult] = None
     draft_md: Optional[str] = None
     edited_md: Optional[str] = None
+    meta: Optional[MetaResult] = None
     keyword_metrics: Optional[KeywordMetricsResult] = None
+
+    # External data (fetched before pipeline starts)
+    existing_posts: List[Dict[str, Any]] = field(default_factory=list)
 
     # Execution metadata
     started_at: Optional[datetime] = None

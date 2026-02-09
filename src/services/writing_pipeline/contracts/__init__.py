@@ -792,6 +792,37 @@ class OutlineResult:
 
 
 # =============================================================================
+# Meta Stage Contracts
+# =============================================================================
+
+@dataclass
+class MetaResult:
+    """
+    Output of Meta stage.
+
+    SEO metadata generated from the finished article.
+    """
+    meta_title: str  # ≤60 chars, contains target keyword
+    meta_description: str  # ≤160 chars, contains keyword + CTA
+    slug: str  # lowercase, hyphens, 3-5 words
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MetaResult":
+        return cls(
+            meta_title=data["meta_title"],
+            meta_description=data["meta_description"],
+            slug=data["slug"],
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "meta_title": self.meta_title,
+            "meta_description": self.meta_description,
+            "slug": self.slug,
+        }
+
+
+# =============================================================================
 # Pipeline Result
 # =============================================================================
 
@@ -811,31 +842,36 @@ class PipelineResult:
     subtitle: str
     word_count: int
 
+    # SEO metadata
+    meta: Optional[MetaResult] = None
+
     # Intermediate results (for debugging/logging)
-    intent: IntentResult
-    research: ResearchResult
-    outline: OutlineResult
-    draft_md: str
+    intent: IntentResult = None
+    research: ResearchResult = None
+    outline: OutlineResult = None
+    draft_md: str = ""
 
     # Metadata
-    started_at: str
-    completed_at: str
-    stages_completed: List[str]
+    started_at: str = ""
+    completed_at: str = ""
+    stages_completed: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dict for JSON serialization."""
-        return {
+        result = {
             "topic": self.topic,
             "region": self.region,
             "article_md": self.article_md,
             "title": self.title,
             "subtitle": self.subtitle,
             "word_count": self.word_count,
-            "intent": self.intent.to_dict(),
-            "research": self.research.to_dict(),
-            "outline": self.outline.to_dict(),
+            "meta": self.meta.to_dict() if self.meta else None,
+            "intent": self.intent.to_dict() if self.intent else None,
+            "research": self.research.to_dict() if self.research else None,
+            "outline": self.outline.to_dict() if self.outline else None,
             "draft_md": self.draft_md,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "stages_completed": self.stages_completed,
         }
+        return result

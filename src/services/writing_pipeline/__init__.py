@@ -7,11 +7,12 @@ Writing Pipeline - Multi-Stage Article Generation
 3. Structure - построение outline статьи
 4. Drafting - написание текста по outline
 5. Editing - редактура и markdown-вёрстка
+6. Meta - генерация SEO-метаданных (meta_title, meta_description, slug)
 """
 
 from .core.runner import PipelineRunner
 from .core.context import WritingContext
-from .contracts import IntentResult, ResearchResult, OutlineResult, TopicBoundaries
+from .contracts import IntentResult, ResearchResult, OutlineResult, TopicBoundaries, MetaResult
 
 __all__ = [
     "PipelineRunner",
@@ -20,4 +21,5 @@ __all__ = [
     "ResearchResult",
     "OutlineResult",
     "TopicBoundaries",
+    "MetaResult",
 ]

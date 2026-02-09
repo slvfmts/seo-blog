@@ -17,6 +17,7 @@ from ..stages import (
     StructureStage,
     DraftingStage,
     EditingStage,
+    MetaStage,
 )
 
 
@@ -44,6 +45,8 @@ class PipelineRunner:
         model: str = "claude-sonnet-4-20250514",
         proxy_url: Optional[str] = None,
         proxy_secret: Optional[str] = None,
+        ghost_url: Optional[str] = None,
+        ghost_admin_key: Optional[str] = None,
     ):
         """
         Initialize the pipeline runner.
@@ -57,6 +60,8 @@ class PipelineRunner:
             model: Claude model to use
             proxy_url: Optional proxy URL for API calls
             proxy_secret: Optional proxy secret
+            ghost_url: Optional Ghost CMS URL for internal linking
+            ghost_admin_key: Optional Ghost Admin API key
         """
         # Initialize Anthropic client
         if proxy_url and proxy_secret:
@@ -73,6 +78,8 @@ class PipelineRunner:
         self.jina_api_key = jina_api_key
         self.dataforseo_login = dataforseo_login
         self.dataforseo_password = dataforseo_password
+        self.ghost_url = ghost_url
+        self.ghost_admin_key = ghost_admin_key
 
         # Initialize stages
         self.stages = [
@@ -88,6 +95,7 @@ class PipelineRunner:
             StructureStage(client=self.client, model=self.model),
             DraftingStage(client=self.client, model=self.model),
             EditingStage(client=self.client, model=self.model),
+            MetaStage(client=self.client, model=self.model),
         ]
 
     async def run(
@@ -129,6 +137,16 @@ class PipelineRunner:
         if config:
             pipeline_config.update(config)
 
+        # Fetch existing posts from Ghost for internal linking
+        existing_posts = []
+        if self.ghost_url and self.ghost_admin_key:
+            try:
+                from ...publisher import GhostPublisher
+                publisher = GhostPublisher(self.ghost_url, self.ghost_admin_key)
+                existing_posts = publisher.get_posts()
+            except Exception:
+                pass  # Graceful degradation
+
         # Initialize context
         context = WritingContext(
             topic=topic,
@@ -137,6 +155,7 @@ class PipelineRunner:
             save_intermediate=save_intermediate,
             started_at=datetime.now(),
             config=pipeline_config,
+            existing_posts=existing_posts,
         )
 
         # Run all stages
@@ -153,6 +172,7 @@ class PipelineRunner:
             title=context.outline.title,
             subtitle=context.outline.subtitle,
             word_count=len(context.edited_md.split()),
+            meta=context.meta,
             intent=context.intent,
             research=context.research,
             outline=context.outline,
