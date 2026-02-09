@@ -53,7 +53,7 @@ class DataForSEOSerpClient:
 
     BASE_URL = "https://api.dataforseo.com/v3"
 
-    def __init__(self, login: str, password: str, timeout: float = 60.0):
+    def __init__(self, login: str, password: str, timeout: float = 120.0):
         self.login = login
         self.password = password
         self.timeout = timeout
