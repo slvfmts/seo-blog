@@ -41,8 +41,17 @@ class StructureStage(WritingStage):
             intent_json = json.dumps(context.intent.to_dict(), ensure_ascii=False, indent=2)
             research_json = json.dumps(context.research.to_dict(), ensure_ascii=False, indent=2)
 
+            # Extract competitor analysis from research if available
+            if context.research.competitor_analysis:
+                competitor_json = json.dumps(
+                    context.research.competitor_analysis, ensure_ascii=False, indent=2
+                )
+            else:
+                competitor_json = "null"
+
             prompt = prompt_template.replace("{{intent_spec_json}}", intent_json)
             prompt = prompt.replace("{{research_pack_json}}", research_json)
+            prompt = prompt.replace("{{competitor_analysis_json}}", competitor_json)
 
             # Call LLM
             response_text, tokens = self._call_llm(

@@ -5,7 +5,7 @@ Each stage has a strictly defined contract for what it receives and produces.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Literal, Dict
+from typing import List, Optional, Literal, Dict, Any
 from datetime import datetime
 
 
@@ -368,6 +368,7 @@ class ResearchResult:
     pitfalls_and_myths: List[Pitfall]
     contradictions: List[Contradiction]
     coverage_map: List[CoverageItem]
+    competitor_analysis: Optional[Dict[str, Any]] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "ResearchResult":
@@ -474,6 +475,7 @@ class ResearchResult:
                 )
                 for cm in data.get("coverage_map", [])
             ],
+            competitor_analysis=data.get("competitor_analysis"),
         )
 
     def to_dict(self) -> dict:
@@ -580,6 +582,7 @@ class ResearchResult:
                 }
                 for cm in self.coverage_map
             ],
+            "competitor_analysis": self.competitor_analysis,
         }
 
 

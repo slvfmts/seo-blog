@@ -13,6 +13,9 @@
 3) keyword_metrics.json (опционально)
 {{keyword_metrics_json}}
 
+4) competitor_pages.json (предварительный анализ конкурентов из топа SERP)
+{{competitor_pages_json}}
+
 ВАЖНО: Формат входных данных
 — Каждый organic result может содержать поле `page_content` с полным
   markdown-текстом страницы (извлечённым через Jina Reader).
@@ -67,7 +70,13 @@ definition | rule | process | best_practice | risk | example | legal | pricing |
 5. Для каждого must_answer_question:
    — убедись, что есть достаточная фактура
    — зафиксируй покрытие в coverage_map
-6. Self-check:
+6. Если competitor_pages не null — проанализируй конкурентов из топа SERP:
+   — Определи формат контента каждой страницы (guide/listicle/faq/comparison/review/mixed)
+   — Определи уникальный угол каждой страницы (1 фраза)
+   — Выяви content_gaps: что НЕ покрыто ни одной из страниц в топе
+   — Сформулируй рекомендации по формату и объёму нашей статьи
+   — Запиши результат в секцию "competitor_analysis" выходного JSON
+7. Self-check:
    — нет ли неподтверждённых утверждений
    — нет ли выдуманных URL
    — покрыты ли все must_answer_questions
@@ -190,5 +199,21 @@ definition | rule | process | best_practice | risk | example | legal | pricing |
       "coverage_confidence": "high | medium | low",
       "missing_notes": "string or null"
     }
-  ]
+  ],
+
+  "competitor_analysis": {
+    "competitors": [
+      {
+        "url": "string",
+        "title": "string",
+        "position": "number",
+        "word_count": "number",
+        "content_format": "guide | listicle | faq | comparison | review | mixed",
+        "unique_angle": "string (1 sentence)"
+      }
+    ],
+    "content_gaps": ["string"],
+    "recommended_format": "string",
+    "recommended_word_count": "number"
+  }
 }

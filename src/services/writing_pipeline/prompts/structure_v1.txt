@@ -11,6 +11,9 @@
 2) research_pack.json
 {{research_pack_json}}
 
+3) competitor_analysis (из research_pack, если есть)
+{{competitor_analysis_json}}
+
 Ограничения:
 — не пиши текст статьи
 — не добавляй факты, которых нет в research_pack
@@ -38,10 +41,19 @@ explanation | list | steps | table | example | faq | warning
 — каждый content_block должен иметь goal (что он даёт читателю)
 — каждый content_block должен ссылаться на фактуру через source_refs (минимум 1 ссылка)
 
+Учёт конкурентного анализа:
+Если competitor_analysis доступен (не null):
+— target_total_words >= recommended_word_count конкурентов (не меньше среднего по топу)
+— common_headings подсказывают обязательные темы (не копируй заголовки дословно — покрой темы)
+— content_gaps — возможности для дифференциации, включи их в структуру
+— Учти recommended_format при выборе типов content_blocks
+
 Распределение объёма:
 — ориентируйся на intent_spec.word_count_range
 — вычисли общий целевой объём target_total_words:
    • возьми среднее между min и max и округли до ближайших 100
+   • если competitor_analysis доступен и recommended_word_count > этого среднего,
+     используй recommended_word_count (но не превышай word_count_range.max)
 — распределяй word_count_target по H2 и H3 так, чтобы:
    • сумма word_count_target по всем H2 (и их H3) ≈ target_total_words (допуск ±10%)
    • ни один H2 не меньше 250 слов

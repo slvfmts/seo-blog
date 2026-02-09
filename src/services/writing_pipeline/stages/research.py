@@ -13,6 +13,7 @@ This is a multi-step stage:
 import json
 import os
 import logging
+import re as re_module
 from typing import List, Dict, Any, Optional, Set
 
 from ..core.stage import WritingStage
@@ -132,6 +133,14 @@ class ResearchStage(WritingStage):
                     results_for_save = self._truncate_for_save(search_results)
                     json.dump(results_for_save, f, ensure_ascii=False, indent=2)
 
+            # Step 4.5: Analyze competitor pages from search results
+            competitor_pages = self._analyze_competitors(search_results)
+
+            if context.save_intermediate and context.output_dir:
+                output_path = os.path.join(context.output_dir, "03b_competitor_analysis.json")
+                with open(output_path, "w", encoding="utf-8") as f:
+                    json.dump(competitor_pages, f, ensure_ascii=False, indent=2)
+
             # Step 5: Fetch keyword metrics (if DataForSEO configured)
             if self._get_dataforseo():
                 keyword_metrics = await self._fetch_keyword_metrics(context)
@@ -142,8 +151,8 @@ class ResearchStage(WritingStage):
                     with open(output_path, "w", encoding="utf-8") as f:
                         json.dump(keyword_metrics.to_dict(), f, ensure_ascii=False, indent=2)
 
-            # Step 6: Pack facts
-            research, tokens = await self._pack_facts(context)
+            # Step 6: Pack facts (with competitor analysis)
+            research, tokens = await self._pack_facts(context, competitor_pages)
             context.research = research
             total_tokens += tokens
 
@@ -551,7 +560,109 @@ class ResearchStage(WritingStage):
 
         return results
 
-    async def _pack_facts(self, context: WritingContext) -> tuple[ResearchResult, int]:
+    def _analyze_competitors(self, search_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze competitor pages from search results.
+
+        Extracts structural metrics (headings, word counts) from organic results
+        that have page_content. Deduplicates by URL, keeping the best position.
+
+        Returns:
+            Dict with pages list and aggregate stats.
+        """
+        # Deduplicate organic results by URL, keep best position
+        seen: Dict[str, Dict[str, Any]] = {}
+        for result in search_results:
+            for i, org in enumerate(result.get("organic", [])):
+                url = org.get("link", "")
+                if not url:
+                    continue
+                position = org.get("position", i + 1)
+                if url not in seen or position < seen[url].get("position", 999):
+                    seen[url] = {
+                        "url": url,
+                        "title": org.get("title", ""),
+                        "position": position,
+                        "snippet": org.get("snippet", ""),
+                        "page_content": org.get("page_content"),
+                        "page_word_count": org.get("page_word_count"),
+                    }
+
+        # Sort by position
+        pages = sorted(seen.values(), key=lambda x: x.get("position", 999))
+
+        # Extract headings and compute stats for pages with content
+        analyzed_pages = []
+        word_counts = []
+
+        for page in pages[:10]:  # Top 10 unique URLs
+            entry = {
+                "url": page["url"],
+                "title": page["title"],
+                "position": page["position"],
+            }
+
+            content = page.get("page_content")
+            wc = page.get("page_word_count")
+
+            if content:
+                # Extract H2/H3 headings via regex
+                headings = re_module.findall(r'^(#{2,3})\s+(.+)$', content, re_module.MULTILINE)
+                entry["headings"] = [
+                    {"level": "h2" if h[0] == "##" else "h3", "text": h[1].strip()}
+                    for h in headings
+                ]
+                entry["word_count"] = wc or len(content.split())
+                word_counts.append(entry["word_count"])
+            else:
+                entry["headings"] = []
+                entry["word_count"] = wc or 0
+                if wc and wc > 0:
+                    word_counts.append(wc)
+
+            analyzed_pages.append(entry)
+
+        # Compute aggregate stats
+        stats: Dict[str, Any] = {}
+        if word_counts:
+            stats["avg_word_count"] = round(sum(word_counts) / len(word_counts))
+            stats["min_word_count"] = min(word_counts)
+            stats["max_word_count"] = max(word_counts)
+        else:
+            stats["avg_word_count"] = 0
+            stats["min_word_count"] = 0
+            stats["max_word_count"] = 0
+
+        # Find common headings (appear in 2+ pages)
+        heading_counts: Dict[str, int] = {}
+        for page in analyzed_pages:
+            seen_in_page = set()
+            for h in page.get("headings", []):
+                text_lower = h["text"].lower().strip()
+                if text_lower not in seen_in_page:
+                    heading_counts[text_lower] = heading_counts.get(text_lower, 0) + 1
+                    seen_in_page.add(text_lower)
+
+        common_headings = [
+            h for h, count in heading_counts.items() if count >= 2
+        ]
+        stats["common_headings"] = sorted(common_headings)
+
+        logger.info(
+            f"Competitor analysis: {len(analyzed_pages)} pages, "
+            f"avg {stats['avg_word_count']} words, "
+            f"{len(common_headings)} common headings"
+        )
+
+        return {
+            "pages": analyzed_pages,
+            "stats": stats,
+        }
+
+    async def _pack_facts(
+        self,
+        context: WritingContext,
+        competitor_pages: Optional[Dict[str, Any]] = None,
+    ) -> tuple[ResearchResult, int]:
         """Pack search results into structured research pack."""
         prompt_template = self._load_prompt("research_packer_v1")
 
@@ -570,6 +681,15 @@ class ResearchStage(WritingStage):
             )
         else:
             prompt = prompt.replace("{{keyword_metrics_json}}", "null")
+
+        # Add competitor pages analysis if available
+        if competitor_pages and competitor_pages.get("pages"):
+            prompt = prompt.replace(
+                "{{competitor_pages_json}}",
+                json.dumps(competitor_pages, ensure_ascii=False, indent=2),
+            )
+        else:
+            prompt = prompt.replace("{{competitor_pages_json}}", "null")
 
         response_text, tokens = self._call_llm(
             prompt,
