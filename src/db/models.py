@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import (
     Column, String, Text, Integer, Float, Boolean,
-    DateTime, ForeignKey, Enum, JSON
+    DateTime, ForeignKey, Enum, JSON, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
@@ -275,3 +275,24 @@ class ContentRoadmap(Base):
     # Relationships
     site = relationship("Site", back_populates="roadmap")
     cluster = relationship("Cluster", back_populates="roadmap_items")
+
+
+# ============ Internal Linking Models ============
+
+class ArticleKeyword(Base):
+    """Keyword-article mapping for internal linking."""
+    __tablename__ = "article_keywords"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    site_id = Column(String(255), nullable=True)
+    post_url = Column(Text, nullable=False)
+    post_title = Column(Text, nullable=False)
+    cms_post_id = Column(String(255), nullable=True)
+    content_md = Column(Text, nullable=True)
+    keyword = Column(Text, nullable=False)
+    keyword_type = Column(String(20), default="secondary")  # primary | secondary
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('post_url', 'keyword', name='uq_article_keyword'),
+    )

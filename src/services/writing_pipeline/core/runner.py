@@ -17,6 +17,7 @@ from ..stages import (
     StructureStage,
     DraftingStage,
     EditingStage,
+    LinkingStage,
     MetaStage,
 )
 
@@ -26,7 +27,7 @@ class PipelineRunner:
     Orchestrates the multi-stage article writing pipeline.
 
     Flow:
-    topic → Intent → Research → Structure → Drafting → Editing → article.md
+    topic -> Intent -> Research -> Structure -> Drafting -> Editing -> Linking -> Meta -> article.md
 
     Features:
     - Executes stages sequentially with shared context
@@ -47,6 +48,7 @@ class PipelineRunner:
         proxy_secret: Optional[str] = None,
         ghost_url: Optional[str] = None,
         ghost_admin_key: Optional[str] = None,
+        database_url: Optional[str] = None,
     ):
         """
         Initialize the pipeline runner.
@@ -62,6 +64,7 @@ class PipelineRunner:
             proxy_secret: Optional proxy secret
             ghost_url: Optional Ghost CMS URL for internal linking
             ghost_admin_key: Optional Ghost Admin API key
+            database_url: Optional database URL for keyword-based internal linking
         """
         # Initialize Anthropic client
         if proxy_url and proxy_secret:
@@ -80,6 +83,16 @@ class PipelineRunner:
         self.dataforseo_password = dataforseo_password
         self.ghost_url = ghost_url
         self.ghost_admin_key = ghost_admin_key
+        self.database_url = database_url
+
+        # Initialize internal linker if database_url is provided
+        self.linker = None
+        if database_url:
+            try:
+                from ...internal_linker import InternalLinker
+                self.linker = InternalLinker(database_url)
+            except Exception:
+                pass  # Graceful degradation
 
         # Initialize stages
         self.stages = [
@@ -95,6 +108,7 @@ class PipelineRunner:
             StructureStage(client=self.client, model=self.model),
             DraftingStage(client=self.client, model=self.model),
             EditingStage(client=self.client, model=self.model),
+            LinkingStage(client=self.client, model=self.model, linker=self.linker),
             MetaStage(client=self.client, model=self.model),
         ]
 
@@ -137,16 +151,6 @@ class PipelineRunner:
         if config:
             pipeline_config.update(config)
 
-        # Fetch existing posts from Ghost for internal linking
-        existing_posts = []
-        if self.ghost_url and self.ghost_admin_key:
-            try:
-                from ...publisher import GhostPublisher
-                publisher = GhostPublisher(self.ghost_url, self.ghost_admin_key)
-                existing_posts = publisher.get_posts()
-            except Exception:
-                pass  # Graceful degradation
-
         # Initialize context
         context = WritingContext(
             topic=topic,
@@ -155,7 +159,6 @@ class PipelineRunner:
             save_intermediate=save_intermediate,
             started_at=datetime.now(),
             config=pipeline_config,
-            existing_posts=existing_posts,
         )
 
         # Run all stages
@@ -163,6 +166,14 @@ class PipelineRunner:
             context = await stage.run(context)
 
         context.completed_at = datetime.now()
+
+        # Build linking data for post-publication registration
+        linking_data = None
+        if context.config.get("_article_keywords"):
+            linking_data = {
+                "keywords": context.config["_article_keywords"],
+                "content_md": context.edited_md,
+            }
 
         # Build final result
         result = PipelineResult(
@@ -173,6 +184,7 @@ class PipelineRunner:
             subtitle=context.outline.subtitle,
             word_count=len(context.edited_md.split()),
             meta=context.meta,
+            linking_data=linking_data,
             intent=context.intent,
             research=context.research,
             outline=context.outline,

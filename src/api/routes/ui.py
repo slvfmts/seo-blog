@@ -590,7 +590,7 @@ async def approve_draft(request: Request, draft_id: UUID, db: Session = Depends(
 
 @router.post("/drafts/{draft_id}/publish", response_class=HTMLResponse)
 async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(get_db)):
-    """Publish draft to Ghost."""
+    """Publish draft to Ghost, register for internal linking, run backward linking."""
     from src.services.publisher import GhostPublisher
     settings = get_settings()
 
@@ -615,7 +615,55 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
             draft.status = "published"
             draft.cms_post_id = result["post"]["id"]
             db.commit()
-    except Exception as e:
+
+            # Register article in internal linker DB + run backward linking
+            try:
+                from src.services.internal_linker import InternalLinker
+                import anthropic
+
+                if settings.database_url:
+                    linker = InternalLinker(settings.database_url)
+                    published_url = result["post"]["url"]
+
+                    # Build keywords list: [(keyword, type)]
+                    keywords = []
+                    if draft.keywords:
+                        for i, kw in enumerate(draft.keywords):
+                            kw_type = "primary" if i == 0 else "secondary"
+                            keywords.append((kw.lower().strip(), kw_type))
+                    elif draft.topic:
+                        keywords.append((draft.topic.lower().strip(), "primary"))
+
+                    # Register article
+                    linker.register_article(
+                        post_url=published_url,
+                        title=draft.title,
+                        cms_post_id=result["post"]["id"],
+                        content_md=draft.content_md,
+                        keywords=keywords,
+                    )
+
+                    # Backward linking (update old articles)
+                    if settings.anthropic_api_key and keywords:
+                        client = anthropic.Anthropic(
+                            api_key=settings.anthropic_api_key,
+                            **({"base_url": settings.anthropic_proxy_url,
+                                "default_headers": {"x-proxy-token": settings.anthropic_proxy_secret}}
+                               if settings.anthropic_proxy_url and settings.anthropic_proxy_secret
+                               else {}),
+                        )
+                        await linker.update_backlinks(
+                            new_url=published_url,
+                            new_title=draft.title,
+                            new_keywords=[kw for kw, _ in keywords],
+                            llm_client=client,
+                            model="claude-sonnet-4-20250514",
+                            ghost_publisher=publisher,
+                        )
+            except Exception:
+                pass  # Graceful degradation — publish succeeds even if linking fails
+
+    except Exception:
         pass  # Handle error silently for now
 
     return RedirectResponse(url=f"/ui/drafts/{draft_id}", status_code=303)
@@ -646,6 +694,7 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str):
             "structure": "pending",
             "drafting": "pending",
             "editing": "pending",
+            "linking": "pending",
             "meta": "pending",
         }
         db.commit()
@@ -661,6 +710,7 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str):
             proxy_secret=settings.anthropic_proxy_secret or None,
             ghost_url=settings.ghost_url or None,
             ghost_admin_key=settings.ghost_admin_key or None,
+            database_url=settings.database_url or None,
         )
 
         # Run pipeline (need to run async in sync context)
@@ -693,6 +743,7 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str):
             "structure": "completed",
             "drafting": "completed",
             "editing": "completed",
+            "linking": "completed",
             "meta": "completed",
         }
 
@@ -712,6 +763,10 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str):
                 }
                 for s in result.research.sources
             ]
+
+        # Store linking keywords for post-publish registration
+        if result.linking_data and result.linking_data.get("keywords"):
+            draft.keywords = [kw for kw, _ in result.linking_data["keywords"]]
 
         db.commit()
 
@@ -777,6 +832,7 @@ async def create_pipeline(
                 "structure": "pending",
                 "drafting": "pending",
                 "editing": "pending",
+                "linking": "pending",
                 "meta": "pending",
             },
         )

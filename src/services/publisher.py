@@ -120,6 +120,84 @@ class GhostPublisher:
 
         return all_posts
 
+    def get_post(self, post_id: str) -> dict | None:
+        """
+        Fetch single post by Ghost ID.
+
+        Returns: {id, title, url, slug, mobiledoc, updated_at} or None.
+        """
+        token = self._create_jwt_token()
+        headers = {
+            "Authorization": f"Ghost {token}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.get(
+                    f"{self.ghost_url}/ghost/api/admin/posts/{post_id}/",
+                    headers=headers,
+                    params={
+                        "fields": "id,title,url,slug,updated_at",
+                        "formats": "mobiledoc",
+                    },
+                )
+
+                if response.status_code == 200:
+                    post = response.json()["posts"][0]
+                    return {
+                        "id": post["id"],
+                        "title": post.get("title", ""),
+                        "url": post.get("url", ""),
+                        "slug": post.get("slug", ""),
+                        "mobiledoc": post.get("mobiledoc", ""),
+                        "updated_at": post.get("updated_at", ""),
+                    }
+
+        except Exception:
+            pass
+
+        return None
+
+    def update_post(self, post_id: str, content_md: str, updated_at: str) -> dict:
+        """
+        Update Ghost post content.
+
+        Ghost requires updated_at for conflict detection.
+        """
+        token = self._create_jwt_token()
+        headers = {
+            "Authorization": f"Ghost {token}",
+            "Content-Type": "application/json",
+        }
+
+        post_data = {
+            "posts": [{
+                "mobiledoc": self._markdown_to_mobiledoc(content_md),
+                "updated_at": updated_at,
+            }]
+        }
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.put(
+                    f"{self.ghost_url}/ghost/api/admin/posts/{post_id}/",
+                    headers=headers,
+                    json=post_data,
+                )
+
+            if response.status_code == 200:
+                return {"success": True}
+            else:
+                return {
+                    "success": False,
+                    "error": response.text,
+                    "status_code": response.status_code,
+                }
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def publish(
         self,
         title: str,

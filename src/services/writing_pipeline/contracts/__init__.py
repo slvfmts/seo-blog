@@ -854,6 +854,9 @@ class PipelineResult:
     outline: OutlineResult = None
     draft_md: str = ""
 
+    # Internal linking data (for post-publication registration)
+    linking_data: Optional[Dict[str, Any]] = None
+
     # Metadata
     started_at: str = ""
     completed_at: str = ""
@@ -868,6 +871,7 @@ class PipelineResult:
             "title": self.title,
             "subtitle": self.subtitle,
             "word_count": self.word_count,
+            "linking_data": self.linking_data,
             "meta": self.meta.to_dict() if self.meta else None,
             "intent": self.intent.to_dict() if self.intent else None,
             "research": self.research.to_dict() if self.research else None,
