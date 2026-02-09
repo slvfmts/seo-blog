@@ -21,6 +21,7 @@ from src.services.brief_generator import BriefGenerator
 from src.services.generator import ArticleGenerator
 from src.services.discovery import DiscoveryAgent
 from src.services.writing_pipeline import PipelineRunner
+from src.services.monitoring.position_tracker import PositionTracker
 from src.config import get_settings
 
 router = APIRouter()
@@ -614,6 +615,30 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
         if result["success"]:
             draft.status = "published"
             draft.cms_post_id = result["post"]["id"]
+
+            # Create Post record
+            post = models.Post(
+                site_id=draft.site_id,
+                draft_id=draft.id,
+                title=draft.title,
+                slug=draft.slug,
+                url=result["post"].get("url", ""),
+                cms_post_id=result["post"]["id"],
+                status="live",
+                published_at=datetime.utcnow(),
+            )
+            db.add(post)
+            db.flush()
+
+            # Link keyword → post for monitoring
+            if draft.brief_id:
+                brief = db.query(models.Brief).filter(models.Brief.id == draft.brief_id).first()
+                if brief and brief.keyword_id:
+                    keyword = db.query(models.Keyword).filter(models.Keyword.id == brief.keyword_id).first()
+                    if keyword:
+                        keyword.post_id = post.id
+                        keyword.status = "targeted"
+
             db.commit()
 
             # Register article in internal linker DB + run backward linking
@@ -862,3 +887,251 @@ async def create_pipeline(
             "region": region,
             "depth": depth,
         })
+
+
+# ============ Monitoring Pages ============
+
+@router.get("/monitoring", response_class=HTMLResponse)
+async def monitoring_dashboard(
+    request: Request,
+    site_id: UUID = None,
+    db: Session = Depends(get_db),
+):
+    """Position monitoring dashboard."""
+    sites = db.query(models.Site).filter(
+        models.Site.status == "active",
+    ).order_by(models.Site.created_at.desc()).all()
+
+    site = None
+    rankings = []
+    summary = {"total_tracked": 0, "in_top_3": 0, "in_top_10": 0, "in_top_20": 0, "not_ranking": 0, "avg_position": None, "alerts": 0}
+
+    if site_id:
+        site = db.query(models.Site).filter(models.Site.id == site_id).first()
+    elif sites:
+        site = sites[0]
+
+    if site:
+        # Get tracked keywords with latest ranking info
+        keywords = db.query(models.Keyword).filter(
+            models.Keyword.site_id == site.id,
+            models.Keyword.status.in_(["targeted", "achieved"]),
+        ).order_by(models.Keyword.current_position.asc().nullslast()).all()
+
+        for kw in keywords:
+            # Get latest ranking
+            latest = db.query(models.KeywordRanking).filter(
+                models.KeywordRanking.keyword_id == kw.id,
+            ).order_by(models.KeywordRanking.date.desc()).first()
+
+            # Get 7-day-ago ranking for change calculation
+            from datetime import timedelta, date as date_type
+            week_ago = datetime.utcnow() - timedelta(days=7)
+            old_ranking = db.query(models.KeywordRanking).filter(
+                models.KeywordRanking.keyword_id == kw.id,
+                models.KeywordRanking.date <= week_ago,
+            ).order_by(models.KeywordRanking.date.desc()).first()
+
+            change = None
+            if latest and old_ranking and latest.position is not None and old_ranking.position is not None:
+                change = latest.position - old_ranking.position  # positive = dropped
+
+            # Get post title
+            post_title = None
+            if kw.post_id:
+                post = db.query(models.Post).filter(models.Post.id == kw.post_id).first()
+                if post:
+                    post_title = post.title
+
+            rankings.append({
+                "keyword_id": str(kw.id),
+                "keyword": kw.keyword,
+                "position": kw.current_position,
+                "change": change,
+                "post_title": post_title,
+                "last_checked": latest.checked_at if latest else None,
+            })
+
+        # Summary
+        total = len(keywords)
+        in_top_3 = sum(1 for kw in keywords if kw.current_position and kw.current_position <= 3)
+        in_top_10 = sum(1 for kw in keywords if kw.current_position and kw.current_position <= 10)
+        in_top_20 = sum(1 for kw in keywords if kw.current_position and kw.current_position <= 20)
+        not_ranking = sum(1 for kw in keywords if kw.current_position is None)
+        positions = [kw.current_position for kw in keywords if kw.current_position is not None]
+        avg_pos = round(sum(positions) / len(positions), 1) if positions else None
+
+        alert_count = db.query(models.IterationTask).filter(
+            models.IterationTask.status == "pending",
+            models.IterationTask.post_id.in_(
+                db.query(models.Post.id).filter(models.Post.site_id == site.id)
+            ),
+        ).count()
+
+        summary = {
+            "total_tracked": total,
+            "in_top_3": in_top_3,
+            "in_top_10": in_top_10,
+            "in_top_20": in_top_20,
+            "not_ranking": not_ranking,
+            "avg_position": avg_pos,
+            "alerts": alert_count,
+        }
+
+    return templates.TemplateResponse("monitoring/dashboard.html", {
+        "request": request,
+        "sites": sites,
+        "site": site,
+        "rankings": rankings,
+        "summary": summary,
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+    })
+
+
+@router.post("/monitoring/check", response_class=HTMLResponse)
+async def trigger_monitoring_check(
+    request: Request,
+    site_id: UUID = None,
+    db: Session = Depends(get_db),
+):
+    """Manually trigger position check."""
+    settings = get_settings()
+
+    if not site_id:
+        return RedirectResponse(url="/ui/monitoring?error=No site selected", status_code=303)
+
+    if not settings.dataforseo_login or not settings.dataforseo_password:
+        return RedirectResponse(
+            url=f"/ui/monitoring?site_id={site_id}&error=DataForSEO credentials not configured",
+            status_code=303,
+        )
+
+    site = db.query(models.Site).filter(models.Site.id == site_id).first()
+    if not site or not site.domain:
+        return RedirectResponse(
+            url=f"/ui/monitoring?site_id={site_id}&error=Site not found or no domain configured",
+            status_code=303,
+        )
+
+    try:
+        tracker = PositionTracker(
+            db_session_factory=SessionLocal,
+            dataforseo_login=settings.dataforseo_login,
+            dataforseo_password=settings.dataforseo_password,
+        )
+
+        summary = await tracker.run_daily_check(site_id)
+        signals = await tracker.detect_decay(site_id)
+
+        msg = f"Checked {summary.get('checked', 0)} keywords"
+        if summary.get('found'):
+            msg += f", {summary['found']} found in SERP"
+        if summary.get('errors'):
+            msg += f", {summary['errors']} errors"
+        if signals:
+            msg += f", {len(signals)} decay signals detected"
+
+        return RedirectResponse(
+            url=f"/ui/monitoring?site_id={site_id}&success={msg}",
+            status_code=303,
+        )
+
+    except Exception as e:
+        return RedirectResponse(
+            url=f"/ui/monitoring?site_id={site_id}&error={str(e)}",
+            status_code=303,
+        )
+
+
+@router.get("/monitoring/keyword/{keyword_id}", response_class=HTMLResponse)
+async def keyword_history_page(
+    request: Request,
+    keyword_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Show position history for a keyword."""
+    keyword = db.query(models.Keyword).filter(models.Keyword.id == keyword_id).first()
+    if not keyword:
+        raise HTTPException(status_code=404, detail="Keyword not found")
+
+    rankings = db.query(models.KeywordRanking).filter(
+        models.KeywordRanking.keyword_id == keyword_id,
+    ).order_by(models.KeywordRanking.date.desc()).limit(90).all()
+
+    # Build history with change calculation
+    history = []
+    for i, r in enumerate(rankings):
+        change = None
+        if i + 1 < len(rankings) and r.position is not None and rankings[i + 1].position is not None:
+            change = r.position - rankings[i + 1].position
+
+        history.append({
+            "date": r.date.strftime("%Y-%m-%d"),
+            "position": r.position,
+            "change": change,
+            "url": r.url,
+            "serp_features": r.serp_features or [],
+        })
+
+    post_title = None
+    if keyword.post_id:
+        post = db.query(models.Post).filter(models.Post.id == keyword.post_id).first()
+        if post:
+            post_title = post.title
+
+    return templates.TemplateResponse("monitoring/history.html", {
+        "request": request,
+        "keyword": keyword.keyword,
+        "keyword_id": str(keyword.id),
+        "site_id": str(keyword.site_id),
+        "current_position": keyword.current_position,
+        "post_title": post_title,
+        "history": history,
+    })
+
+
+# ============ Iterations Pages ============
+
+@router.get("/iterations", response_class=HTMLResponse)
+async def iterations_list(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """List content iteration tasks."""
+    tasks = db.query(models.IterationTask).order_by(
+        models.IterationTask.priority.asc(),
+        models.IterationTask.created_at.desc(),
+    ).all()
+
+    # Eager-load posts
+    for task in tasks:
+        task.post = db.query(models.Post).filter(models.Post.id == task.post_id).first()
+
+    return templates.TemplateResponse("iterations/list.html", {
+        "request": request,
+        "tasks": tasks,
+        "success": request.query_params.get("success"),
+    })
+
+
+@router.post("/iterations/{task_id}/skip", response_class=HTMLResponse)
+async def skip_iteration_task(
+    request: Request,
+    task_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Skip an iteration task."""
+    task = db.query(models.IterationTask).filter(models.IterationTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status in ("pending", "in_progress"):
+        task.status = "skipped"
+        task.completed_at = datetime.utcnow()
+        db.commit()
+
+    return RedirectResponse(
+        url="/ui/iterations?success=Task skipped",
+        status_code=303,
+    )

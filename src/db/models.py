@@ -155,6 +155,10 @@ class Post(Base):
 
     # Relationships
     site = relationship("Site", back_populates="posts")
+    keywords = relationship("Keyword", back_populates="post")
+    rankings = relationship("KeywordRanking", back_populates="post")
+    metrics = relationship("PostMetric", back_populates="post")
+    iteration_tasks = relationship("IterationTask", back_populates="post")
 
 
 # ============ Discovery Pipeline Models ============
@@ -202,6 +206,7 @@ class Keyword(Base):
     # Связи
     competitor_id = Column(UUID(as_uuid=True), ForeignKey("competitors.id"), nullable=True)
     cluster_id = Column(UUID(as_uuid=True), ForeignKey("clusters.id"), nullable=True)
+    post_id = Column(UUID(as_uuid=True), ForeignKey("posts.id"), nullable=True)
 
     status = Column(String(50), default="new")  # new | clustered | targeted | achieved | abandoned
 
@@ -213,6 +218,8 @@ class Keyword(Base):
     source_competitor = relationship("Competitor", back_populates="keywords")
     cluster = relationship("Cluster", back_populates="keywords")
     briefs = relationship("Brief", back_populates="keyword")
+    post = relationship("Post", back_populates="keywords")
+    rankings = relationship("KeywordRanking", back_populates="keyword", order_by="KeywordRanking.date.desc()")
 
 
 class Cluster(Base):
@@ -296,3 +303,73 @@ class ArticleKeyword(Base):
     __table_args__ = (
         UniqueConstraint('post_url', 'keyword', name='uq_article_keyword'),
     )
+
+
+# ============ Monitoring & Iteration Models ============
+
+class KeywordRanking(Base):
+    """Ежедневный снимок позиции keyword в SERP."""
+    __tablename__ = "keyword_rankings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    keyword_id = Column(UUID(as_uuid=True), ForeignKey("keywords.id"), nullable=False)
+    post_id = Column(UUID(as_uuid=True), ForeignKey("posts.id"), nullable=True)
+
+    date = Column(DateTime, nullable=False)
+    position = Column(Integer, nullable=True)  # None = не в топ-100
+    url = Column(Text, nullable=True)  # какой URL ранжируется
+    serp_features = Column(JSON)  # ["featured_snippet", "paa", ...]
+    checked_at = Column(DateTime, default=datetime.utcnow)
+    source = Column(String(50), default="dataforseo")  # dataforseo | manual
+
+    # Relationships
+    keyword = relationship("Keyword", back_populates="rankings")
+    post = relationship("Post", back_populates="rankings")
+
+    __table_args__ = (
+        UniqueConstraint('keyword_id', 'date', name='uq_keyword_date'),
+    )
+
+
+class PostMetric(Base):
+    """Метрики поста (подготовка для GSC/GA4)."""
+    __tablename__ = "post_metrics"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    post_id = Column(UUID(as_uuid=True), ForeignKey("posts.id"), nullable=False)
+
+    date = Column(DateTime, nullable=False)
+    impressions = Column(Integer)
+    clicks = Column(Integer)
+    ctr = Column(Float)
+    avg_position = Column(Float)
+    sessions = Column(Integer)
+    bounce_rate = Column(Float)
+    top_queries = Column(JSON)  # [{query, impressions, clicks, position}]
+    source = Column(String(50), default="gsc")  # gsc | ga4 | manual
+
+    # Relationships
+    post = relationship("Post", back_populates="metrics")
+
+    __table_args__ = (
+        UniqueConstraint('post_id', 'date', 'source', name='uq_post_date_source'),
+    )
+
+
+class IterationTask(Base):
+    """Задача на обновление контента."""
+    __tablename__ = "iteration_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    post_id = Column(UUID(as_uuid=True), ForeignKey("posts.id"), nullable=False)
+
+    trigger_type = Column(String(50), nullable=False)  # decay | freshness | opportunity | manual
+    trigger_data = Column(JSON)  # детали триггера
+    priority = Column(Integer, default=5)  # 1 = highest
+    status = Column(String(50), default="pending")  # pending | in_progress | completed | skipped
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime)
+
+    # Relationships
+    post = relationship("Post", back_populates="iteration_tasks")

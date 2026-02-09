@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from src.config import get_settings
-from src.api.routes import health, sites, articles, briefs, ui, discovery
+from src.api.routes import health, sites, articles, briefs, ui, discovery, monitoring, iterations
 
 
 @asynccontextmanager
@@ -17,8 +17,34 @@ async def lifespan(app: FastAPI):
     # Startup
     settings = get_settings()
     print(f"Starting SEO Blog API (debug={settings.debug})")
+
+    # Start monitoring scheduler if DataForSEO credentials are configured
+    scheduler = None
+    if settings.dataforseo_login and settings.dataforseo_password:
+        from src.db.session import SessionLocal
+        from src.services.monitoring.position_tracker import PositionTracker
+        from src.services.monitoring.scheduler import MonitoringScheduler
+
+        tracker = PositionTracker(
+            db_session_factory=SessionLocal,
+            dataforseo_login=settings.dataforseo_login,
+            dataforseo_password=settings.dataforseo_password,
+        )
+        scheduler = MonitoringScheduler(
+            position_tracker=tracker,
+            db_session_factory=SessionLocal,
+            run_hour=6,  # 6 UTC = 9 MSK
+        )
+        await scheduler.start()
+        print("Monitoring scheduler started (daily at 06:00 UTC)")
+    else:
+        print("Monitoring scheduler skipped (DataForSEO credentials not configured)")
+
     yield
+
     # Shutdown
+    if scheduler:
+        await scheduler.stop()
     print("Shutting down SEO Blog API")
 
 
@@ -49,6 +75,8 @@ def create_app() -> FastAPI:
     app.include_router(articles.router, prefix="/api/v1/articles", tags=["articles"])
     app.include_router(briefs.router, prefix="/api/v1/briefs", tags=["briefs"])
     app.include_router(discovery.router, prefix="/api/v1/discovery", tags=["discovery"])
+    app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"])
+    app.include_router(iterations.router, prefix="/api/v1/iterations", tags=["iterations"])
 
     # UI Роуты
     app.include_router(ui.router, prefix="/ui", tags=["ui"])

@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}{{ keyword }} — Position History{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <a href="/ui/monitoring{% if site_id %}?site_id={{ site_id }}{% endif %}" class="text-blue-600 hover:text-blue-800 text-sm">&larr; Back to Dashboard</a>
+    <h1 class="text-2xl font-bold text-gray-900 mt-2">{{ keyword }}</h1>
+    <p class="text-gray-500 mt-1">
+        Current position:
+        {% if current_position %}
+            <span class="font-medium">#{{ current_position }}</span>
+        {% else %}
+            <span class="text-red-500">Not ranked</span>
+        {% endif %}
+        {% if post_title %}
+            | Post: <span class="font-medium">{{ post_title }}</span>
+        {% endif %}
+    </p>
+</div>
+
+<!-- Visual Chart (CSS-only bar chart) -->
+{% if history %}
+<div class="bg-white shadow rounded-lg p-6 mb-6">
+    <h2 class="text-lg font-medium text-gray-900 mb-4">Position Trend</h2>
+    <div class="flex items-end space-x-1" style="height: 200px;">
+        {% for h in history|reverse %}
+        <div class="flex flex-col items-center flex-1" title="{{ h.date }}: #{{ h.position if h.position else 'N/A' }}">
+            {% if h.position %}
+                {% set bar_height = ((101 - h.position) / 100 * 180)|int %}
+                {% if h.position <= 3 %}
+                    {% set color = 'bg-green-500' %}
+                {% elif h.position <= 10 %}
+                    {% set color = 'bg-blue-500' %}
+                {% elif h.position <= 20 %}
+                    {% set color = 'bg-yellow-500' %}
+                {% else %}
+                    {% set color = 'bg-gray-400' %}
+                {% endif %}
+                <div class="text-xs text-gray-500 mb-1">{{ h.position }}</div>
+                <div class="{{ color }} rounded-t w-full" style="height: {{ bar_height }}px; min-height: 4px;"></div>
+            {% else %}
+                <div class="text-xs text-red-400 mb-1">—</div>
+                <div class="bg-red-200 rounded-t w-full" style="height: 4px;"></div>
+            {% endif %}
+            <div class="text-xs text-gray-400 mt-1 truncate w-full text-center">{{ h.date[-5:] }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- History Table -->
+<div class="bg-white shadow rounded-lg overflow-hidden">
+    <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Position</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Change</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">URL</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">SERP Features</th>
+            </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+            {% for h in history %}
+            <tr>
+                <td class="px-6 py-3 text-sm text-gray-900">{{ h.date }}</td>
+                <td class="px-6 py-3 text-sm">
+                    {% if h.position is none %}
+                        <span class="text-red-500">Not ranked</span>
+                    {% elif h.position <= 3 %}
+                        <span class="text-green-600 font-bold">#{{ h.position }}</span>
+                    {% elif h.position <= 10 %}
+                        <span class="text-blue-600 font-medium">#{{ h.position }}</span>
+                    {% elif h.position <= 20 %}
+                        <span class="text-yellow-600">#{{ h.position }}</span>
+                    {% else %}
+                        <span class="text-gray-600">#{{ h.position }}</span>
+                    {% endif %}
+                </td>
+                <td class="px-6 py-3 text-sm">
+                    {% if h.change is not none %}
+                        {% if h.change < 0 %}
+                            <span class="text-green-600">&uarr;{{ h.change|abs }}</span>
+                        {% elif h.change > 0 %}
+                            <span class="text-red-600">&darr;{{ h.change }}</span>
+                        {% else %}
+                            <span class="text-gray-400">=</span>
+                        {% endif %}
+                    {% else %}
+                        <span class="text-gray-300">—</span>
+                    {% endif %}
+                </td>
+                <td class="px-6 py-3 text-sm text-gray-500">
+                    {% if h.url %}
+                        <a href="{{ h.url }}" target="_blank" class="text-blue-600 hover:underline truncate block max-w-xs">{{ h.url[:60] }}{% if h.url|length > 60 %}...{% endif %}</a>
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td class="px-6 py-3 text-sm text-gray-500">
+                    {% if h.serp_features %}
+                        {% for f in h.serp_features %}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600 mr-1">{{ f }}</span>
+                        {% endfor %}
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not history %}
+            <tr>
+                <td colspan="5" class="px-6 py-8 text-center text-gray-500">
+                    No ranking data yet. Run a position check first.
+                </td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

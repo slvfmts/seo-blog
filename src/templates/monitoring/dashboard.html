@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}Monitoring — SEO Blog{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold text-gray-900">Position Monitoring</h1>
+        <div class="flex items-center space-x-3">
+            {% if sites %}
+            <form method="get" action="/ui/monitoring" class="flex items-center space-x-2">
+                <select name="site_id" class="rounded-md border-gray-300 text-sm px-3 py-2 border">
+                    {% for s in sites %}
+                    <option value="{{ s.id }}" {% if site and s.id == site.id %}selected{% endif %}>{{ s.name }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2 rounded-md text-sm">
+                    Switch
+                </button>
+            </form>
+            {% endif %}
+            {% if site %}
+            <form method="post" action="/ui/monitoring/check?site_id={{ site.id }}">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                    Run Check Now
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% if error %}
+<div class="bg-red-50 border border-red-200 rounded-md p-4 mb-6">
+    <p class="text-red-800 text-sm">{{ error }}</p>
+</div>
+{% endif %}
+
+{% if success %}
+<div class="bg-green-50 border border-green-200 rounded-md p-4 mb-6">
+    <p class="text-green-800 text-sm">{{ success }}</p>
+</div>
+{% endif %}
+
+{% if not site %}
+<div class="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+    <p class="text-yellow-800">No active sites with domains configured. <a href="/ui/topics" class="underline">Create a topic</a> first.</p>
+</div>
+{% else %}
+
+<!-- Summary Cards -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white rounded-lg shadow p-4">
+        <p class="text-sm text-gray-500">Total Tracked</p>
+        <p class="text-2xl font-bold text-gray-900">{{ summary.total_tracked }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <p class="text-sm text-gray-500">Avg Position</p>
+        <p class="text-2xl font-bold text-gray-900">{{ summary.avg_position if summary.avg_position else '—' }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <p class="text-sm text-gray-500">In Top 10</p>
+        <p class="text-2xl font-bold text-green-600">{{ summary.in_top_10 }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <p class="text-sm text-gray-500">Decay Alerts</p>
+        <p class="text-2xl font-bold {% if summary.alerts > 0 %}text-red-600{% else %}text-gray-400{% endif %}">{{ summary.alerts }}</p>
+    </div>
+</div>
+
+<!-- Rankings Table -->
+<div class="bg-white shadow rounded-lg overflow-hidden">
+    <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Keyword</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Position</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">7d Change</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Post</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Checked</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">History</th>
+            </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+            {% for item in rankings %}
+            <tr>
+                <td class="px-6 py-4 text-sm font-medium text-gray-900">{{ item.keyword }}</td>
+                <td class="px-6 py-4 text-sm">
+                    {% if item.position is none %}
+                        <span class="text-red-500 font-medium">Not ranked</span>
+                    {% elif item.position <= 3 %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">#{{ item.position }}</span>
+                    {% elif item.position <= 10 %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">#{{ item.position }}</span>
+                    {% elif item.position <= 20 %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">#{{ item.position }}</span>
+                    {% else %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">#{{ item.position }}</span>
+                    {% endif %}
+                </td>
+                <td class="px-6 py-4 text-sm">
+                    {% if item.change is not none %}
+                        {% if item.change < 0 %}
+                            <span class="text-green-600 font-medium">&uarr;{{ item.change|abs }}</span>
+                        {% elif item.change > 0 %}
+                            <span class="text-red-600 font-medium">&darr;{{ item.change }}</span>
+                        {% else %}
+                            <span class="text-gray-400">=</span>
+                        {% endif %}
+                    {% else %}
+                        <span class="text-gray-300">—</span>
+                    {% endif %}
+                </td>
+                <td class="px-6 py-4 text-sm text-gray-500">
+                    {% if item.post_title %}
+                        <span title="{{ item.post_title }}">{{ item.post_title[:40] }}{% if item.post_title|length > 40 %}...{% endif %}</span>
+                    {% else %}
+                        <span class="text-gray-300">—</span>
+                    {% endif %}
+                </td>
+                <td class="px-6 py-4 text-sm text-gray-500">
+                    {{ item.last_checked.strftime('%Y-%m-%d') if item.last_checked else '—' }}
+                </td>
+                <td class="px-6 py-4 text-sm">
+                    <a href="/ui/monitoring/keyword/{{ item.keyword_id }}" class="text-blue-600 hover:text-blue-800">View</a>
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not rankings %}
+            <tr>
+                <td colspan="6" class="px-6 py-8 text-center text-gray-500">
+                    No tracked keywords yet. Keywords get tracked when articles are published.
+                </td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+{% endif %}
+{% endblock %}
