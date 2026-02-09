@@ -69,6 +69,11 @@ async def main():
         default=5,
         help="Max pages to fetch content from (default: 5)"
     )
+    parser.add_argument(
+        "--no-playwright",
+        action="store_true",
+        help="Disable Playwright headless browser fallback"
+    )
 
     args = parser.parse_args()
 
@@ -104,6 +109,7 @@ async def main():
     print(f"DataForSEO: {'yes' if dataforseo_login else 'no'}")
     print(f"PAA expansion: {'yes' if not args.no_paa else 'no'}")
     print(f"Content fetch: {'yes' if not args.no_content_fetch else 'no'}")
+    print(f"Playwright: {'yes' if not args.no_playwright else 'no'}")
     print(f"Max pages: {args.max_pages}")
     print(f"Internal linking DB: {'yes' if database_url else 'no'}")
     print(f"Ghost CMS: {'yes' if ghost_url else 'no'}")
@@ -130,6 +136,7 @@ async def main():
         "fetch_page_content": not args.no_content_fetch,
         "max_pages_to_fetch": args.max_pages,
         "max_paa_queries": 3,
+        "use_playwright": not args.no_playwright,
     }
 
     print("Starting pipeline...")

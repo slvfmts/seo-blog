@@ -369,6 +369,8 @@ class ResearchResult:
     contradictions: List[Contradiction]
     coverage_map: List[CoverageItem]
     competitor_analysis: Optional[Dict[str, Any]] = None
+    eeat_signals: Optional[Dict[str, Any]] = None
+    keyword_clusters: Optional["KeywordClusteringResult"] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "ResearchResult":
@@ -476,6 +478,8 @@ class ResearchResult:
                 for cm in data.get("coverage_map", [])
             ],
             competitor_analysis=data.get("competitor_analysis"),
+            eeat_signals=data.get("eeat_signals"),
+            keyword_clusters=KeywordClusteringResult.from_dict(data["keyword_clusters"]) if data.get("keyword_clusters") else None,
         )
 
     def to_dict(self) -> dict:
@@ -583,7 +587,68 @@ class ResearchResult:
                 for cm in self.coverage_map
             ],
             "competitor_analysis": self.competitor_analysis,
+            "eeat_signals": self.eeat_signals,
+            "keyword_clusters": self.keyword_clusters.to_dict() if self.keyword_clusters else None,
         }
+
+
+# =============================================================================
+# Keyword Clustering Contract
+# =============================================================================
+
+@dataclass
+class KeywordCluster:
+    """A cluster of semantically related keywords."""
+    cluster_name: str
+    cluster_intent: str
+    primary_keyword: str
+    keywords: List[str]
+    total_volume: int  # 0 if metrics unavailable
+    suggested_section_topic: str
+
+    def to_dict(self) -> dict:
+        return {
+            "cluster_name": self.cluster_name,
+            "cluster_intent": self.cluster_intent,
+            "primary_keyword": self.primary_keyword,
+            "keywords": self.keywords,
+            "total_volume": self.total_volume,
+            "suggested_section_topic": self.suggested_section_topic,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "KeywordCluster":
+        return cls(
+            cluster_name=data["cluster_name"],
+            cluster_intent=data["cluster_intent"],
+            primary_keyword=data["primary_keyword"],
+            keywords=data["keywords"],
+            total_volume=data.get("total_volume", 0),
+            suggested_section_topic=data["suggested_section_topic"],
+        )
+
+
+@dataclass
+class KeywordClusteringResult:
+    """Result of keyword clustering sub-stage."""
+    primary_cluster: KeywordCluster
+    secondary_clusters: List[KeywordCluster]
+    unclustered: List[str]
+
+    def to_dict(self) -> dict:
+        return {
+            "primary_cluster": self.primary_cluster.to_dict(),
+            "secondary_clusters": [c.to_dict() for c in self.secondary_clusters],
+            "unclustered": self.unclustered,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "KeywordClusteringResult":
+        return cls(
+            primary_cluster=KeywordCluster.from_dict(data["primary_cluster"]),
+            secondary_clusters=[KeywordCluster.from_dict(c) for c in data.get("secondary_clusters", [])],
+            unclustered=data.get("unclustered", []),
+        )
 
 
 # =============================================================================
@@ -669,6 +734,7 @@ class OutlineResult:
     sections: List[Section]
     conclusion: Conclusion
     coverage_check: CoverageCheck
+    eeat_plan: Optional[List[Dict[str, Any]]] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "OutlineResult":
@@ -730,6 +796,7 @@ class OutlineResult:
                 uncovered_questions=data["coverage_check"].get("uncovered_questions", []),
                 missing_notes=data["coverage_check"].get("missing_notes"),
             ),
+            eeat_plan=data.get("eeat_plan"),
         )
 
     def to_dict(self) -> dict:
@@ -791,6 +858,7 @@ class OutlineResult:
                 "uncovered_questions": self.coverage_check.uncovered_questions,
                 "missing_notes": self.coverage_check.missing_notes,
             },
+            "eeat_plan": self.eeat_plan,
         }
 
 
@@ -808,6 +876,7 @@ class MetaResult:
     meta_title: str  # ≤60 chars, contains target keyword
     meta_description: str  # ≤160 chars, contains keyword + CTA
     slug: str  # lowercase, hyphens, 3-5 words
+    schema_json_ld: Optional[str] = None  # JSON-LD structured data
 
     @classmethod
     def from_dict(cls, data: dict) -> "MetaResult":
@@ -815,6 +884,7 @@ class MetaResult:
             meta_title=data["meta_title"],
             meta_description=data["meta_description"],
             slug=data["slug"],
+            schema_json_ld=data.get("schema_json_ld"),
         )
 
     def to_dict(self) -> dict:
@@ -822,6 +892,7 @@ class MetaResult:
             "meta_title": self.meta_title,
             "meta_description": self.meta_description,
             "slug": self.slug,
+            "schema_json_ld": self.schema_json_ld,
         }
 
 

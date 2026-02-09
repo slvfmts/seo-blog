@@ -14,6 +14,12 @@
 3) competitor_analysis (из research_pack, если есть)
 {{competitor_analysis_json}}
 
+4) keyword_clusters.json (кластеры ключевых слов, если доступны)
+{{keyword_clusters_json}}
+
+5) eeat_signals (E-E-A-T данные из research_pack, если есть)
+{{eeat_signals_json}}
+
 Ограничения:
 — не пиши текст статьи
 — не добавляй факты, которых нет в research_pack
@@ -40,6 +46,20 @@ explanation | list | steps | table | example | faq | warning
 — каждый раздел/подраздел должен иметь purpose (зачем он нужен)
 — каждый content_block должен иметь goal (что он даёт читателю)
 — каждый content_block должен ссылаться на фактуру через source_refs (минимум 1 ссылка)
+
+Учёт keyword_clusters (если доступны, не null):
+— primary_cluster → фокусная тема статьи, primary_keyword должен быть в title/H1
+— secondary_clusters → кандидаты на H2/H3 (suggested_section_topic подсказывает тему раздела)
+— Не обязательно включать ВСЕ кластеры — выбирай наиболее релевантные для user_goal
+— unclustered ключевые слова можно использовать в content_blocks где уместно
+
+Учёт E-E-A-T (если eeat_signals доступны, не null):
+— Распредели E-E-A-T сигналы по разделам:
+  * expert_sources → упоминай в разделах, где используются данные этих источников
+  * authority_references → включи ссылки на стандарты/исследования в релевантные разделы
+  * experience_examples → запланируй практические примеры/кейсы в 2-3 ключевых H2
+  * trust_indicators → добавь даты, методологию, оговорки в соответствующие блоки
+— Выведи eeat_plan в JSON: массив объектов с section_id и типами E-E-A-T сигналов
 
 Учёт конкурентного анализа:
 Если competitor_analysis доступен (не null):
@@ -177,5 +197,12 @@ explanation | list | steps | table | example | faq | warning
     "all_must_answer_covered": boolean,
     "uncovered_questions": ["string"],
     "missing_notes": "string or null"
-  }
+  },
+  "eeat_plan": [
+    {
+      "section_id": "string",
+      "eeat_types": ["experience | expertise | authority | trust"],
+      "description": "string (what E-E-A-T signal to include)"
+    }
+  ]
 }

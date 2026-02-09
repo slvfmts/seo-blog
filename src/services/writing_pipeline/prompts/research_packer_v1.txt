@@ -70,13 +70,20 @@ definition | rule | process | best_practice | risk | example | legal | pricing |
 5. Для каждого must_answer_question:
    — убедись, что есть достаточная фактура
    — зафиксируй покрытие в coverage_map
-6. Если competitor_pages не null — проанализируй конкурентов из топа SERP:
+6b. E-E-A-T анализ:
+   — expert_sources: какие источники представляют экспертное мнение (практики, специалисты, профильные организации)
+   — authority_references: ссылки на стандарты, нормативные документы, исследования
+   — experience_examples: примеры из практики, реальные кейсы, конкретные сценарии
+   — trust_indicators: методология, прозрачность данных, даты исследований
+   → Записать в "eeat_signals" секцию выходного JSON
+
+7. Если competitor_pages не null — проанализируй конкурентов из топа SERP:
    — Определи формат контента каждой страницы (guide/listicle/faq/comparison/review/mixed)
    — Определи уникальный угол каждой страницы (1 фраза)
    — Выяви content_gaps: что НЕ покрыто ни одной из страниц в топе
    — Сформулируй рекомендации по формату и объёму нашей статьи
    — Запиши результат в секцию "competitor_analysis" выходного JSON
-7. Self-check:
+8. Self-check:
    — нет ли неподтверждённых утверждений
    — нет ли выдуманных URL
    — покрыты ли все must_answer_questions
@@ -215,5 +222,36 @@ definition | rule | process | best_practice | risk | example | legal | pricing |
     "content_gaps": ["string"],
     "recommended_format": "string",
     "recommended_word_count": "number"
+  },
+
+  "eeat_signals": {
+    "expert_sources": [
+      {
+        "source_id": "string",
+        "expertise_type": "string (practitioner | researcher | organization | standard)",
+        "why_expert": "string (1 sentence)"
+      }
+    ],
+    "authority_references": [
+      {
+        "source_id": "string",
+        "reference_type": "string (standard | regulation | study | official_data)",
+        "description": "string"
+      }
+    ],
+    "experience_examples": [
+      {
+        "fact_id_or_example_id": "string",
+        "experience_type": "string (case_study | real_scenario | practical_tip)",
+        "description": "string"
+      }
+    ],
+    "trust_indicators": [
+      {
+        "indicator": "string (dated_data | methodology | limitations | transparency)",
+        "source_id": "string or null",
+        "description": "string"
+      }
+    ]
   }
 }

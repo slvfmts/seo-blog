@@ -18,7 +18,7 @@ from typing import List, Dict, Any, Optional, Set
 
 from ..core.stage import WritingStage
 from ..core.context import WritingContext
-from ..contracts import QueryPlannerResult, ResearchResult, KeywordMetricsResult, KeywordMetricsData
+from ..contracts import QueryPlannerResult, ResearchResult, KeywordMetricsResult, KeywordMetricsData, KeywordClusteringResult
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ class ResearchStage(WritingStage):
         jina_api_key: Optional[str] = None,
         dataforseo_login: Optional[str] = None,
         dataforseo_password: Optional[str] = None,
+        use_playwright: bool = True,
         **kwargs
     ):
         super().__init__(*args, **kwargs)
@@ -48,11 +49,13 @@ class ResearchStage(WritingStage):
         self.jina_api_key = jina_api_key
         self.dataforseo_login = dataforseo_login
         self.dataforseo_password = dataforseo_password
+        self.use_playwright = use_playwright
 
         # Lazy-loaded clients
         self._jina_reader = None
         self._trafilatura = None
         self._dataforseo = None
+        self._playwright_browser = None
 
     @property
     def name(self) -> str:
@@ -85,6 +88,16 @@ class ResearchStage(WritingStage):
                 password=self.dataforseo_password,
             )
         return self._dataforseo
+
+    def _get_playwright_browser(self):
+        """Lazy-load Playwright browser."""
+        if self._playwright_browser is None and self.use_playwright:
+            try:
+                from ..data_sources.playwright_browser import PlaywrightBrowser
+                self._playwright_browser = PlaywrightBrowser(max_concurrent=2, timeout_ms=30000)
+            except Exception as e:
+                logger.warning(f"Playwright not available: {e}")
+        return self._playwright_browser
 
     async def run(self, context: WritingContext) -> WritingContext:
         """Execute research stage."""
@@ -162,6 +175,17 @@ class ResearchStage(WritingStage):
                 with open(output_path, "w", encoding="utf-8") as f:
                     json.dump(research.to_dict(), f, ensure_ascii=False, indent=2)
 
+            # Step 7: Keyword clustering
+            clusters, cluster_tokens = await self._cluster_keywords(context)
+            if clusters:
+                context.research.keyword_clusters = clusters
+                total_tokens += cluster_tokens
+
+                if context.save_intermediate and context.output_dir:
+                    output_path = os.path.join(context.output_dir, "04b_keyword_clusters.json")
+                    with open(output_path, "w", encoding="utf-8") as f:
+                        json.dump(clusters.to_dict(), f, ensure_ascii=False, indent=2)
+
             # Calculate metadata
             pages_fetched = sum(
                 1 for r in search_results
@@ -178,6 +202,7 @@ class ResearchStage(WritingStage):
                     "pages_fetched": pages_fetched,
                     "paa_expanded": expand_paa,
                     "has_keyword_metrics": context.keyword_metrics is not None,
+                    "has_keyword_clusters": context.research.keyword_clusters is not None,
                 }
             )
 
@@ -449,6 +474,28 @@ class ResearchStage(WritingStage):
                     except Exception as e:
                         logger.warning(f"Trafilatura fallback failed for {url}: {e}")
 
+        # Playwright fallback for still-failed URLs (both Russian and non-Russian)
+        use_pw = context.config.get("use_playwright", self.use_playwright)
+        playwright_browser = self._get_playwright_browser() if use_pw else None
+        if playwright_browser:
+            still_failed = [
+                (i, url) for i, (url, content) in enumerate(zip(urls_to_fetch, contents))
+                if not content.success
+            ]
+            if still_failed:
+                logger.info(f"Trying Playwright for {len(still_failed)} still-failed URLs")
+                failed_urls_only = [url for _, url in still_failed]
+                pw_results = await playwright_browser.fetch_batch(failed_urls_only, delay=1.5)
+                for (i, url), pw_result in zip(still_failed, pw_results):
+                    if pw_result.success:
+                        contents[i] = PageContent(
+                            url=pw_result.url,
+                            title=pw_result.title,
+                            content=pw_result.content,
+                            word_count=pw_result.word_count,
+                            success=True,
+                        )
+
         # Log results and add content to search results
         success_count = sum(1 for c in contents if c.success)
         logger.info(f"Content fetch results: {success_count}/{len(contents)} successful")
@@ -718,3 +765,81 @@ class ResearchStage(WritingStage):
         items.sort(key=lambda x: x["volume"], reverse=True)
 
         return json.dumps(items[:20], ensure_ascii=False, indent=2)
+
+    async def _cluster_keywords(
+        self,
+        context: WritingContext,
+    ) -> tuple[Optional[KeywordClusteringResult], int]:
+        """
+        Cluster keywords by semantic similarity using LLM.
+
+        Collects all keywords from: queries, related searches, PAA questions, topic.
+        Skips if fewer than 5 unique keywords.
+
+        Returns:
+            (KeywordClusteringResult or None, tokens_used)
+        """
+        # Collect all keywords
+        all_keywords: Set[str] = set()
+        all_keywords.add(context.topic)
+
+        if context.queries:
+            for q in context.queries.queries:
+                all_keywords.add(q.query)
+
+        if context.search_results:
+            for result in context.search_results:
+                # Related searches
+                for rs in result.get("relatedSearches", []):
+                    query = rs.get("query", "")
+                    if query:
+                        all_keywords.add(query)
+                # PAA questions
+                for paa in result.get("peopleAlsoAsk", []):
+                    question = paa.get("question", "")
+                    if question:
+                        all_keywords.add(question)
+
+        # Skip if too few keywords
+        if len(all_keywords) < 5:
+            logger.info(f"Skipping keyword clustering: only {len(all_keywords)} keywords")
+            return None, 0
+
+        # Build keywords list with volume if available
+        keywords_data = []
+        for kw in all_keywords:
+            entry = {"keyword": kw}
+            if context.keyword_metrics:
+                vol = context.keyword_metrics.get_volume(kw)
+                if vol > 0:
+                    entry["volume"] = vol
+            keywords_data.append(entry)
+
+        # Sort by volume descending (keywords with volume first)
+        keywords_data.sort(key=lambda x: x.get("volume", 0), reverse=True)
+
+        prompt_template = self._load_prompt("keyword_clustering_v1")
+        prompt = prompt_template.replace("{{topic}}", context.topic)
+        prompt = prompt.replace("{{primary_intent}}", context.intent.primary_intent)
+        prompt = prompt.replace("{{keywords_json}}", json.dumps(keywords_data, ensure_ascii=False, indent=2))
+
+        try:
+            response_text, tokens = self._call_llm(
+                prompt,
+                max_tokens=2048,
+                temperature=0.5,
+            )
+
+            data = self._parse_json_response(response_text)
+            result = KeywordClusteringResult.from_dict(data)
+
+            logger.info(
+                f"Keyword clustering: 1 primary + {len(result.secondary_clusters)} secondary clusters, "
+                f"{len(result.unclustered)} unclustered"
+            )
+
+            return result, tokens
+
+        except Exception as e:
+            logger.warning(f"Keyword clustering failed: {e}")
+            return None, 0

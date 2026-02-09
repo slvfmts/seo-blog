@@ -205,6 +205,7 @@ class GhostPublisher:
         slug: str = None,
         meta_title: str = None,
         meta_description: str = None,
+        schema_json_ld: str = None,
         status: str = "draft",
     ) -> dict:
         """Публикует статью в Ghost."""
@@ -230,6 +231,8 @@ class GhostPublisher:
             post_data["posts"][0]["meta_title"] = meta_title
         if meta_description:
             post_data["posts"][0]["meta_description"] = meta_description
+        if schema_json_ld:
+            post_data["posts"][0]["codeinjection_foot"] = schema_json_ld
 
         try:
             with httpx.Client() as client:

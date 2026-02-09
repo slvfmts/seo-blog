@@ -147,6 +147,7 @@ class PipelineRunner:
             "fetch_page_content": True,
             "max_pages_to_fetch": 5,
             "max_paa_queries": 3,
+            "use_playwright": True,
         }
         if config:
             pipeline_config.update(config)

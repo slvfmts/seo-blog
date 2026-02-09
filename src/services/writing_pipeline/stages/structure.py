@@ -49,9 +49,27 @@ class StructureStage(WritingStage):
             else:
                 competitor_json = "null"
 
+            # E-E-A-T signals from research
+            if context.research.eeat_signals:
+                eeat_json = json.dumps(
+                    context.research.eeat_signals, ensure_ascii=False, indent=2
+                )
+            else:
+                eeat_json = "null"
+
+            # Keyword clusters from research
+            if context.research.keyword_clusters:
+                clusters_json = json.dumps(
+                    context.research.keyword_clusters.to_dict(), ensure_ascii=False, indent=2
+                )
+            else:
+                clusters_json = "null"
+
             prompt = prompt_template.replace("{{intent_spec_json}}", intent_json)
             prompt = prompt.replace("{{research_pack_json}}", research_json)
             prompt = prompt.replace("{{competitor_analysis_json}}", competitor_json)
+            prompt = prompt.replace("{{eeat_signals_json}}", eeat_json)
+            prompt = prompt.replace("{{keyword_clusters_json}}", clusters_json)
 
             # Call LLM
             response_text, tokens = self._call_llm(

@@ -32,3 +32,6 @@ structlog==24.1.0
 
 # Content extraction (optional - for Trafilatura fallback)
 trafilatura==1.12.0
+
+# Headless browser (optional - for Playwright content extraction)
+playwright==1.49.0

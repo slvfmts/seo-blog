@@ -45,6 +45,7 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: always
+    shm_size: '256m'
     ports:
       - "8000:8000"
     environment:
