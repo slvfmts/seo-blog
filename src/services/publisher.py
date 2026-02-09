@@ -206,7 +206,7 @@ class GhostPublisher:
         meta_title: str = None,
         meta_description: str = None,
         schema_json_ld: str = None,
-        status: str = "draft",
+        status: str = "published",
     ) -> dict:
         """Публикует статью в Ghost."""
 

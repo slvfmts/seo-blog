@@ -5,7 +5,7 @@ PipelineRunner - Orchestrates the writing pipeline stages.
 import os
 import json
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Callable
 
 import anthropic
 
@@ -119,6 +119,7 @@ class PipelineRunner:
         output_dir: Optional[str] = None,
         save_intermediate: bool = True,
         config: Optional[dict] = None,
+        on_stage_complete: Optional[Callable[[str, str], None]] = None,
     ) -> PipelineResult:
         """
         Run the full writing pipeline.
@@ -133,6 +134,7 @@ class PipelineRunner:
                 - fetch_page_content: bool (default True) - fetch full page content
                 - max_pages_to_fetch: int (default 5) - max pages for content fetch
                 - max_paa_queries: int (default 3) - max PAA queries to expand
+            on_stage_complete: Optional callback(stage_name, status) called after each stage
 
         Returns:
             PipelineResult with final article and metadata
@@ -164,7 +166,11 @@ class PipelineRunner:
 
         # Run all stages
         for stage in self.stages:
+            if on_stage_complete:
+                on_stage_complete(stage.name, "running")
             context = await stage.run(context)
+            if on_stage_complete:
+                on_stage_complete(stage.name, "completed")
 
         context.completed_at = datetime.now()
 

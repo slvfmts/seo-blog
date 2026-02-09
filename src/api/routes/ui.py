@@ -4,6 +4,7 @@ UI routes for Brief workflow web interface.
 
 import asyncio
 import os
+import traceback
 import uuid as uuid_lib
 from uuid import UUID
 from datetime import datetime
@@ -87,6 +88,7 @@ async def new_topic_form(request: Request):
 async def create_topic(
     request: Request,
     niche: str = Form(...),
+    domain: str = Form(""),
     country: str = Form("ru"),
     language: str = Form("ru"),
     db: Session = Depends(get_db),
@@ -99,6 +101,7 @@ async def create_topic(
             "request": request,
             "error": "SERPER_API_KEY not configured",
             "niche": niche,
+            "domain": domain,
             "country": country,
             "language": language,
         })
@@ -108,6 +111,7 @@ async def create_topic(
             "request": request,
             "error": "ANTHROPIC_API_KEY not configured",
             "niche": niche,
+            "domain": domain,
             "country": country,
             "language": language,
         })
@@ -130,6 +134,7 @@ async def create_topic(
         # Create Site
         site = models.Site(
             name=niche,
+            domain=domain.strip() if domain.strip() else None,
             status="active",
             language=language,
             country=country.upper(),
@@ -170,6 +175,7 @@ async def create_topic(
             "request": request,
             "error": str(e),
             "niche": niche,
+            "domain": domain,
             "country": country,
             "language": language,
         })
@@ -610,6 +616,7 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
             slug=draft.slug,
             meta_title=draft.meta_title,
             meta_description=draft.meta_description,
+            status="published",
         )
 
         if result["success"]:
@@ -738,17 +745,29 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str):
             database_url=settings.database_url or None,
         )
 
+        # Stage progress callback — updates DB after each stage
+        def on_stage_complete(stage_name: str, status: str):
+            try:
+                d = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+                if d and d.pipeline_stages:
+                    stages = dict(d.pipeline_stages)
+                    stages[stage_name] = status
+                    d.pipeline_stages = stages
+                    db.commit()
+            except Exception:
+                db.rollback()
+
         # Run pipeline (need to run async in sync context)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
         async def run_with_progress():
-            # Run the pipeline
             result = await runner.run(
                 topic=topic,
                 region=region,
                 output_dir=output_dir,
                 save_intermediate=True,
+                on_stage_complete=on_stage_complete,
             )
             return result
 
@@ -796,14 +815,17 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str):
         db.commit()
 
     except Exception as e:
-        # Update draft with error
-        draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
-        if draft:
-            draft.pipeline_status = "failed"
-            draft.pipeline_error = str(e)
-            draft.status = "failed"
-            draft.pipeline_completed_at = datetime.utcnow()
-            db.commit()
+        # Update draft with error including full traceback
+        try:
+            draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+            if draft:
+                draft.pipeline_status = "failed"
+                draft.pipeline_error = traceback.format_exc()
+                draft.status = "failed"
+                draft.pipeline_completed_at = datetime.utcnow()
+                db.commit()
+        except Exception:
+            pass  # Don't mask the original error
     finally:
         db.close()
 

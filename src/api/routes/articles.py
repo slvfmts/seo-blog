@@ -128,7 +128,9 @@ async def publish_article(draft_id: UUID, db: Session = Depends(get_db)):
         title=draft.title,
         content=draft.content_md,
         slug=draft.slug,
+        meta_title=draft.meta_title,
         meta_description=draft.meta_description,
+        status="published",
     )
 
     if result["success"]:
