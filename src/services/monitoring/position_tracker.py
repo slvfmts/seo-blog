@@ -86,6 +86,7 @@ class PositionTracker:
                 domain=domain,
                 location_code=location_code,
                 language_code=language_code,
+                depth=30,
             )
 
             # 5. Save results
