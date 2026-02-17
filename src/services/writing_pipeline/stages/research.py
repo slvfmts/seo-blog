@@ -475,7 +475,7 @@ class ResearchStage(WritingStage):
                         logger.warning(f"Trafilatura fallback failed for {url}: {e}")
 
         # Playwright fallback for still-failed URLs (both Russian and non-Russian)
-        use_pw = context.config.get("use_playwright", self.use_playwright)
+        use_pw = self.use_playwright
         playwright_browser = self._get_playwright_browser() if use_pw else None
         if playwright_browser:
             still_failed = [
