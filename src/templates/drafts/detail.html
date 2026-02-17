@@ -4,11 +4,18 @@
 
 {% block content %}
 <div class="mb-6">
-    {% if draft.brief_id %}
-    <a href="/ui/briefs/{{ draft.brief_id }}" class="text-blue-600 hover:text-blue-800 text-sm">&larr; Back to Brief</a>
-    {% else %}
-    <a href="/ui/drafts" class="text-blue-600 hover:text-blue-800 text-sm">&larr; Back to Drafts</a>
-    {% endif %}
+    <!-- Breadcrumb -->
+    <nav class="flex items-center space-x-2 text-sm text-gray-500">
+        {% if draft.site %}
+        <a href="/ui/topics" class="hover:text-gray-700">Темы</a>
+        <span>&rarr;</span>
+        <a href="/ui/topics/{{ draft.site_id }}" class="hover:text-gray-700">{{ draft.site.name }}</a>
+        <span>&rarr;</span>
+        {% endif %}
+        <a href="/ui/articles" class="hover:text-gray-700">Статьи</a>
+        <span>&rarr;</span>
+        <span class="text-gray-900 font-medium">{{ draft.title[:50] }}{% if draft.title|length > 50 %}...{% endif %}</span>
+    </nav>
 </div>
 
 <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -142,8 +149,8 @@
             <div class="px-6 py-4">
                 <pre class="text-sm text-red-700 whitespace-pre-wrap">{{ draft.pipeline_error }}</pre>
                 <div class="mt-4">
-                    <a href="/ui/pipeline/new" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700">
-                        Try Again
+                    <a href="/ui/articles" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700">
+                        Назад к статьям
                     </a>
                 </div>
             </div>
@@ -277,6 +284,33 @@
 
     <!-- Sidebar -->
     <div class="lg:col-span-1 space-y-6">
+        <!-- Topic & Keyword Info -->
+        {% if draft.site or draft.keyword %}
+        <div class="bg-white shadow rounded-lg p-4">
+            <h3 class="text-sm font-medium text-gray-700 mb-3">Привязка</h3>
+            <dl class="space-y-3">
+                {% if draft.site %}
+                <div>
+                    <dt class="text-xs text-gray-500 uppercase">Тема</dt>
+                    <dd class="mt-1">
+                        <a href="/ui/topics/{{ draft.site_id }}" class="text-sm text-indigo-600 hover:text-indigo-900">{{ draft.site.name }}</a>
+                    </dd>
+                </div>
+                {% endif %}
+
+                {% if draft.keyword %}
+                <div>
+                    <dt class="text-xs text-gray-500 uppercase">Keyword</dt>
+                    <dd class="mt-1 text-sm font-medium text-gray-900">{{ draft.keyword.keyword }}</dd>
+                    {% if draft.keyword.search_volume %}
+                    <dd class="text-xs text-gray-500">Volume: {{ draft.keyword.search_volume }} | Difficulty: {{ draft.keyword.difficulty or '-' }}</dd>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </dl>
+        </div>
+        {% endif %}
+
         <!-- Meta Info -->
         <div class="bg-white shadow rounded-lg p-4">
             <h3 class="text-sm font-medium text-gray-700 mb-3">Meta Information</h3>
@@ -324,7 +358,7 @@
             <div class="space-y-2">
                 {% if draft.status == 'generated' %}
                 <!-- Validate first -->
-                <form method="POST" action="/ui/drafts/{{ draft.id }}/validate" id="validate-form">
+                <form method="POST" action="/ui/articles/{{ draft.id }}/validate" id="validate-form">
                     <button type="submit" id="validate-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
                         <span id="val-btn-text">Validate</span>
                         <span id="val-btn-loading" class="hidden">
@@ -336,7 +370,7 @@
                         </span>
                     </button>
                 </form>
-                <form method="POST" action="/ui/drafts/{{ draft.id }}/approve">
+                <form method="POST" action="/ui/articles/{{ draft.id }}/approve">
                     <button type="submit" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
                         Skip Validation & Approve
                     </button>
@@ -344,7 +378,7 @@
 
                 {% elif draft.status == 'validated' %}
                 <!-- Re-validate or Approve -->
-                <form method="POST" action="/ui/drafts/{{ draft.id }}/validate" id="validate-form">
+                <form method="POST" action="/ui/articles/{{ draft.id }}/validate" id="validate-form">
                     <button type="submit" id="validate-btn" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
                         <span id="val-btn-text">Re-validate</span>
                         <span id="val-btn-loading" class="hidden">
@@ -356,7 +390,7 @@
                         </span>
                     </button>
                 </form>
-                <form method="POST" action="/ui/drafts/{{ draft.id }}/approve">
+                <form method="POST" action="/ui/articles/{{ draft.id }}/approve">
                     <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
                         Approve Draft
                     </button>
@@ -364,7 +398,7 @@
 
                 {% elif draft.status == 'validation_failed' %}
                 <!-- Re-validate or Force Approve -->
-                <form method="POST" action="/ui/drafts/{{ draft.id }}/validate" id="validate-form">
+                <form method="POST" action="/ui/articles/{{ draft.id }}/validate" id="validate-form">
                     <button type="submit" id="validate-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
                         <span id="val-btn-text">Re-validate</span>
                         <span id="val-btn-loading" class="hidden">
@@ -379,7 +413,7 @@
                 <p class="text-xs text-red-600 text-center py-1">Validation failed - fix issues first</p>
 
                 {% elif draft.status == 'approved' %}
-                <form method="POST" action="/ui/drafts/{{ draft.id }}/publish" id="publish-form">
+                <form method="POST" action="/ui/articles/{{ draft.id }}/publish" id="publish-form">
                     <button type="submit" id="publish-btn" class="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
                         <span id="pub-btn-text">Publish to Ghost</span>
                         <span id="pub-btn-loading" class="hidden">

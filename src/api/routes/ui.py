@@ -55,7 +55,7 @@ async def list_topics(request: Request, db: Session = Depends(get_db)):
             models.Keyword.site_id == site.id,
             models.Keyword.status == 'selected'
         ).count()
-        brief_count = db.query(models.Brief).filter(models.Brief.site_id == site.id).count()
+        article_count = db.query(models.Draft).filter(models.Draft.site_id == site.id).count()
 
         topics.append({
             "id": site.id,
@@ -67,7 +67,7 @@ async def list_topics(request: Request, db: Session = Depends(get_db)):
             "created_at": site.created_at,
             "keyword_count": keyword_count,
             "selected_count": selected_count,
-            "brief_count": brief_count,
+            "article_count": article_count,
         })
 
     return templates.TemplateResponse("topics/list.html", {
@@ -199,6 +199,11 @@ async def topic_detail(
         models.Keyword.site_id == topic_id
     ).order_by(models.Keyword.status, models.Keyword.keyword).all()
 
+    # Count articles for this topic
+    article_count = db.query(models.Draft).filter(
+        models.Draft.site_id == topic_id,
+    ).count()
+
     # Calculate stats
     stats = {
         "total": len(keywords),
@@ -206,6 +211,9 @@ async def topic_detail(
         "selected": sum(1 for kw in keywords if kw.status == "selected"),
         "rejected": sum(1 for kw in keywords if kw.status == "rejected"),
         "brief_created": sum(1 for kw in keywords if kw.status == "brief_created"),
+        "writing": sum(1 for kw in keywords if kw.status == "writing"),
+        "targeted": sum(1 for kw in keywords if kw.status == "targeted"),
+        "article_count": article_count,
     }
 
     return templates.TemplateResponse("topics/detail.html", {
@@ -284,18 +292,25 @@ async def reject_keywords(
     )
 
 
-@router.post("/topics/{topic_id}/generate-briefs", response_class=HTMLResponse)
-async def generate_briefs_for_topic(
+@router.post("/topics/{topic_id}/generate-articles", response_class=HTMLResponse)
+async def generate_articles_for_topic(
     request: Request,
     topic_id: UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    """Generate briefs for all selected keywords."""
+    """Generate articles via Writing Pipeline for all selected keywords."""
     settings = get_settings()
 
     topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
+
+    if not settings.anthropic_api_key:
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error=ANTHROPIC_API_KEY not configured",
+            status_code=303,
+        )
 
     # Get selected keywords
     keywords = db.query(models.Keyword).filter(
@@ -310,46 +325,54 @@ async def generate_briefs_for_topic(
         )
 
     try:
-        generator = BriefGenerator(
-            serper_api_key=settings.serper_api_key,
-            anthropic_api_key=settings.anthropic_api_key,
-            proxy_url=settings.anthropic_proxy_url or None,
-            proxy_secret=settings.anthropic_proxy_secret or None,
-        )
-
         count = 0
-        for keyword in keywords:
-            # Generate brief
-            brief_data = await generator.generate(
-                topic=keyword.keyword,
-                country=topic.country.lower(),
-                language=topic.language,
-            )
+        region = topic.language or "ru"
 
-            # Create Brief with keyword_id
-            db_brief = models.Brief(
+        for keyword in keywords:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_topic = "".join(c if c.isalnum() else "_" for c in keyword.keyword[:30])
+            output_dir = f"/tmp/pipeline_output/{timestamp}_{safe_topic}"
+
+            # Create draft with site_id and keyword_id
+            draft = models.Draft(
+                title=keyword.keyword,
+                topic=keyword.keyword,
                 site_id=topic.id,
                 keyword_id=keyword.id,
-                title=brief_data.get("title", keyword.keyword),
-                target_keyword=brief_data.get("target_keyword", keyword.keyword),
-                secondary_keywords=brief_data.get("secondary_keywords"),
-                word_count_min=brief_data.get("word_count_min", 1500),
-                word_count_max=brief_data.get("word_count_max", 2500),
-                structure=brief_data.get("structure"),
-                competitor_urls=brief_data.get("competitor_urls"),
-                serp_analysis=brief_data.get("serp_analysis"),
-                status="draft",
+                status="generating",
+                pipeline_status="pending",
+                pipeline_started_at=datetime.utcnow(),
+                pipeline_output_dir=output_dir,
+                pipeline_stages={
+                    "intent": "pending",
+                    "research": "pending",
+                    "structure": "pending",
+                    "drafting": "pending",
+                    "editing": "pending",
+                    "linking": "pending",
+                    "meta": "pending",
+                },
             )
-            db.add(db_brief)
+            db.add(draft)
+            db.flush()
 
             # Update keyword status
-            keyword.status = "brief_created"
+            keyword.status = "writing"
+
+            # Start background pipeline
+            background_tasks.add_task(
+                run_pipeline_sync,
+                str(draft.id),
+                keyword.keyword,
+                region,
+                output_dir,
+            )
             count += 1
 
         db.commit()
 
         return RedirectResponse(
-            url=f"/ui/topics/{topic_id}?success=Создано {count} Briefs",
+            url=f"/ui/articles?site_id={topic_id}&success=Запущена генерация {count} статей",
             status_code=303,
         )
 
@@ -533,24 +556,44 @@ async def generate_draft(request: Request, brief_id: UUID, db: Session = Depends
     return RedirectResponse(url=f"/ui/briefs/{brief_id}", status_code=303)
 
 
-# ============ Drafts Pages ============
+# ============ Articles Pages ============
 
-@router.get("/drafts", response_class=HTMLResponse)
-async def list_drafts(request: Request, db: Session = Depends(get_db)):
-    """List all drafts."""
-    drafts = db.query(models.Draft).order_by(models.Draft.created_at.desc()).all()
+@router.get("/articles", response_class=HTMLResponse)
+async def list_articles(
+    request: Request,
+    site_id: UUID = None,
+    status: str = None,
+    db: Session = Depends(get_db),
+):
+    """List all articles (drafts) with filters."""
+    query = db.query(models.Draft)
+
+    if site_id:
+        query = query.filter(models.Draft.site_id == site_id)
+    if status:
+        query = query.filter(models.Draft.status == status)
+
+    drafts = query.order_by(models.Draft.created_at.desc()).all()
+
+    # Get all sites for filter dropdown
+    sites = db.query(models.Site).order_by(models.Site.name).all()
+
     return templates.TemplateResponse("drafts/list.html", {
         "request": request,
         "drafts": drafts,
+        "sites": sites,
+        "current_site_id": site_id,
+        "current_status": status,
+        "success": request.query_params.get("success"),
     })
 
 
-@router.get("/drafts/{draft_id}", response_class=HTMLResponse)
-async def draft_detail(request: Request, draft_id: UUID, db: Session = Depends(get_db)):
-    """Show draft details."""
+@router.get("/articles/{draft_id}", response_class=HTMLResponse)
+async def article_detail(request: Request, draft_id: UUID, db: Session = Depends(get_db)):
+    """Show article (draft) details."""
     draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
     if not draft:
-        raise HTTPException(status_code=404, detail="Draft not found")
+        raise HTTPException(status_code=404, detail="Article not found")
 
     return templates.TemplateResponse("drafts/detail.html", {
         "request": request,
@@ -558,6 +601,20 @@ async def draft_detail(request: Request, draft_id: UUID, db: Session = Depends(g
     })
 
 
+# Legacy redirects
+@router.get("/drafts", response_class=HTMLResponse)
+async def list_drafts_redirect(request: Request):
+    """Redirect /ui/drafts to /ui/articles."""
+    return RedirectResponse(url="/ui/articles", status_code=301)
+
+
+@router.get("/drafts/{draft_id}", response_class=HTMLResponse)
+async def draft_detail_redirect(request: Request, draft_id: UUID):
+    """Redirect /ui/drafts/{id} to /ui/articles/{id}."""
+    return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=301)
+
+
+@router.post("/articles/{draft_id}/validate", response_class=HTMLResponse)
 @router.post("/drafts/{draft_id}/validate", response_class=HTMLResponse)
 async def validate_draft(request: Request, draft_id: UUID, db: Session = Depends(get_db)):
     """Run validation pipeline on draft."""
@@ -568,7 +625,7 @@ async def validate_draft(request: Request, draft_id: UUID, db: Session = Depends
         raise HTTPException(status_code=404, detail="Draft not found")
 
     if draft.status not in ("generated", "validated", "validation_failed"):
-        return RedirectResponse(url=f"/ui/drafts/{draft_id}", status_code=303)
+        return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=303)
 
     try:
         pipeline = ValidationPipeline()
@@ -577,9 +634,10 @@ async def validate_draft(request: Request, draft_id: UUID, db: Session = Depends
         # Error handling is done in pipeline
         pass
 
-    return RedirectResponse(url=f"/ui/drafts/{draft_id}", status_code=303)
+    return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=303)
 
 
+@router.post("/articles/{draft_id}/approve", response_class=HTMLResponse)
 @router.post("/drafts/{draft_id}/approve", response_class=HTMLResponse)
 async def approve_draft(request: Request, draft_id: UUID, db: Session = Depends(get_db)):
     """Approve a draft for publishing."""
@@ -592,9 +650,10 @@ async def approve_draft(request: Request, draft_id: UUID, db: Session = Depends(
         draft.status = "approved"
         db.commit()
 
-    return RedirectResponse(url=f"/ui/drafts/{draft_id}", status_code=303)
+    return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=303)
 
 
+@router.post("/articles/{draft_id}/publish", response_class=HTMLResponse)
 @router.post("/drafts/{draft_id}/publish", response_class=HTMLResponse)
 async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(get_db)):
     """Publish draft to Ghost, register for internal linking, run backward linking."""
@@ -606,7 +665,7 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
         raise HTTPException(status_code=404, detail="Draft not found")
 
     if draft.status != "approved":
-        return RedirectResponse(url=f"/ui/drafts/{draft_id}", status_code=303)
+        return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=303)
 
     try:
         publisher = GhostPublisher(settings.ghost_url, settings.ghost_admin_key)
@@ -638,13 +697,17 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
             db.flush()
 
             # Link keyword → post for monitoring
-            if draft.brief_id:
+            keyword_id = draft.keyword_id
+            if not keyword_id and draft.brief_id:
                 brief = db.query(models.Brief).filter(models.Brief.id == draft.brief_id).first()
-                if brief and brief.keyword_id:
-                    keyword = db.query(models.Keyword).filter(models.Keyword.id == brief.keyword_id).first()
-                    if keyword:
-                        keyword.post_id = post.id
-                        keyword.status = "targeted"
+                if brief:
+                    keyword_id = brief.keyword_id
+
+            if keyword_id:
+                keyword = db.query(models.Keyword).filter(models.Keyword.id == keyword_id).first()
+                if keyword:
+                    keyword.post_id = post.id
+                    keyword.status = "targeted"
 
             db.commit()
 
@@ -698,7 +761,7 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
     except Exception:
         pass  # Handle error silently for now
 
-    return RedirectResponse(url=f"/ui/drafts/{draft_id}", status_code=303)
+    return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=303)
 
 
 # ============ Pipeline Pages ============
@@ -897,7 +960,7 @@ async def create_pipeline(
         )
 
         return RedirectResponse(
-            url=f"/ui/drafts/{draft.id}",
+            url=f"/ui/articles/{draft.id}",
             status_code=303,
         )
 

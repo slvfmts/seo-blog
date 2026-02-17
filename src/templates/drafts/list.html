@@ -1,10 +1,45 @@
 {% extends "base.html" %}
 
-{% block title %}Drafts - SEO Blog{% endblock %}
+{% block title %}Статьи — SEO Blog{% endblock %}
 
 {% block content %}
 <div class="mb-6 flex justify-between items-center">
-    <h1 class="text-2xl font-bold text-gray-900">Drafts</h1>
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Статьи</h1>
+        <p class="mt-1 text-sm text-gray-600">Все черновики и опубликованные статьи</p>
+    </div>
+    <a href="/ui/pipeline/new" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700">
+        + Быстрая статья
+    </a>
+</div>
+
+{% if success %}
+<div class="mb-4 bg-green-50 border border-green-200 rounded-md p-4">
+    <p class="text-sm font-medium text-green-800">{{ success }}</p>
+</div>
+{% endif %}
+
+<!-- Filters -->
+<div class="mb-4 flex items-center space-x-4">
+    <form method="GET" action="/ui/articles" class="flex items-center space-x-3">
+        {% if sites %}
+        <select name="site_id" onchange="this.form.submit()" class="border border-gray-300 rounded-md shadow-sm py-1.5 px-3 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+            <option value="">Все темы</option>
+            {% for s in sites %}
+            <option value="{{ s.id }}" {% if current_site_id and current_site_id|string == s.id|string %}selected{% endif %}>{{ s.name }}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
+
+        <select name="status" onchange="this.form.submit()" class="border border-gray-300 rounded-md shadow-sm py-1.5 px-3 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+            <option value="">Все статусы</option>
+            <option value="generating" {% if current_status == 'generating' %}selected{% endif %}>Generating</option>
+            <option value="generated" {% if current_status == 'generated' %}selected{% endif %}>Generated</option>
+            <option value="approved" {% if current_status == 'approved' %}selected{% endif %}>Approved</option>
+            <option value="published" {% if current_status == 'published' %}selected{% endif %}>Published</option>
+            <option value="failed" {% if current_status == 'failed' %}selected{% endif %}>Failed</option>
+        </select>
+    </form>
 </div>
 
 {% if drafts %}
@@ -13,37 +48,54 @@
         <thead class="bg-gray-50">
             <tr>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Title
+                    Заголовок
                 </th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Word Count
+                    Тема
                 </th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
+                    Keyword
                 </th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Created
+                    Статус
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Слов
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Дата
                 </th>
             </tr>
         </thead>
         <tbody class="bg-white divide-y divide-gray-200">
             {% for draft in drafts %}
-            <tr class="hover:bg-gray-50 cursor-pointer" onclick="window.location='/ui/drafts/{{ draft.id }}'">
+            <tr class="hover:bg-gray-50 cursor-pointer" onclick="window.location='/ui/articles/{{ draft.id }}'">
                 <td class="px-6 py-4">
                     <div class="text-sm font-medium text-gray-900">{{ draft.title }}</div>
                     {% if draft.slug %}
                     <div class="text-xs text-gray-500 font-mono">/{{ draft.slug }}</div>
                     {% endif %}
                 </td>
-                <td class="px-6 py-4">
-                    <div class="text-sm text-gray-500">
-                        {{ draft.word_count or '-' }}
-                    </div>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    {% if draft.site %}
+                    <a href="/ui/topics/{{ draft.site_id }}" class="text-sm text-indigo-600 hover:text-indigo-900" onclick="event.stopPropagation()">
+                        {{ draft.site.name }}
+                    </a>
+                    {% else %}
+                    <span class="text-xs text-gray-400">Без темы</span>
+                    {% endif %}
                 </td>
-                <td class="px-6 py-4">
+                <td class="px-6 py-4 whitespace-nowrap">
+                    {% if draft.keyword %}
+                    <div class="text-sm text-gray-900">{{ draft.keyword.keyword }}</div>
+                    {% if draft.keyword.search_volume %}
+                    <div class="text-xs text-gray-500">vol: {{ draft.keyword.search_volume }}</div>
+                    {% endif %}
+                    {% else %}
+                    <span class="text-xs text-gray-400">-</span>
+                    {% endif %}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
                     {% if draft.status == 'generating' %}
                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
                         <svg class="animate-spin h-3 w-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -74,15 +126,11 @@
                     </span>
                     {% endif %}
                 </td>
-                <td class="px-6 py-4">
-                    <div class="text-sm text-gray-500">
-                        {{ draft.created_at.strftime('%Y-%m-%d %H:%M') }}
-                    </div>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {{ draft.word_count or '-' }}
                 </td>
-                <td class="px-6 py-4 text-right text-sm font-medium">
-                    <a href="/ui/drafts/{{ draft.id }}" class="text-blue-600 hover:text-blue-900">
-                        View
-                    </a>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {{ draft.created_at.strftime('%d.%m.%Y %H:%M') }}
                 </td>
             </tr>
             {% endfor %}
@@ -94,11 +142,14 @@
     <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
     </svg>
-    <h3 class="mt-2 text-sm font-medium text-gray-900">No drafts</h3>
-    <p class="mt-1 text-sm text-gray-500">Create a brief first to generate articles.</p>
-    <div class="mt-6">
-        <a href="/ui/briefs/new" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
-            Create Brief
+    <h3 class="mt-2 text-sm font-medium text-gray-900">Нет статей</h3>
+    <p class="mt-1 text-sm text-gray-500">Создайте тему и выберите ключевые слова для генерации статей.</p>
+    <div class="mt-6 space-x-3">
+        <a href="/ui/topics" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700">
+            Перейти к темам
+        </a>
+        <a href="/ui/pipeline/new" class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+            + Быстрая статья
         </a>
     </div>
 </div>

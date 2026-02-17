@@ -93,6 +93,7 @@ class Draft(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=True)
     brief_id = Column(UUID(as_uuid=True), ForeignKey("briefs.id"), nullable=True)
+    keyword_id = Column(UUID(as_uuid=True), ForeignKey("keywords.id"), nullable=True)
 
     title = Column(String(500), nullable=False)
     slug = Column(String(255))
@@ -133,6 +134,7 @@ class Draft(Base):
     # Relationships
     site = relationship("Site", back_populates="drafts")
     brief = relationship("Brief", back_populates="drafts")
+    keyword = relationship("Keyword", back_populates="drafts", foreign_keys=[keyword_id])
 
 
 class Post(Base):
@@ -218,6 +220,7 @@ class Keyword(Base):
     source_competitor = relationship("Competitor", back_populates="keywords")
     cluster = relationship("Cluster", back_populates="keywords")
     briefs = relationship("Brief", back_populates="keyword")
+    drafts = relationship("Draft", back_populates="keyword", foreign_keys="Draft.keyword_id")
     post = relationship("Post", back_populates="keywords")
     rankings = relationship("KeywordRanking", back_populates="keyword", order_by="KeywordRanking.date.desc()")
 

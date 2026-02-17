@@ -35,7 +35,7 @@
         </div>
 
         <!-- Stats -->
-        <div class="mt-6 grid grid-cols-4 gap-4">
+        <div class="mt-6 grid grid-cols-5 gap-4">
             <div class="bg-gray-50 rounded-lg p-4">
                 <dt class="text-sm font-medium text-gray-500">Keywords</dt>
                 <dd class="mt-1 text-2xl font-semibold text-gray-900">{{ stats.total }}</dd>
@@ -48,9 +48,13 @@
                 <dt class="text-sm font-medium text-green-700">Выбрано</dt>
                 <dd class="mt-1 text-2xl font-semibold text-green-900">{{ stats.selected }}</dd>
             </div>
+            <div class="bg-yellow-50 rounded-lg p-4">
+                <dt class="text-sm font-medium text-yellow-700">В работе</dt>
+                <dd class="mt-1 text-2xl font-semibold text-yellow-900">{{ stats.writing }}</dd>
+            </div>
             <div class="bg-purple-50 rounded-lg p-4">
-                <dt class="text-sm font-medium text-purple-700">Briefs</dt>
-                <dd class="mt-1 text-2xl font-semibold text-purple-900">{{ stats.brief_created }}</dd>
+                <dt class="text-sm font-medium text-purple-700">Статьи</dt>
+                <dd class="mt-1 text-2xl font-semibold text-purple-900">{{ stats.article_count }}</dd>
             </div>
         </div>
 
@@ -147,7 +151,7 @@
                                 Статус
                             </th>
                             <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
-                                Brief
+                                Статья
                             </th>
                         </tr>
                     </thead>
@@ -160,7 +164,7 @@
                                     name="keyword_ids"
                                     value="{{ kw.id }}"
                                     class="keyword-checkbox h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                                    {% if kw.status == 'brief_created' or kw.status == 'rejected' %}disabled{% endif %}
+                                    {% if kw.status not in ['new', 'selected'] %}disabled{% endif %}
                                 >
                             </td>
                             <td class="px-4 py-3">
@@ -185,9 +189,21 @@
                                 <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
                                     rejected
                                 </span>
+                                {% elif kw.status == 'writing' %}
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                    <svg class="animate-spin h-3 w-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                    </svg>
+                                    writing
+                                </span>
                                 {% elif kw.status == 'brief_created' %}
                                 <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
                                     brief
+                                </span>
+                                {% elif kw.status == 'targeted' %}
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
+                                    targeted
                                 </span>
                                 {% else %}
                                 <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
@@ -196,9 +212,13 @@
                                 {% endif %}
                             </td>
                             <td class="px-4 py-3 whitespace-nowrap text-sm">
-                                {% if kw.briefs %}
-                                <a href="/ui/briefs/{{ kw.briefs[0].id }}" class="text-indigo-600 hover:text-indigo-900">
+                                {% if kw.drafts %}
+                                <a href="/ui/articles/{{ kw.drafts[0].id }}" class="text-indigo-600 hover:text-indigo-900">
                                     Открыть
+                                </a>
+                                {% elif kw.briefs %}
+                                <a href="/ui/briefs/{{ kw.briefs[0].id }}" class="text-gray-500 hover:text-gray-700">
+                                    Brief
                                 </a>
                                 {% else %}
                                 <span class="text-gray-400">-</span>
@@ -231,11 +251,11 @@
                 <div>
                     <button
                         type="submit"
-                        formaction="/ui/topics/{{ topic.id }}/generate-briefs"
-                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                        {% if stats.selected == 0 %}disabled class="opacity-50 cursor-not-allowed"{% endif %}
+                        formaction="/ui/topics/{{ topic.id }}/generate-articles"
+                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 {% if stats.selected == 0 %}opacity-50 cursor-not-allowed{% endif %}"
+                        {% if stats.selected == 0 %}disabled{% endif %}
                     >
-                        Создать Briefs ({{ stats.selected }})
+                        Написать статьи ({{ stats.selected }})
                     </button>
                 </div>
             </div>
