@@ -120,4 +120,120 @@ class WritingStage(ABC):
             json_str = text[start:end]
             return json.loads(json_str)
         except (ValueError, json.JSONDecodeError):
+            pass
+
+        # Try to repair common JSON issues
+        try:
+            json_str = self._repair_json(text)
+            return json.loads(json_str)
+        except (ValueError, json.JSONDecodeError):
+            pass
+
+        # Last resort: ask LLM to fix the JSON
+        try:
+            return self._llm_repair_json(text)
+        except Exception:
             raise ValueError(f"Failed to parse JSON from response: {text[:500]}...")
+
+    @staticmethod
+    def _repair_json(text: str) -> str:
+        """Try to repair common JSON issues from LLM output."""
+        import re
+
+        # Extract JSON from markdown code blocks
+        if "```" in text:
+            match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+            if match:
+                text = match.group(1).strip()
+
+        # Find outermost { ... }
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1:
+            raise ValueError("No JSON object found")
+        text = text[start:end + 1]
+
+        # Remove trailing commas before } or ]
+        text = re.sub(r",\s*([}\]])", r"\1", text)
+
+        # Fix unescaped newlines inside strings (common LLM issue)
+        # This is a heuristic: replace literal newlines inside strings
+        lines = text.split("\n")
+        fixed_lines = []
+        in_string = False
+        for line in lines:
+            # Count unescaped quotes to track string state
+            quote_count = 0
+            i = 0
+            while i < len(line):
+                if line[i] == '"' and (i == 0 or line[i-1] != '\\'):
+                    quote_count += 1
+                i += 1
+            if in_string and not line.strip().startswith('"'):
+                # Continuation of a broken string - append with space
+                if fixed_lines:
+                    prev = fixed_lines[-1]
+                    if prev.rstrip().endswith('"'):
+                        # Previous line ended a string, this is a new line
+                        fixed_lines.append(line)
+                    else:
+                        fixed_lines[-1] = prev.rstrip() + " " + line.strip()
+                else:
+                    fixed_lines.append(line)
+            else:
+                fixed_lines.append(line)
+            # Track string state
+            if quote_count % 2 == 1:
+                in_string = not in_string
+        text = "\n".join(fixed_lines)
+
+        # Remove trailing commas again after fixes
+        text = re.sub(r",\s*([}\]])", r"\1", text)
+
+        return text
+
+    def _llm_repair_json(self, text: str) -> dict:
+        """Use LLM to repair broken JSON as last resort."""
+        import json
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Extract the JSON part
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1:
+            raise ValueError("No JSON object found")
+        broken_json = text[start:end + 1]
+
+        # Truncate if too long (keep first and last parts)
+        if len(broken_json) > 30000:
+            broken_json = broken_json[:15000] + "\n...[TRUNCATED]...\n" + broken_json[-15000:]
+
+        repair_prompt = (
+            "The following JSON has syntax errors. Fix ONLY the JSON syntax "
+            "(missing commas, unescaped quotes, trailing commas, etc.) and return "
+            "the corrected JSON. Do NOT add, remove, or change any data. "
+            "Return ONLY valid JSON, no markdown, no explanation.\n\n"
+            f"{broken_json}"
+        )
+
+        logger.info("Attempting LLM JSON repair")
+        response_text, _ = self._call_llm(repair_prompt, max_tokens=16384, temperature=0.0)
+
+        # Parse the repaired JSON
+        response_text = response_text.strip()
+        if response_text.startswith("```"):
+            import re
+            match = re.search(r"```(?:json)?\s*\n?(.*?)```", response_text, re.DOTALL)
+            if match:
+                response_text = match.group(1).strip()
+
+        s = response_text.find("{")
+        e = response_text.rfind("}")
+        if s != -1 and e != -1:
+            response_text = response_text[s:e + 1]
+
+        result = json.loads(response_text)
+        logger.info("LLM JSON repair succeeded")
+        return result
