@@ -8,6 +8,7 @@ from .structure import StructureStage
 from .drafting import DraftingStage
 from .editing import EditingStage
 from .linking import LinkingStage
+from .seo_polish import SeoPolishStage
 from .meta import MetaStage
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "DraftingStage",
     "EditingStage",
     "LinkingStage",
+    "SeoPolishStage",
     "MetaStage",
 ]

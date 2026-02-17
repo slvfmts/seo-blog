@@ -35,3 +35,6 @@ trafilatura==1.12.0
 
 # Headless browser (optional - for Playwright content extraction)
 playwright==1.49.0
+
+# Morphological analysis (for SEO keyword matching in Russian)
+pymorphy3==2.0.2

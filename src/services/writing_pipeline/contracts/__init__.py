@@ -863,6 +863,102 @@ class OutlineResult:
 
 
 # =============================================================================
+# SEO Polish Stage Contracts
+# =============================================================================
+
+@dataclass
+class SeoCheckResult:
+    """Result of a single SEO check."""
+    check: str       # "keyword_density", "keyword_in_h1", etc.
+    status: str      # "pass" | "fail" | "warning"
+    value: Any       # current value (density float, bool, count int)
+    threshold: Any   # expected value
+    details: str     # human-readable description
+
+    def to_dict(self) -> dict:
+        return {
+            "check": self.check,
+            "status": self.status,
+            "value": self.value,
+            "threshold": self.threshold,
+            "details": self.details,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SeoCheckResult":
+        return cls(
+            check=data["check"],
+            status=data["status"],
+            value=data["value"],
+            threshold=data["threshold"],
+            details=data["details"],
+        )
+
+
+@dataclass
+class SeoAnalysis:
+    """Result of programmatic SEO analysis."""
+    checks: List[SeoCheckResult]
+    needs_fix: bool
+    keyword_density: float
+    keywords_found: Dict[str, int]  # keyword -> count
+
+    @property
+    def failed_checks(self) -> List[SeoCheckResult]:
+        return [c for c in self.checks if c.status == "fail"]
+
+    @property
+    def warning_checks(self) -> List[SeoCheckResult]:
+        return [c for c in self.checks if c.status == "warning"]
+
+    def to_dict(self) -> dict:
+        return {
+            "checks": [c.to_dict() for c in self.checks],
+            "needs_fix": self.needs_fix,
+            "keyword_density": self.keyword_density,
+            "keywords_found": self.keywords_found,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SeoAnalysis":
+        return cls(
+            checks=[SeoCheckResult.from_dict(c) for c in data["checks"]],
+            needs_fix=data["needs_fix"],
+            keyword_density=data["keyword_density"],
+            keywords_found=data["keywords_found"],
+        )
+
+
+@dataclass
+class SeoPolishResult:
+    """Output of SEO Polish stage."""
+    analysis_before: SeoAnalysis
+    analysis_after: Optional[SeoAnalysis]  # None if no fixes needed
+    llm_called: bool
+    changes_made: List[str]
+    tokens_used: int
+
+    def to_dict(self) -> dict:
+        return {
+            "analysis_before": self.analysis_before.to_dict(),
+            "analysis_after": self.analysis_after.to_dict() if self.analysis_after else None,
+            "llm_called": self.llm_called,
+            "changes_made": self.changes_made,
+            "tokens_used": self.tokens_used,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SeoPolishResult":
+        return cls(
+            analysis_before=SeoAnalysis.from_dict(data["analysis_before"]),
+            analysis_after=SeoAnalysis.from_dict(data["analysis_after"]) if data.get("analysis_after") else None,
+            llm_called=data["llm_called"],
+            changes_made=data["changes_made"],
+            tokens_used=data["tokens_used"],
+        )
+
+
+# =============================================================================
 # Meta Stage Contracts
 # =============================================================================
 
