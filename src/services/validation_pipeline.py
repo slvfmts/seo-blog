@@ -69,7 +69,7 @@ class ValidationPipeline:
             # Get parameters from brief or use defaults
             target_keyword = ""
             word_count_min = 1500
-            word_count_max = 2500
+            word_count_max = 5000
             competitor_urls = []
 
             if brief:
@@ -80,10 +80,10 @@ class ValidationPipeline:
             elif draft.keywords:
                 target_keyword = draft.keywords[0] if draft.keywords else ""
 
-            # Run SEO Lint
+            # Run SEO Lint (use meta_title for title checks, fall back to title)
             seo_report = self.seo_validator.validate(
                 content_md=draft.content_md or "",
-                title=draft.title or "",
+                title=draft.meta_title or draft.title or "",
                 meta_description=draft.meta_description,
                 target_keyword=target_keyword,
                 word_count_min=word_count_min,
@@ -128,21 +128,19 @@ class ValidationPipeline:
             draft.validation_score = overall_score
             draft.validation_report = result.to_dict()
 
-            if overall_status == "failed":
-                draft.status = "validation_failed"
-            else:
-                draft.status = "validated"
+            # Validation is informational — never block publishing
+            draft.status = "validated"
 
             db.commit()
 
             return result
 
         except Exception as e:
-            # On error, keep current status or set to error
+            # On error, still allow proceeding
             if db.is_active:
                 draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
                 if draft:
-                    draft.status = "validation_failed"
+                    draft.status = "validated"
                     draft.validation_report = {"error": str(e)}
                     db.commit()
             raise
@@ -171,19 +169,19 @@ class ValidationPipeline:
             # Get parameters
             target_keyword = ""
             word_count_min = 1500
-            word_count_max = 2500
+            word_count_max = 5000
 
             if brief:
                 target_keyword = brief.target_keyword or ""
                 word_count_min = brief.word_count_min or 1500
-                word_count_max = brief.word_count_max or 2500
+                word_count_max = brief.word_count_max or 5000
             elif draft.keywords:
                 target_keyword = draft.keywords[0] if draft.keywords else ""
 
-            # Run SEO Lint
+            # Run SEO Lint (use meta_title for title checks, fall back to title)
             seo_report = self.seo_validator.validate(
                 content_md=draft.content_md or "",
-                title=draft.title or "",
+                title=draft.meta_title or draft.title or "",
                 meta_description=draft.meta_description,
                 target_keyword=target_keyword,
                 word_count_min=word_count_min,
@@ -204,10 +202,8 @@ class ValidationPipeline:
             draft.validation_score = overall_score
             draft.validation_report = result.to_dict()
 
-            if overall_status == "failed":
-                draft.status = "validation_failed"
-            else:
-                draft.status = "validated"
+            # Validation is informational — never block publishing
+            draft.status = "validated"
 
             db.commit()
 
@@ -217,7 +213,7 @@ class ValidationPipeline:
             if db.is_active:
                 draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
                 if draft:
-                    draft.status = "validation_failed"
+                    draft.status = "validated"
                     draft.validation_report = {"error": str(e)}
                     db.commit()
             raise

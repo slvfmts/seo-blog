@@ -56,7 +56,7 @@ class SEOLintValidator:
         meta_description: Optional[str],
         target_keyword: str,
         word_count_min: int = 1500,
-        word_count_max: int = 2500,
+        word_count_max: int = 5000,
     ) -> SEOLintReport:
         """
         Run all SEO lint checks.

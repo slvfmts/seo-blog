@@ -645,8 +645,8 @@ async def approve_draft(request: Request, draft_id: UUID, db: Session = Depends(
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
 
-    # Allow approve from generated (skip validation) or validated status
-    if draft.status in ("generated", "validated"):
+    # Allow approve from any post-generation status
+    if draft.status in ("generated", "validated", "validation_failed"):
         draft.status = "approved"
         db.commit()
 
