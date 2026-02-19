@@ -51,6 +51,13 @@ class GhostPublisher:
 
         return f"{header_b64}.{payload_b64}.{signature_b64}"
 
+    def _extract_script_tags(self, markdown: str) -> tuple[str, str]:
+        """Extract <script> tags from markdown, return (clean_md, scripts_html)."""
+        import re
+        scripts = re.findall(r'<script[^>]*>.*?</script>', markdown, re.DOTALL)
+        clean = re.sub(r'\s*<script[^>]*>.*?</script>\s*', '\n', markdown, flags=re.DOTALL).rstrip()
+        return clean, '\n'.join(scripts)
+
     def _markdown_to_mobiledoc(self, markdown: str) -> str:
         """Конвертирует Markdown в Ghost mobiledoc формат."""
         mobiledoc = {
@@ -171,12 +178,15 @@ class GhostPublisher:
             "Content-Type": "application/json",
         }
 
+        clean_content, extracted_scripts = self._extract_script_tags(content_md)
         post_data = {
             "posts": [{
-                "mobiledoc": self._markdown_to_mobiledoc(content_md),
+                "mobiledoc": self._markdown_to_mobiledoc(clean_content),
                 "updated_at": updated_at,
             }]
         }
+        if extracted_scripts.strip():
+            post_data["posts"][0]["codeinjection_foot"] = extracted_scripts
 
         try:
             with httpx.Client(timeout=30.0) as client:
@@ -217,10 +227,13 @@ class GhostPublisher:
             "Content-Type": "application/json"
         }
 
+        # Extract <script> tags (e.g. JSON-LD) from content body
+        clean_content, extracted_scripts = self._extract_script_tags(content)
+
         post_data = {
             "posts": [{
                 "title": title,
-                "mobiledoc": self._markdown_to_mobiledoc(content),
+                "mobiledoc": self._markdown_to_mobiledoc(clean_content),
                 "status": status,
             }]
         }
@@ -231,8 +244,10 @@ class GhostPublisher:
             post_data["posts"][0]["meta_title"] = meta_title
         if meta_description:
             post_data["posts"][0]["meta_description"] = meta_description
-        if schema_json_ld:
-            post_data["posts"][0]["codeinjection_foot"] = schema_json_ld
+        # JSON-LD and other scripts go to Ghost's code injection footer
+        all_scripts = '\n'.join(filter(None, [schema_json_ld, extracted_scripts]))
+        if all_scripts.strip():
+            post_data["posts"][0]["codeinjection_foot"] = all_scripts
 
         try:
             with httpx.Client() as client:
