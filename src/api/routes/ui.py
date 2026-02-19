@@ -410,7 +410,7 @@ async def expand_keywords(
         )
 
         language_code = topic.language or "ru"
-        location_code = client.get_location_code(topic.country or "ru")
+        location_code = client.get_labs_location_code(topic.country or "ru")
 
         # Build existing keyword set for dedup
         existing_kw_set = {kw.keyword.lower().strip() for kw in all_keywords}
@@ -483,6 +483,12 @@ async def expand_keywords(
             added += 1
 
         db.commit()
+
+        if errors:
+            import logging
+            logger = logging.getLogger(__name__)
+            for err in errors[:5]:
+                logger.warning(f"Keyword expansion error: {err}")
 
         msg = f"Добавлено {added} новых keywords (из {len(seeds)} seed, cost: ${total_cost:.2f})"
         if errors:

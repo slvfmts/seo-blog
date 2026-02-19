@@ -76,7 +76,7 @@ class DataForSEO:
 
     BASE_URL = "https://api.dataforseo.com/v3"
 
-    # Common location codes
+    # Common location codes (Google Ads / keywords_data endpoints)
     LOCATIONS = {
         "us": 2840,
         "usa": 2840,
@@ -88,6 +88,12 @@ class DataForSEO:
         "germany": 2276,
         "fr": 2250,
         "france": 2250,
+    }
+
+    # DataForSEO Labs doesn't support all locations (e.g. Russia is missing).
+    # This maps unsupported location codes to the nearest supported alternative.
+    LABS_LOCATION_FALLBACK = {
+        2643: 2398,  # Russia -> Kazakhstan (has Russian language data)
     }
 
     def __init__(
@@ -126,6 +132,14 @@ class DataForSEO:
             Location code for DataForSEO API
         """
         return self.LOCATIONS.get(region.lower(), 2840)
+
+    def get_labs_location_code(self, region: str) -> int:
+        """
+        Get location code for DataForSEO Labs endpoints.
+        Falls back to nearest supported location if the primary one isn't available.
+        """
+        code = self.get_location_code(region)
+        return self.LABS_LOCATION_FALLBACK.get(code, code)
 
     async def get_keyword_metrics(
         self,
