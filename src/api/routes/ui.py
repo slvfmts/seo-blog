@@ -417,56 +417,33 @@ async def expand_keywords(
 
         # Select seeds: up to 20, prefer "new" status
         new_first = sorted(all_keywords, key=lambda k: (0 if k.status == "new" else 1, k.keyword))
-        seeds = new_first[:20]
+        seeds = [s.keyword for s in new_first[:20]]
 
-        # Create tasks: 2 per seed (suggestions + related)
-        semaphore = asyncio.Semaphore(10)
+        # Single API call using Google Ads keywords_for_keywords endpoint
+        # (same tier as search_volume, no Labs subscription needed)
+        result = await client.get_keywords_for_keywords(
+            seed_keywords=seeds,
+            location_code=location_code,
+            language_code=language_code,
+        )
 
-        async def limited(coro):
-            async with semaphore:
-                return await coro
-
-        tasks = []
-        for seed in seeds:
-            tasks.append(limited(client.get_keyword_suggestions(
-                keyword=seed.keyword,
-                location_code=location_code,
-                language_code=language_code,
-                limit=700,
-            )))
-            tasks.append(limited(client.get_related_keywords(
-                keyword=seed.keyword,
-                location_code=location_code,
-                language_code=language_code,
-                depth=2,
-                limit=500,
-            )))
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Collect unique discovered keywords (keep highest volume on dupes)
-        discovered = {}  # lowercase -> KeywordMetrics
-        total_cost = 0.0
+        total_cost = result.cost or 0.0
         errors = []
 
-        for r in results:
-            if isinstance(r, Exception):
-                errors.append(str(r))
+        if not result.success:
+            errors.append(f"{result.source}: {result.error}")
+
+        # Collect unique discovered keywords (skip existing)
+        discovered = {}
+        for kw_m in result.keywords:
+            key = kw_m.keyword.lower().strip()
+            if key in existing_kw_set:
                 continue
-            if not r.success:
-                errors.append(f"{r.source}/{r.seed_keyword}: {r.error}")
-                continue
-            if r.cost:
-                total_cost += r.cost
-            for kw_m in r.keywords:
-                key = kw_m.keyword.lower().strip()
-                if key in existing_kw_set:
-                    continue
-                if key in discovered:
-                    if kw_m.search_volume > discovered[key].search_volume:
-                        discovered[key] = kw_m
-                else:
+            if key in discovered:
+                if kw_m.search_volume > discovered[key].search_volume:
                     discovered[key] = kw_m
+            else:
+                discovered[key] = kw_m
 
         # Save new keywords to DB
         added = 0
