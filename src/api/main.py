@@ -6,9 +6,35 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import RedirectResponse as StarletteRedirect
 
 from src.config import get_settings
 from src.api.routes import health, sites, articles, briefs, ui, discovery, monitoring, iterations
+
+
+# Paths that don't require authentication
+_PUBLIC_PREFIXES = ("/ui/login", "/health", "/docs", "/openapi.json", "/api/", "/redoc")
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """Redirect unauthenticated /ui/ requests to login page."""
+
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+        # Only protect /ui/* paths (except login itself)
+        if path.startswith("/ui/") or path == "/ui":
+            if not any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+                user = request.session.get("user")
+                if not user:
+                    return StarletteRedirect(url="/ui/login", status_code=302)
+        # Root redirect also needs auth check
+        if path == "/":
+            user = request.session.get("user")
+            if not user:
+                return StarletteRedirect(url="/ui/login", status_code=302)
+        return await call_next(request)
 
 
 @asynccontextmanager
@@ -59,6 +85,12 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
         debug=settings.debug,
     )
+
+    # Auth middleware (checked first, added last due to ASGI ordering)
+    app.add_middleware(AuthMiddleware)
+
+    # Session middleware
+    app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 
     # CORS
     app.add_middleware(

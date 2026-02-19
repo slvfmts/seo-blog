@@ -40,6 +40,57 @@ def md_to_html(text: str) -> str:
 templates.env.filters['markdown'] = md_to_html
 
 
+# ============ Auth Pages ============
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Show login form."""
+    return templates.TemplateResponse("auth/login.html", {
+        "request": request,
+        "error": request.query_params.get("error"),
+    })
+
+
+@router.post("/login", response_class=HTMLResponse)
+async def login_submit(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+):
+    """Verify credentials and set session."""
+    import secrets
+    import bcrypt
+    settings = get_settings()
+
+    email_ok = secrets.compare_digest(email.lower().strip(), settings.auth_email.lower())
+    password_ok = False
+    if settings.auth_password_hash:
+        try:
+            password_ok = bcrypt.checkpw(
+                password.encode("utf-8"),
+                settings.auth_password_hash.encode("utf-8"),
+            )
+        except Exception:
+            password_ok = False
+
+    if email_ok and password_ok:
+        request.session["user"] = email.lower().strip()
+        return RedirectResponse(url="/ui/topics", status_code=303)
+
+    return templates.TemplateResponse("auth/login.html", {
+        "request": request,
+        "error": "Неверный email или пароль",
+        "email": email,
+    })
+
+
+@router.get("/logout")
+async def logout(request: Request):
+    """Clear session and redirect to login."""
+    request.session.clear()
+    return RedirectResponse(url="/ui/login", status_code=302)
+
+
 # ============ Topics Pages ============
 
 @router.get("/topics", response_class=HTMLResponse)

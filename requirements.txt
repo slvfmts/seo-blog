@@ -26,6 +26,10 @@ markdown==3.5.2
 # HTML parsing
 beautifulsoup4==4.12.3
 
+# Auth
+bcrypt==4.2.1
+itsdangerous==2.2.0
+
 # Utils
 python-dotenv==1.0.1
 structlog==24.1.0

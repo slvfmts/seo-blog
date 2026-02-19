@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     dataforseo_login: str = ""
     dataforseo_password: str = ""
 
+    # Auth
+    secret_key: str = "change-me-in-production"
+    auth_email: str = ""
+    auth_password_hash: str = ""
+
     # App
     debug: bool = False
     log_level: str = "INFO"
