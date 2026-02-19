@@ -268,8 +268,16 @@ class DataForSEO:
             # Extract metrics
             search_volume = result.get("search_volume", 0) or 0
             cpc = result.get("cpc", 0) or 0
-            competition = result.get("competition", 0) or 0
-            competition_level = result.get("competition_level", "LOW") or "LOW"
+            # competition field can be a string ("MEDIUM") or float depending on location
+            # Use competition_index (always numeric 0-100) when available
+            raw_competition = result.get("competition", 0)
+            if isinstance(raw_competition, str):
+                competition = (result.get("competition_index") or 0) / 100.0
+            else:
+                competition = raw_competition or 0
+            competition_level = result.get("competition_level") or result.get("competition", "LOW")
+            if not isinstance(competition_level, str):
+                competition_level = "LOW"
 
             # Monthly trend data
             monthly_searches = result.get("monthly_searches", [])
