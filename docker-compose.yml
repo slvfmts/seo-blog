@@ -59,6 +59,9 @@ services:
       SERPER_API_KEY: ${SERPER_API_KEY}
       DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN}
       DATAFORSEO_PASSWORD: ${DATAFORSEO_PASSWORD}
+      SECRET_KEY: ${SECRET_KEY}
+      AUTH_EMAIL: ${AUTH_EMAIL}
+      AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH}
     volumes:
       - ./src:/app/src
     depends_on:
