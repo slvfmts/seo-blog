@@ -42,6 +42,17 @@ class KeywordMetricsResult:
     cost: Optional[float] = None  # API cost for this request
 
 
+@dataclass
+class KeywordExpansionResult:
+    """Result of keyword expansion (suggestions or related)."""
+    keywords: List[KeywordMetrics]
+    seed_keyword: str
+    source: str  # "suggestions" or "related"
+    success: bool
+    error: Optional[str] = None
+    cost: Optional[float] = None
+
+
 class DataForSEO:
     """
     DataForSEO API client for keyword metrics.
@@ -386,3 +397,307 @@ class DataForSEO:
             result[keyword] = difficulty
 
         return result
+
+    async def get_keyword_suggestions(
+        self,
+        keyword: str,
+        location_code: int = 2840,
+        language_code: str = "en",
+        limit: int = 700,
+    ) -> KeywordExpansionResult:
+        """
+        Get keyword suggestions (seed expansion) from DataForSEO Labs.
+
+        Args:
+            keyword: Seed keyword to expand
+            location_code: Location code (e.g., 2840 for USA)
+            language_code: Language code (e.g., "en", "ru")
+            limit: Max number of suggestions (default 700)
+
+        Returns:
+            KeywordExpansionResult with discovered keywords
+        """
+        payload = [{
+            "keyword": keyword,
+            "location_code": location_code,
+            "language_code": language_code,
+            "limit": limit,
+            "include_seed_keyword": True,
+        }]
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.BASE_URL}/dataforseo_labs/google/keyword_suggestions/live",
+                    headers={
+                        "Authorization": self._auth_header,
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    timeout=self.timeout,
+                )
+
+                if response.status_code != 200:
+                    return KeywordExpansionResult(
+                        keywords=[],
+                        seed_keyword=keyword,
+                        source="suggestions",
+                        success=False,
+                        error=f"HTTP {response.status_code}: {response.text[:500]}",
+                    )
+
+                data = response.json()
+                return self._parse_suggestions_response(data, keyword)
+
+        except httpx.TimeoutException:
+            return KeywordExpansionResult(
+                keywords=[],
+                seed_keyword=keyword,
+                source="suggestions",
+                success=False,
+                error=f"Request timeout after {self.timeout}s",
+            )
+        except Exception as e:
+            logger.error(f"DataForSEO keyword_suggestions error for '{keyword}': {e}")
+            return KeywordExpansionResult(
+                keywords=[],
+                seed_keyword=keyword,
+                source="suggestions",
+                success=False,
+                error=str(e),
+            )
+
+    def _parse_suggestions_response(
+        self,
+        data: Dict[str, Any],
+        seed_keyword: str,
+    ) -> KeywordExpansionResult:
+        """Parse keyword_suggestions response."""
+        if data.get("status_code") != 20000:
+            return KeywordExpansionResult(
+                keywords=[],
+                seed_keyword=seed_keyword,
+                source="suggestions",
+                success=False,
+                error=data.get("status_message", "Unknown error"),
+            )
+
+        cost = data.get("cost", 0)
+        tasks = data.get("tasks", [])
+        if not tasks:
+            return KeywordExpansionResult(
+                keywords=[], seed_keyword=seed_keyword, source="suggestions",
+                success=False, error="No tasks in response",
+            )
+
+        task = tasks[0]
+        if task.get("status_code") != 20000:
+            return KeywordExpansionResult(
+                keywords=[], seed_keyword=seed_keyword, source="suggestions",
+                success=False, error=task.get("status_message", "Task failed"),
+            )
+
+        results = task.get("result", [])
+        keywords = []
+
+        for result_block in results:
+            items = result_block.get("items", [])
+            for item in items:
+                kw_text = item.get("keyword", "")
+                if not kw_text:
+                    continue
+
+                kw_info = item.get("keyword_info", {}) or {}
+                kw_props = item.get("keyword_properties", {}) or {}
+
+                search_volume = kw_info.get("search_volume", 0) or 0
+                competition = kw_info.get("competition", 0) or 0
+                cpc = kw_info.get("cpc", 0) or 0
+                competition_level = kw_info.get("competition_level", "LOW") or "LOW"
+
+                # Prefer keyword_difficulty from keyword_properties if available
+                kw_difficulty = kw_props.get("keyword_difficulty")
+                if kw_difficulty is not None:
+                    difficulty = float(kw_difficulty)
+                else:
+                    difficulty = self._estimate_difficulty(competition, search_volume)
+
+                # Monthly trend
+                monthly_searches = kw_info.get("monthly_searches", [])
+                trend = None
+                if monthly_searches:
+                    trend = [
+                        m.get("search_volume", 0) or 0
+                        for m in monthly_searches[-12:]
+                    ]
+
+                keywords.append(KeywordMetrics(
+                    keyword=kw_text,
+                    search_volume=search_volume,
+                    difficulty=difficulty,
+                    cpc=cpc,
+                    competition=competition,
+                    competition_level=competition_level,
+                    trend=trend,
+                ))
+
+        return KeywordExpansionResult(
+            keywords=keywords,
+            seed_keyword=seed_keyword,
+            source="suggestions",
+            success=True,
+            cost=cost,
+        )
+
+    async def get_related_keywords(
+        self,
+        keyword: str,
+        location_code: int = 2840,
+        language_code: str = "en",
+        depth: int = 2,
+        limit: int = 500,
+    ) -> KeywordExpansionResult:
+        """
+        Get related keywords from DataForSEO Labs.
+
+        Args:
+            keyword: Seed keyword
+            location_code: Location code
+            language_code: Language code
+            depth: Relation depth (2 = ~72 keywords/seed)
+            limit: Max number of related keywords
+
+        Returns:
+            KeywordExpansionResult with discovered keywords
+        """
+        payload = [{
+            "keyword": keyword,
+            "location_code": location_code,
+            "language_code": language_code,
+            "depth": depth,
+            "limit": limit,
+        }]
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.BASE_URL}/dataforseo_labs/google/related_keywords/live",
+                    headers={
+                        "Authorization": self._auth_header,
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    timeout=self.timeout,
+                )
+
+                if response.status_code != 200:
+                    return KeywordExpansionResult(
+                        keywords=[],
+                        seed_keyword=keyword,
+                        source="related",
+                        success=False,
+                        error=f"HTTP {response.status_code}: {response.text[:500]}",
+                    )
+
+                data = response.json()
+                return self._parse_related_response(data, keyword)
+
+        except httpx.TimeoutException:
+            return KeywordExpansionResult(
+                keywords=[],
+                seed_keyword=keyword,
+                source="related",
+                success=False,
+                error=f"Request timeout after {self.timeout}s",
+            )
+        except Exception as e:
+            logger.error(f"DataForSEO related_keywords error for '{keyword}': {e}")
+            return KeywordExpansionResult(
+                keywords=[],
+                seed_keyword=keyword,
+                source="related",
+                success=False,
+                error=str(e),
+            )
+
+    def _parse_related_response(
+        self,
+        data: Dict[str, Any],
+        seed_keyword: str,
+    ) -> KeywordExpansionResult:
+        """Parse related_keywords response. Note: items have an extra keyword_data wrapper."""
+        if data.get("status_code") != 20000:
+            return KeywordExpansionResult(
+                keywords=[],
+                seed_keyword=seed_keyword,
+                source="related",
+                success=False,
+                error=data.get("status_message", "Unknown error"),
+            )
+
+        cost = data.get("cost", 0)
+        tasks = data.get("tasks", [])
+        if not tasks:
+            return KeywordExpansionResult(
+                keywords=[], seed_keyword=seed_keyword, source="related",
+                success=False, error="No tasks in response",
+            )
+
+        task = tasks[0]
+        if task.get("status_code") != 20000:
+            return KeywordExpansionResult(
+                keywords=[], seed_keyword=seed_keyword, source="related",
+                success=False, error=task.get("status_message", "Task failed"),
+            )
+
+        results = task.get("result", [])
+        keywords = []
+
+        for result_block in results:
+            items = result_block.get("items", [])
+            for item in items:
+                # Related keywords have extra keyword_data wrapper
+                kw_data = item.get("keyword_data", {}) or {}
+                kw_text = kw_data.get("keyword", "")
+                if not kw_text:
+                    continue
+
+                kw_info = kw_data.get("keyword_info", {}) or {}
+                kw_props = kw_data.get("keyword_properties", {}) or {}
+
+                search_volume = kw_info.get("search_volume", 0) or 0
+                competition = kw_info.get("competition", 0) or 0
+                cpc = kw_info.get("cpc", 0) or 0
+                competition_level = kw_info.get("competition_level", "LOW") or "LOW"
+
+                kw_difficulty = kw_props.get("keyword_difficulty")
+                if kw_difficulty is not None:
+                    difficulty = float(kw_difficulty)
+                else:
+                    difficulty = self._estimate_difficulty(competition, search_volume)
+
+                monthly_searches = kw_info.get("monthly_searches", [])
+                trend = None
+                if monthly_searches:
+                    trend = [
+                        m.get("search_volume", 0) or 0
+                        for m in monthly_searches[-12:]
+                    ]
+
+                keywords.append(KeywordMetrics(
+                    keyword=kw_text,
+                    search_volume=search_volume,
+                    difficulty=difficulty,
+                    cpc=cpc,
+                    competition=competition,
+                    competition_level=competition_level,
+                    trend=trend,
+                ))
+
+        return KeywordExpansionResult(
+            keywords=keywords,
+            seed_keyword=seed_keyword,
+            source="related",
+            success=True,
+            cost=cost,
+        )

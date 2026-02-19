@@ -292,6 +292,214 @@ async def reject_keywords(
     )
 
 
+@router.post("/topics/{topic_id}/keywords/fetch-volume", response_class=HTMLResponse)
+async def fetch_keyword_volume(
+    request: Request,
+    topic_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Fetch search volume, difficulty, CPC from DataForSEO for all keywords."""
+    settings = get_settings()
+
+    if not settings.dataforseo_login or not settings.dataforseo_password:
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error=DataForSEO credentials not configured (DATAFORSEO_LOGIN, DATAFORSEO_PASSWORD)",
+            status_code=303,
+        )
+
+    topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    keywords = db.query(models.Keyword).filter(
+        models.Keyword.site_id == topic_id,
+    ).all()
+
+    if not keywords:
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error=Нет ключевых слов",
+            status_code=303,
+        )
+
+    try:
+        from src.services.writing_pipeline.data_sources.dataforseo import DataForSEO
+
+        client = DataForSEO(
+            login=settings.dataforseo_login,
+            password=settings.dataforseo_password,
+        )
+
+        keyword_texts = [kw.keyword for kw in keywords]
+        language_code = topic.language or "ru"
+        location_code = client.get_location_code(topic.country or "ru")
+
+        result = await client.get_keyword_metrics(
+            keywords=keyword_texts,
+            location_code=location_code,
+            language_code=language_code,
+        )
+
+        if not result.success:
+            return RedirectResponse(
+                url=f"/ui/topics/{topic_id}?error=DataForSEO error: {result.error}",
+                status_code=303,
+            )
+
+        # Build lookup by lowercase keyword
+        metrics_map = {m.keyword.lower(): m for m in result.keywords}
+
+        updated = 0
+        for kw in keywords:
+            m = metrics_map.get(kw.keyword.lower())
+            if m:
+                kw.search_volume = m.search_volume
+                kw.difficulty = m.difficulty
+                kw.cpc = m.cpc
+                updated += 1
+
+        db.commit()
+
+        cost_str = f", cost: ${result.cost:.4f}" if result.cost else ""
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?success=Обновлено {updated} keywords{cost_str}",
+            status_code=303,
+        )
+
+    except Exception as e:
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error={str(e)}",
+            status_code=303,
+        )
+
+
+@router.post("/topics/{topic_id}/keywords/expand", response_class=HTMLResponse)
+async def expand_keywords(
+    request: Request,
+    topic_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Expand seed keywords using DataForSEO suggestions + related keywords."""
+    settings = get_settings()
+
+    if not settings.dataforseo_login or not settings.dataforseo_password:
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error=DataForSEO credentials not configured (DATAFORSEO_LOGIN, DATAFORSEO_PASSWORD)",
+            status_code=303,
+        )
+
+    topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    all_keywords = db.query(models.Keyword).filter(
+        models.Keyword.site_id == topic_id,
+    ).all()
+
+    if not all_keywords:
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error=Нет ключевых слов для расширения",
+            status_code=303,
+        )
+
+    try:
+        from src.services.writing_pipeline.data_sources.dataforseo import DataForSEO
+
+        client = DataForSEO(
+            login=settings.dataforseo_login,
+            password=settings.dataforseo_password,
+        )
+
+        language_code = topic.language or "ru"
+        location_code = client.get_location_code(topic.country or "ru")
+
+        # Build existing keyword set for dedup
+        existing_kw_set = {kw.keyword.lower().strip() for kw in all_keywords}
+
+        # Select seeds: up to 20, prefer "new" status
+        new_first = sorted(all_keywords, key=lambda k: (0 if k.status == "new" else 1, k.keyword))
+        seeds = new_first[:20]
+
+        # Create tasks: 2 per seed (suggestions + related)
+        semaphore = asyncio.Semaphore(10)
+
+        async def limited(coro):
+            async with semaphore:
+                return await coro
+
+        tasks = []
+        for seed in seeds:
+            tasks.append(limited(client.get_keyword_suggestions(
+                keyword=seed.keyword,
+                location_code=location_code,
+                language_code=language_code,
+                limit=700,
+            )))
+            tasks.append(limited(client.get_related_keywords(
+                keyword=seed.keyword,
+                location_code=location_code,
+                language_code=language_code,
+                depth=2,
+                limit=500,
+            )))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Collect unique discovered keywords (keep highest volume on dupes)
+        discovered = {}  # lowercase -> KeywordMetrics
+        total_cost = 0.0
+        errors = []
+
+        for r in results:
+            if isinstance(r, Exception):
+                errors.append(str(r))
+                continue
+            if not r.success:
+                errors.append(f"{r.source}/{r.seed_keyword}: {r.error}")
+                continue
+            if r.cost:
+                total_cost += r.cost
+            for kw_m in r.keywords:
+                key = kw_m.keyword.lower().strip()
+                if key in existing_kw_set:
+                    continue
+                if key in discovered:
+                    if kw_m.search_volume > discovered[key].search_volume:
+                        discovered[key] = kw_m
+                else:
+                    discovered[key] = kw_m
+
+        # Save new keywords to DB
+        added = 0
+        for kw_m in discovered.values():
+            keyword = models.Keyword(
+                site_id=topic.id,
+                keyword=kw_m.keyword,
+                search_volume=kw_m.search_volume,
+                difficulty=kw_m.difficulty,
+                cpc=kw_m.cpc,
+                status="new",
+            )
+            db.add(keyword)
+            added += 1
+
+        db.commit()
+
+        msg = f"Добавлено {added} новых keywords (из {len(seeds)} seed, cost: ${total_cost:.2f})"
+        if errors:
+            msg += f", {len(errors)} ошибок API"
+
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?success={msg}",
+            status_code=303,
+        )
+
+    except Exception as e:
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error={str(e)}",
+            status_code=303,
+        )
+
+
 @router.post("/topics/{topic_id}/generate-articles", response_class=HTMLResponse)
 async def generate_articles_for_topic(
     request: Request,
