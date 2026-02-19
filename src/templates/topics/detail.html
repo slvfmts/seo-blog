@@ -77,6 +77,42 @@
     </div>
 </div>
 
+<!-- Knowledge Base (Фактура) -->
+<div class="bg-white shadow sm:rounded-lg mb-6">
+    <div class="px-4 py-5 sm:p-6">
+        <h2 class="text-lg font-medium text-gray-900 mb-3">Фактура</h2>
+        {% if all_folders %}
+        <form method="POST" action="/ui/topics/{{ topic.id }}/kb">
+            <div class="space-y-2">
+                {% for folder in all_folders %}
+                <label class="flex items-center space-x-3">
+                    <input
+                        type="checkbox"
+                        name="folder_ids"
+                        value="{{ folder.id }}"
+                        class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                        {% if folder.id|string in attached_folder_ids %}checked{% endif %}
+                    >
+                    <span class="text-sm text-gray-900">{{ folder.name }}</span>
+                    <span class="text-xs text-gray-500">({{ folder.documents|length }} док.)</span>
+                </label>
+                {% endfor %}
+            </div>
+            <div class="mt-3">
+                <button type="submit" class="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    Сохранить
+                </button>
+            </div>
+        </form>
+        {% else %}
+        <p class="text-sm text-gray-500">
+            Нет папок с документами.
+            <a href="/ui/kb/new" class="text-indigo-600 hover:text-indigo-900">Создать папку</a>
+        </p>
+        {% endif %}
+    </div>
+</div>
+
 {% if error %}
 <div class="mb-6 bg-red-50 border border-red-200 rounded-md p-4">
     <div class="flex">

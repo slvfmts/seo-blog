@@ -8,12 +8,21 @@ import uuid
 from datetime import datetime
 from sqlalchemy import (
     Column, String, Text, Integer, Float, Boolean,
-    DateTime, ForeignKey, Enum, JSON, UniqueConstraint
+    DateTime, ForeignKey, Enum, JSON, UniqueConstraint, Table
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
+
+
+# M2M association table: sites <-> knowledge_folders
+site_knowledge_folders = Table(
+    'site_knowledge_folders',
+    Base.metadata,
+    Column('site_id', UUID(as_uuid=True), ForeignKey('sites.id', ondelete='CASCADE'), primary_key=True),
+    Column('folder_id', UUID(as_uuid=True), ForeignKey('knowledge_folders.id', ondelete='CASCADE'), primary_key=True),
+)
 
 
 class Brief(Base):
@@ -84,6 +93,7 @@ class Site(Base):
     keywords = relationship("Keyword", back_populates="site")
     clusters = relationship("Cluster", back_populates="site")
     roadmap = relationship("ContentRoadmap", back_populates="site")
+    knowledge_folders = relationship("KnowledgeFolder", secondary=site_knowledge_folders, back_populates="sites")
 
 
 class Draft(Base):
@@ -376,3 +386,43 @@ class IterationTask(Base):
 
     # Relationships
     post = relationship("Post", back_populates="iteration_tasks")
+
+
+# ============ Knowledge Base Models ============
+
+class KnowledgeFolder(Base):
+    """Папка с документами для использования при генерации статей."""
+    __tablename__ = "knowledge_folders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    documents = relationship("KnowledgeDocument", back_populates="folder", cascade="all, delete-orphan")
+    sites = relationship("Site", secondary=site_knowledge_folders, back_populates="knowledge_folders")
+
+
+class KnowledgeDocument(Base):
+    """Документ в папке базы знаний."""
+    __tablename__ = "knowledge_documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    folder_id = Column(UUID(as_uuid=True), ForeignKey("knowledge_folders.id", ondelete="CASCADE"), nullable=False)
+
+    filename = Column(String(255), nullable=False)
+    original_filename = Column(String(255), nullable=False)
+    file_path = Column(String(500), nullable=False)
+    file_size = Column(Integer, nullable=False)
+    mime_type = Column(String(100), nullable=False)
+
+    content_text = Column(Text, nullable=True)
+    word_count = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    folder = relationship("KnowledgeFolder", back_populates="documents")

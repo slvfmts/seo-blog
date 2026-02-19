@@ -9,7 +9,7 @@ import uuid as uuid_lib
 from uuid import UUID
 from datetime import datetime
 from typing import List
-from fastapi import APIRouter, Depends, Request, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, Request, Form, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -267,11 +267,17 @@ async def topic_detail(
         "article_count": article_count,
     }
 
+    # Knowledge Base folders
+    all_folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
+    attached_folder_ids = {str(f.id) for f in topic.knowledge_folders}
+
     return templates.TemplateResponse("topics/detail.html", {
         "request": request,
         "topic": topic,
         "keywords": keywords,
         "stats": stats,
+        "all_folders": all_folders,
+        "attached_folder_ids": attached_folder_ids,
         "error": request.query_params.get("error"),
         "success": request.query_params.get("success"),
     })
@@ -582,6 +588,18 @@ async def generate_articles_for_topic(
         count = 0
         region = topic.language or "ru"
 
+        # Load KB docs from attached folders
+        kb_docs = []
+        for folder in topic.knowledge_folders:
+            for doc in folder.documents:
+                if doc.content_text:
+                    kb_docs.append({
+                        "id": str(doc.id),
+                        "title": doc.original_filename,
+                        "content_text": doc.content_text,
+                        "word_count": doc.word_count or 0,
+                    })
+
         for keyword in keywords:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_topic = "".join(c if c.isalnum() else "_" for c in keyword.keyword[:30])
@@ -620,6 +638,7 @@ async def generate_articles_for_topic(
                 keyword.keyword,
                 region,
                 output_dir,
+                kb_docs,
             )
             count += 1
 
@@ -636,6 +655,245 @@ async def generate_articles_for_topic(
             url=f"/ui/topics/{topic_id}?error={str(e)}",
             status_code=303,
         )
+
+
+# ============ Knowledge Base (Фактура) Pages ============
+
+@router.get("/kb", response_class=HTMLResponse)
+async def kb_list(request: Request, db: Session = Depends(get_db)):
+    """List all KB folders."""
+    folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.created_at.desc()).all()
+
+    folder_data = []
+    for folder in folders:
+        doc_count = len(folder.documents)
+        site_count = len(folder.sites)
+        folder_data.append({
+            "id": folder.id,
+            "name": folder.name,
+            "description": folder.description,
+            "doc_count": doc_count,
+            "site_count": site_count,
+            "created_at": folder.created_at,
+        })
+
+    return templates.TemplateResponse("kb/list.html", {
+        "request": request,
+        "folders": folder_data,
+    })
+
+
+@router.get("/kb/new", response_class=HTMLResponse)
+async def kb_new_form(request: Request):
+    """Show create folder form (reuse detail template with empty state)."""
+    return templates.TemplateResponse("kb/create.html", {
+        "request": request,
+    })
+
+
+@router.post("/kb/new", response_class=HTMLResponse)
+async def kb_create(
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """Create a new KB folder."""
+    folder = models.KnowledgeFolder(
+        name=name.strip(),
+        description=description.strip() or None,
+    )
+    db.add(folder)
+    db.commit()
+    db.refresh(folder)
+    return RedirectResponse(url=f"/ui/kb/{folder.id}", status_code=303)
+
+
+@router.get("/kb/{folder_id}", response_class=HTMLResponse)
+async def kb_detail(
+    request: Request,
+    folder_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Show folder detail with documents."""
+    folder = db.query(models.KnowledgeFolder).filter(models.KnowledgeFolder.id == folder_id).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+
+    return templates.TemplateResponse("kb/detail.html", {
+        "request": request,
+        "folder": folder,
+        "documents": folder.documents,
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+    })
+
+
+ALLOWED_EXTENSIONS = {".md", ".txt", ".pdf", ".docx"}
+MIME_MAP = {
+    ".md": "text/markdown",
+    ".txt": "text/plain",
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
+@router.post("/kb/{folder_id}/upload", response_class=HTMLResponse)
+async def kb_upload(
+    request: Request,
+    folder_id: UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Upload a document to a KB folder."""
+    import os
+    from src.services.text_extractor import extract_text
+
+    folder = db.query(models.KnowledgeFolder).filter(models.KnowledgeFolder.id == folder_id).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+
+    # Validate extension
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return RedirectResponse(
+            url=f"/ui/kb/{folder_id}?error=Недопустимый формат файла: {ext}",
+            status_code=303,
+        )
+
+    # Read file content
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        return RedirectResponse(
+            url=f"/ui/kb/{folder_id}?error=Файл слишком большой (макс. 50 МБ)",
+            status_code=303,
+        )
+
+    # Save to disk
+    settings = get_settings()
+    upload_dir = os.path.join(settings.upload_dir, str(folder_id))
+    os.makedirs(upload_dir, exist_ok=True)
+
+    safe_filename = f"{uuid_lib.uuid4().hex}{ext}"
+    file_path = os.path.join(upload_dir, safe_filename)
+
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # Extract text
+    mime_type = MIME_MAP.get(ext, "application/octet-stream")
+    try:
+        text, word_count = extract_text(file_path, mime_type)
+    except Exception as e:
+        # Clean up file on extraction failure
+        os.remove(file_path)
+        return RedirectResponse(
+            url=f"/ui/kb/{folder_id}?error=Ошибка извлечения текста: {e}",
+            status_code=303,
+        )
+
+    # Create DB record
+    doc = models.KnowledgeDocument(
+        folder_id=folder_id,
+        filename=safe_filename,
+        original_filename=file.filename or safe_filename,
+        file_path=file_path,
+        file_size=len(content),
+        mime_type=mime_type,
+        content_text=text,
+        word_count=word_count,
+    )
+    db.add(doc)
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/ui/kb/{folder_id}?success=Загружен: {file.filename} ({word_count} слов)",
+        status_code=303,
+    )
+
+
+@router.post("/kb/{folder_id}/documents/{doc_id}/delete", response_class=HTMLResponse)
+async def kb_delete_document(
+    request: Request,
+    folder_id: UUID,
+    doc_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Delete a document from a KB folder."""
+    import os
+
+    doc = db.query(models.KnowledgeDocument).filter(
+        models.KnowledgeDocument.id == doc_id,
+        models.KnowledgeDocument.folder_id == folder_id,
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Remove file from disk
+    if doc.file_path and os.path.exists(doc.file_path):
+        os.remove(doc.file_path)
+
+    db.delete(doc)
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/ui/kb/{folder_id}?success=Документ удалён",
+        status_code=303,
+    )
+
+
+@router.post("/kb/{folder_id}/delete", response_class=HTMLResponse)
+async def kb_delete_folder(
+    request: Request,
+    folder_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Delete a KB folder with all documents."""
+    import os
+    import shutil
+
+    folder = db.query(models.KnowledgeFolder).filter(models.KnowledgeFolder.id == folder_id).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+
+    # Remove files from disk
+    settings = get_settings()
+    upload_dir = os.path.join(settings.upload_dir, str(folder_id))
+    if os.path.exists(upload_dir):
+        shutil.rmtree(upload_dir)
+
+    db.delete(folder)
+    db.commit()
+
+    return RedirectResponse(url="/ui/kb", status_code=303)
+
+
+@router.post("/topics/{topic_id}/kb", response_class=HTMLResponse)
+async def update_topic_kb(
+    request: Request,
+    topic_id: UUID,
+    folder_ids: List[str] = Form(default=[]),
+    db: Session = Depends(get_db),
+):
+    """Update M2M between topic and KB folders."""
+    topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    # Clear existing and re-add
+    topic.knowledge_folders.clear()
+    for fid in folder_ids:
+        folder = db.query(models.KnowledgeFolder).filter(models.KnowledgeFolder.id == fid).first()
+        if folder:
+            topic.knowledge_folders.append(folder)
+
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/ui/topics/{topic_id}?success=Фактура обновлена",
+        status_code=303,
+    )
 
 
 # ============ Briefs Pages ============
@@ -1020,7 +1278,7 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
 
 # ============ Pipeline Pages ============
 
-def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str):
+def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, knowledge_base_docs: list = None):
     """
     Run writing pipeline synchronously.
     Called from background task.
@@ -1079,12 +1337,16 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str):
         asyncio.set_event_loop(loop)
 
         async def run_with_progress():
+            config = {}
+            if knowledge_base_docs:
+                config["knowledge_base_docs"] = knowledge_base_docs
             result = await runner.run(
                 topic=topic,
                 region=region,
                 output_dir=output_dir,
                 save_intermediate=True,
                 on_stage_complete=on_stage_complete,
+                config=config,
             )
             return result
 

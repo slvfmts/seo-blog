@@ -62,8 +62,10 @@ services:
       SECRET_KEY: ${SECRET_KEY}
       AUTH_EMAIL: ${AUTH_EMAIL}
       AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
     volumes:
       - ./src:/app/src
+      - uploads-data:/data/uploads
     depends_on:
       - postgres
       - redis
@@ -120,3 +122,4 @@ volumes:
   ghost-db-data:
   postgres-data:
   redis-data:
+  uploads-data:

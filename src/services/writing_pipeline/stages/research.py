@@ -136,6 +136,26 @@ class ResearchStage(WritingStage):
                     search_results, max_pages, region=context.region
                 )
 
+            # Step 4b: Inject Knowledge Base documents (if attached)
+            kb_docs = context.config.get("knowledge_base_docs", [])
+            if kb_docs:
+                kb_result = {
+                    "query": context.topic,
+                    "purpose": "knowledge_base",
+                    "is_knowledge_base": True,
+                    "organic": [{
+                        "position": 0,
+                        "title": doc["title"],
+                        "link": f"kb://{doc['id']}",
+                        "snippet": doc["content_text"][:300],
+                        "page_content": doc["content_text"][:4000],
+                        "page_word_count": doc.get("word_count", 0),
+                        "is_knowledge_base": True,
+                    } for doc in kb_docs],
+                }
+                search_results.insert(0, kb_result)
+                logger.info(f"Injected {len(kb_docs)} KB documents into search results")
+
             context.search_results = search_results
 
             # Save search results if configured

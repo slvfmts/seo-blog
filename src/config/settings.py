@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     auth_email: str = ""
     auth_password_hash: str = ""
 
+    # Uploads
+    upload_dir: str = "/data/uploads"
+
     # App
     debug: bool = False
     log_level: str = "INFO"
