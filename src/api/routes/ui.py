@@ -331,7 +331,7 @@ async def fetch_keyword_volume(
 
         keyword_texts = [kw.keyword for kw in keywords]
         language_code = topic.language or "ru"
-        location_code = client.get_location_code(topic.country or "ru")
+        location_code = client.get_safe_location_code(topic.country or "ru")
 
         result = await client.get_keyword_metrics(
             keywords=keyword_texts,
@@ -410,7 +410,7 @@ async def expand_keywords(
         )
 
         language_code = topic.language or "ru"
-        location_code = client.get_labs_location_code(topic.country or "ru")
+        location_code = client.get_safe_location_code(topic.country or "ru")
 
         # Build existing keyword set for dedup
         existing_kw_set = {kw.keyword.lower().strip() for kw in all_keywords}

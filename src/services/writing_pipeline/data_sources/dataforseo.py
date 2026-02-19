@@ -90,9 +90,9 @@ class DataForSEO:
         "france": 2250,
     }
 
-    # DataForSEO Labs doesn't support all locations (e.g. Russia is missing).
+    # DataForSEO doesn't support some locations (e.g. Russia).
     # This maps unsupported location codes to the nearest supported alternative.
-    LABS_LOCATION_FALLBACK = {
+    LOCATION_FALLBACK = {
         2643: 2398,  # Russia -> Kazakhstan (has Russian language data)
     }
 
@@ -133,13 +133,13 @@ class DataForSEO:
         """
         return self.LOCATIONS.get(region.lower(), 2840)
 
-    def get_labs_location_code(self, region: str) -> int:
+    def get_safe_location_code(self, region: str) -> int:
         """
-        Get location code for DataForSEO Labs endpoints.
-        Falls back to nearest supported location if the primary one isn't available.
+        Get location code with fallback for unsupported regions (e.g. Russia).
+        Use this instead of get_location_code for all DataForSEO API calls.
         """
         code = self.get_location_code(region)
-        return self.LABS_LOCATION_FALLBACK.get(code, code)
+        return self.LOCATION_FALLBACK.get(code, code)
 
     async def get_keyword_metrics(
         self,
@@ -172,9 +172,11 @@ class DataForSEO:
         # Resolve location code
         if location_code is None:
             if location_name:
-                location_code = self.get_location_code(location_name)
+                location_code = self.get_safe_location_code(location_name)
             else:
                 location_code = 2840  # Default to USA
+        else:
+            location_code = self.LOCATION_FALLBACK.get(location_code, location_code)
 
         # Build request payload
         payload = [{
