@@ -422,153 +422,141 @@ class DataForSEO:
 
         return result
 
-    async def get_keywords_for_keywords(
+    async def get_keyword_suggestions_via_serper(
         self,
         seed_keywords: List[str],
+        serper_api_key: str,
+        region: str = "ru",
         location_code: int = 2840,
         language_code: str = "en",
     ) -> KeywordExpansionResult:
         """
-        Get keyword ideas from Google Ads based on seed keywords.
+        Discover keyword ideas using Serper.dev (related searches + PAA + autocomplete),
+        then fetch volume/difficulty via DataForSEO search_volume.
 
-        Uses the same API tier as search_volume (Keywords Data API),
-        NOT the Labs API which requires separate billing.
+        This avoids DataForSEO Labs/keywords_for_keywords endpoints (402 Payment Required)
+        by using only the search_volume endpoint which is included in basic plans.
 
         Args:
-            seed_keywords: List of seed keywords (max 20 per request)
-            location_code: Location code (e.g., 2840 for USA, 2398 for Kazakhstan)
-            language_code: Language code (e.g., "en", "ru")
+            seed_keywords: List of seed keywords (up to 20)
+            serper_api_key: Serper.dev API key
+            region: Region for Serper search (e.g., "ru", "us")
+            location_code: DataForSEO location code for volume lookup
+            language_code: Language code for volume lookup
 
         Returns:
-            KeywordExpansionResult with discovered keyword ideas
+            KeywordExpansionResult with discovered keywords + metrics
         """
-        seed_keywords = seed_keywords[:20]  # API limit
+        seed_keywords = seed_keywords[:20]
         seed_str = ", ".join(seed_keywords[:3]) + ("..." if len(seed_keywords) > 3 else "")
 
-        payload = [{
-            "keywords": seed_keywords,
-            "location_code": location_code,
-            "language_code": language_code,
-            "search_partners": False,
-        }]
+        gl = "ru" if region.lower() in ["ru", "россия", "russia"] else "us"
+        hl = "ru" if region.lower() in ["ru", "россия", "russia"] else "en"
 
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.BASE_URL}/keywords_data/google_ads/keywords_for_keywords/live",
-                    headers={
-                        "Authorization": self._auth_header,
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                    timeout=self.timeout,
-                )
+        # Step 1: Discover keyword candidates via Serper.dev
+        discovered_keywords = set()
+        errors = []
+        semaphore = asyncio.Semaphore(5)
 
-                if response.status_code != 200:
-                    return KeywordExpansionResult(
-                        keywords=[],
-                        seed_keyword=seed_str,
-                        source="keywords_for_keywords",
-                        success=False,
-                        error=f"HTTP {response.status_code}: {response.text[:500]}",
+        async def search_serper(query: str):
+            async with semaphore:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        "https://google.serper.dev/search",
+                        headers={"X-API-KEY": serper_api_key, "Content-Type": "application/json"},
+                        json={"q": query, "gl": gl, "hl": hl, "num": 10},
+                        timeout=30.0,
                     )
+                    resp.raise_for_status()
+                    return resp.json()
 
-                data = response.json()
-                return self._parse_keywords_for_keywords_response(data, seed_str)
+        async def autocomplete_serper(query: str):
+            async with semaphore:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        "https://google.serper.dev/autocomplete",
+                        headers={"X-API-KEY": serper_api_key, "Content-Type": "application/json"},
+                        json={"q": query, "gl": gl, "hl": hl},
+                        timeout=30.0,
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
 
-        except httpx.TimeoutException:
-            return KeywordExpansionResult(
-                keywords=[],
-                seed_keyword=seed_str,
-                source="keywords_for_keywords",
-                success=False,
-                error=f"Request timeout after {self.timeout}s",
-            )
-        except Exception as e:
-            logger.error(f"DataForSEO keywords_for_keywords error: {e}")
-            return KeywordExpansionResult(
-                keywords=[],
-                seed_keyword=seed_str,
-                source="keywords_for_keywords",
-                success=False,
-                error=str(e),
-            )
+        # Run search + autocomplete for each seed in parallel
+        tasks = []
+        for seed in seed_keywords:
+            tasks.append(("search", seed, search_serper(seed)))
+            tasks.append(("autocomplete", seed, autocomplete_serper(seed)))
 
-    def _parse_keywords_for_keywords_response(
-        self,
-        data: Dict[str, Any],
-        seed_str: str,
-    ) -> KeywordExpansionResult:
-        """Parse keywords_for_keywords response (same format as search_volume)."""
-        if data.get("status_code") != 20000:
-            return KeywordExpansionResult(
-                keywords=[],
-                seed_keyword=seed_str,
-                source="keywords_for_keywords",
-                success=False,
-                error=data.get("status_message", "Unknown error"),
-            )
+        import asyncio as _asyncio
+        coros = [t[2] for t in tasks]
+        results = await _asyncio.gather(*coros, return_exceptions=True)
 
-        cost = data.get("cost", 0)
-        tasks = data.get("tasks", [])
-        if not tasks:
-            return KeywordExpansionResult(
-                keywords=[], seed_keyword=seed_str, source="keywords_for_keywords",
-                success=False, error="No tasks in response",
-            )
-
-        task = tasks[0]
-        if task.get("status_code") != 20000:
-            return KeywordExpansionResult(
-                keywords=[], seed_keyword=seed_str, source="keywords_for_keywords",
-                success=False, error=task.get("status_message", "Task failed"),
-                cost=task.get("cost", 0),
-            )
-
-        results = task.get("result", [])
-        keywords = []
-
-        for result in results:
-            kw_text = result.get("keyword", "")
-            if not kw_text:
+        for i, result in enumerate(results):
+            task_type, seed, _ = tasks[i]
+            if isinstance(result, Exception):
+                errors.append(f"{task_type}/{seed}: {result}")
                 continue
 
-            search_volume = result.get("search_volume", 0) or 0
-            cpc = result.get("cpc", 0) or 0
+            if task_type == "search":
+                # Extract related searches
+                for item in result.get("relatedSearches", []):
+                    q = item.get("query", "").strip()
+                    if q:
+                        discovered_keywords.add(q)
+                # Extract PAA questions as keywords
+                for item in result.get("peopleAlsoAsk", []):
+                    q = item.get("question", "").strip()
+                    if q:
+                        discovered_keywords.add(q)
+            elif task_type == "autocomplete":
+                # Extract autocomplete suggestions
+                for item in result.get("suggestions", []):
+                    q = item.get("value", "").strip()
+                    if q:
+                        discovered_keywords.add(q)
 
-            raw_competition = result.get("competition", 0)
-            if isinstance(raw_competition, str):
-                competition = (result.get("competition_index") or 0) / 100.0
-            else:
-                competition = raw_competition or 0
-            competition_level = result.get("competition_level") or result.get("competition", "LOW")
-            if not isinstance(competition_level, str):
-                competition_level = "LOW"
+        if not discovered_keywords:
+            return KeywordExpansionResult(
+                keywords=[],
+                seed_keyword=seed_str,
+                source="serper+volume",
+                success=len(errors) == 0,
+                error="; ".join(errors[:3]) if errors else "No keywords discovered",
+            )
 
-            difficulty = self._estimate_difficulty(competition, search_volume)
+        logger.info(f"Serper discovered {len(discovered_keywords)} keyword candidates from {len(seed_keywords)} seeds")
 
-            monthly_searches = result.get("monthly_searches", [])
-            trend = None
-            if monthly_searches:
-                trend = [
-                    m.get("search_volume", 0) or 0
-                    for m in monthly_searches[-12:]
-                ]
+        # Step 2: Get volume/difficulty for discovered keywords via DataForSEO search_volume
+        kw_list = list(discovered_keywords)
+        volume_result = await self.get_keyword_metrics(
+            keywords=kw_list,
+            location_code=location_code,
+            language_code=language_code,
+        )
 
-            keywords.append(KeywordMetrics(
-                keyword=kw_text,
-                search_volume=search_volume,
-                difficulty=difficulty,
-                cpc=cpc,
-                competition=competition,
-                competition_level=competition_level,
-                trend=trend,
-            ))
+        if not volume_result.success:
+            # Return keywords without metrics if volume lookup fails
+            keywords = [
+                KeywordMetrics(
+                    keyword=kw, search_volume=0, difficulty=0,
+                    cpc=0, competition=0, competition_level="LOW",
+                )
+                for kw in kw_list
+            ]
+            return KeywordExpansionResult(
+                keywords=keywords,
+                seed_keyword=seed_str,
+                source="serper+volume",
+                success=True,
+                error=f"Volume lookup failed: {volume_result.error}",
+                cost=0,
+            )
 
         return KeywordExpansionResult(
-            keywords=keywords,
+            keywords=volume_result.keywords,
             seed_keyword=seed_str,
-            source="keywords_for_keywords",
+            source="serper+volume",
             success=True,
-            cost=cost,
+            cost=volume_result.cost,
         )

@@ -401,6 +401,12 @@ async def expand_keywords(
             status_code=303,
         )
 
+    if not settings.serper_api_key:
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error=SERPER_API_KEY not configured (needed for keyword discovery)",
+            status_code=303,
+        )
+
     try:
         from src.services.writing_pipeline.data_sources.dataforseo import DataForSEO
 
@@ -411,6 +417,7 @@ async def expand_keywords(
 
         language_code = topic.language or "ru"
         location_code = client.get_safe_location_code(topic.country or "ru")
+        region = topic.country or "ru"
 
         # Build existing keyword set for dedup
         existing_kw_set = {kw.keyword.lower().strip() for kw in all_keywords}
@@ -419,10 +426,12 @@ async def expand_keywords(
         new_first = sorted(all_keywords, key=lambda k: (0 if k.status == "new" else 1, k.keyword))
         seeds = [s.keyword for s in new_first[:20]]
 
-        # Single API call using Google Ads keywords_for_keywords endpoint
-        # (same tier as search_volume, no Labs subscription needed)
-        result = await client.get_keywords_for_keywords(
+        # Discover keywords via Serper.dev (related searches + PAA + autocomplete)
+        # then fetch volume via DataForSEO search_volume (the only working endpoint)
+        result = await client.get_keyword_suggestions_via_serper(
             seed_keywords=seeds,
+            serper_api_key=settings.serper_api_key,
+            region=region,
             location_code=location_code,
             language_code=language_code,
         )
@@ -432,6 +441,9 @@ async def expand_keywords(
 
         if not result.success:
             errors.append(f"{result.source}: {result.error}")
+        if result.error and result.success:
+            # Partial error (e.g. volume lookup failed but keywords discovered)
+            errors.append(result.error)
 
         # Collect unique discovered keywords (skip existing)
         discovered = {}
