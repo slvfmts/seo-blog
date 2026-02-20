@@ -164,7 +164,7 @@ class PipelineRunner:
         if self.ghost_url and self.ghost_admin_key:
             try:
                 from ...publisher import GhostPublisher
-                publisher = GhostPublisher(ghost_url=self.ghost_url, admin_api_key=self.ghost_admin_key)
+                publisher = GhostPublisher(ghost_url=self.ghost_url, admin_key=self.ghost_admin_key)
                 existing_posts = publisher.get_posts()
                 logger.info(f"Fetched {len(existing_posts)} existing posts from Ghost for overlap analysis")
             except Exception as e:
