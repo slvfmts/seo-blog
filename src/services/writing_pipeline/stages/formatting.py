@@ -189,13 +189,14 @@ class FormattingStage(WritingStage):
                     client_kwargs["default_headers"] = {"x-proxy-token": self.openai_proxy_secret}
             client = openai.OpenAI(**client_kwargs)
 
-            # Prepare article summary for cover prompt (first ~3000 chars + headings)
+            # Prepare article summary — DALL-E prompt limit is 4000 chars
             headings = re.findall(r'^#{1,3}\s+(.+)$', article_md, re.MULTILINE)
-            article_summary = article_md[:3000]
-            if headings:
-                article_summary += "\n\nЗаголовки: " + " | ".join(headings)
+            headings_text = "\n\nЗаголовки: " + " | ".join(headings) if headings else ""
+            base_len = len(COVER_PROMPT) + len(headings_text)
+            max_article = 4000 - base_len - 50  # 50 char safety margin
+            article_summary = article_md[:max(500, max_article)]
 
-            prompt = COVER_PROMPT + article_summary
+            prompt = COVER_PROMPT + article_summary + headings_text
 
             response = client.images.generate(
                 model="dall-e-3",
