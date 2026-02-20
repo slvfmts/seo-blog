@@ -409,6 +409,32 @@ class TerminologyCanon:
 
 
 @dataclass
+class DraftMeta:
+    """Metadata from drafting stage about claim usage and overlap handling."""
+    used_allowed_claims: List[str] = field(default_factory=list)
+    softened_claims_count: int = 0
+    overlap_compressions: List[str] = field(default_factory=list)
+    link_suggestions: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "used_allowed_claims": self.used_allowed_claims,
+            "softened_claims_count": self.softened_claims_count,
+            "overlap_compressions": self.overlap_compressions,
+            "link_suggestions": self.link_suggestions,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DraftMeta":
+        return cls(
+            used_allowed_claims=data.get("used_allowed_claims", []),
+            softened_claims_count=data.get("softened_claims_count", 0),
+            overlap_compressions=data.get("overlap_compressions", []),
+            link_suggestions=data.get("link_suggestions", []),
+        )
+
+
+@dataclass
 class ResearchResult:
     """
     Output of Research stage (Fact Packer).

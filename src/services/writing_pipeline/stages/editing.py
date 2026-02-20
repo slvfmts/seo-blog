@@ -2,6 +2,8 @@
 Editing Stage - Final editing and markdown formatting.
 """
 
+import json
+
 from ..core.stage import WritingStage
 from ..core.context import WritingContext
 
@@ -14,6 +16,7 @@ class EditingStage(WritingStage):
     - Improves clarity and readability
     - Removes filler words and repetition
     - Ensures consistent markdown formatting
+    - Preserves tone from intent spec
     - Does NOT add new facts or change meaning
     """
 
@@ -30,8 +33,12 @@ class EditingStage(WritingStage):
                 raise ValueError("Drafting stage must be completed before editing")
 
             # Load and fill prompt template
-            prompt_template = self._load_prompt("editing_v1")
+            prompt_template = self._load_prompt("editing_v2")
             prompt = prompt_template.replace("{{draft_md}}", context.draft_md)
+
+            # Inject intent_spec so editor knows audience/tone
+            intent_json = json.dumps(context.intent.to_dict(), ensure_ascii=False, indent=2) if context.intent else "{}"
+            prompt = prompt.replace("{{intent_spec_json}}", intent_json)
 
             # Call LLM
             response_text, tokens = self._call_llm(
