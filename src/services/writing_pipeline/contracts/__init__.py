@@ -409,6 +409,26 @@ class TerminologyCanon:
 
 
 @dataclass
+class QualityGateResult:
+    """Output of Quality Gate stage."""
+    article_md: str
+    quality_report: Dict[str, Any]
+
+    def to_dict(self) -> dict:
+        return {
+            "article_md": self.article_md,
+            "quality_report": self.quality_report,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "QualityGateResult":
+        return cls(
+            article_md=data.get("article_md", ""),
+            quality_report=data.get("quality_report", {}),
+        )
+
+
+@dataclass
 class DraftMeta:
     """Metadata from drafting stage about claim usage and overlap handling."""
     used_allowed_claims: List[str] = field(default_factory=list)

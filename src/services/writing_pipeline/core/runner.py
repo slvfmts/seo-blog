@@ -22,6 +22,7 @@ from ..stages import (
     EditingStage,
     LinkingStage,
     SeoPolishStage,
+    QualityGateStage,
     MetaStage,
 )
 
@@ -31,7 +32,7 @@ class PipelineRunner:
     Orchestrates the multi-stage article writing pipeline.
 
     Flow:
-    topic -> Intent -> Research -> Structure -> Drafting -> Editing -> Linking -> SEO Polish -> Meta -> article.md
+    topic -> Intent -> Research -> Structure -> Drafting -> Editing -> Linking -> SEO Polish -> Quality Gate -> Meta -> article.md
 
     Features:
     - Executes stages sequentially with shared context
@@ -114,6 +115,7 @@ class PipelineRunner:
             EditingStage(client=self.client, model=self.model),
             LinkingStage(client=self.client, model=self.model, linker=self.linker),
             SeoPolishStage(client=self.client, model=self.model),
+            QualityGateStage(client=self.client, model=self.model),
             MetaStage(client=self.client, model=self.model),
         ]
 
