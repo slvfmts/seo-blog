@@ -4,7 +4,11 @@ WritingStage - Abstract base class for pipeline stages.
 
 from abc import ABC, abstractmethod
 from typing import Optional
+import time
+import logging
 import anthropic
+
+logger = logging.getLogger(__name__)
 
 from .context import WritingContext
 
@@ -69,27 +73,40 @@ class WritingStage(ABC):
         Returns:
             Tuple of (response_text, tokens_used)
         """
-        chunks = []
-        input_tokens = 0
-        output_tokens = 0
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                chunks = []
 
-        with self.client.messages.stream(
-            model=self.model,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-        ) as stream:
-            for text in stream.text_stream:
-                chunks.append(text)
+                with self.client.messages.stream(
+                    model=self.model,
+                    max_tokens=max_tokens,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                ) as stream:
+                    for text in stream.text_stream:
+                        chunks.append(text)
 
-        response = stream.get_final_message()
-        input_tokens = response.usage.input_tokens
-        output_tokens = response.usage.output_tokens
+                response = stream.get_final_message()
+                input_tokens = response.usage.input_tokens
+                output_tokens = response.usage.output_tokens
 
-        text = "".join(chunks)
-        tokens = input_tokens + output_tokens
+                text = "".join(chunks)
+                tokens = input_tokens + output_tokens
 
-        return text, tokens
+                return text, tokens
+
+            except (anthropic.APIStatusError, anthropic.APIConnectionError) as e:
+                is_retryable = isinstance(e, anthropic.APIConnectionError) or (
+                    hasattr(e, 'status_code') and e.status_code in (429, 500, 502, 503, 529)
+                ) or 'overloaded' in str(e).lower()
+
+                if is_retryable and attempt < max_retries - 1:
+                    wait = 2 ** (attempt + 1)  # 2, 4 seconds
+                    logger.warning(f"LLM call failed (attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait}s...")
+                    time.sleep(wait)
+                    continue
+                raise
 
     def _parse_json_response(self, text: str) -> dict:
         """Parse JSON from LLM response, handling markdown code blocks."""
