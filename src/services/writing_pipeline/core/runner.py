@@ -4,8 +4,11 @@ PipelineRunner - Orchestrates the writing pipeline stages.
 
 import os
 import json
+import logging
 from datetime import datetime
 from typing import Optional, List, Callable
+
+logger = logging.getLogger(__name__)
 
 import anthropic
 
@@ -156,6 +159,17 @@ class PipelineRunner:
         if config:
             pipeline_config.update(config)
 
+        # Fetch existing posts from Ghost for cluster overlap analysis
+        existing_posts = []
+        if self.ghost_url and self.ghost_admin_key:
+            try:
+                from ...publisher import GhostPublisher
+                publisher = GhostPublisher(ghost_url=self.ghost_url, admin_api_key=self.ghost_admin_key)
+                existing_posts = publisher.get_posts()
+                logger.info(f"Fetched {len(existing_posts)} existing posts from Ghost for overlap analysis")
+            except Exception as e:
+                logger.warning(f"Failed to fetch existing posts from Ghost: {e}")
+
         # Initialize context
         context = WritingContext(
             topic=topic,
@@ -164,6 +178,7 @@ class PipelineRunner:
             save_intermediate=save_intermediate,
             started_at=datetime.now(),
             config=pipeline_config,
+            existing_posts=existing_posts,
         )
 
         # Run all stages
