@@ -64,20 +64,30 @@ class WritingStage(ABC):
         temperature: float = 0.7,
     ) -> tuple[str, int]:
         """
-        Call the LLM with a prompt.
+        Call the LLM with a prompt using streaming to avoid proxy timeouts.
 
         Returns:
             Tuple of (response_text, tokens_used)
         """
-        response = self.client.messages.create(
+        chunks = []
+        input_tokens = 0
+        output_tokens = 0
+
+        with self.client.messages.stream(
             model=self.model,
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
             temperature=temperature,
-        )
+        ) as stream:
+            for text in stream.text_stream:
+                chunks.append(text)
 
-        text = response.content[0].text
-        tokens = response.usage.input_tokens + response.usage.output_tokens
+        response = stream.get_final_message()
+        input_tokens = response.usage.input_tokens
+        output_tokens = response.usage.output_tokens
+
+        text = "".join(chunks)
+        tokens = input_tokens + output_tokens
 
         return text, tokens
 
