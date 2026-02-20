@@ -1372,7 +1372,10 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
             "drafting": "completed",
             "editing": "completed",
             "linking": "completed",
+            "seo_polish": "completed",
+            "quality_gate": "completed",
             "meta": "completed",
+            "formatting": "completed",
         }
 
         # Save SEO metadata from Meta stage
