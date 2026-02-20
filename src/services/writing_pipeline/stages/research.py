@@ -770,11 +770,32 @@ class ResearchStage(WritingStage):
 
         response_text, tokens = self._call_llm(
             prompt,
-            max_tokens=8192,
+            max_tokens=12000,
             temperature=0.5,
         )
 
         data = self._parse_json_response(response_text)
+
+        # Ensure v2 fields are present (graceful degradation)
+        if "claim_bank" not in data or data["claim_bank"] is None:
+            data["claim_bank"] = {"allowed_claims": [], "disallowed_claim_patterns": []}
+            logger.warning("claim_bank missing from LLM response, using empty default")
+        if "unique_angle" not in data or data["unique_angle"] is None:
+            data["unique_angle"] = {
+                "article_role": "cluster",
+                "primary_intent": context.intent.primary_intent if context.intent else "",
+                "differentiators": [],
+                "must_not_cover": [],
+            }
+            logger.warning("unique_angle missing from LLM response, using empty default")
+        if "example_snippets" not in data:
+            data["example_snippets"] = []
+        if "terminology_canon" not in data or data["terminology_canon"] is None:
+            data["terminology_canon"] = {"terms": {}, "do_not_use": []}
+            logger.warning("terminology_canon missing from LLM response, using empty default")
+        if "cluster_overlap_map" not in data:
+            data["cluster_overlap_map"] = []
+
         return ResearchResult.from_dict(data), tokens
 
     def _format_existing_posts_for_prompt(self, existing_posts: List[Dict[str, Any]]) -> str:
