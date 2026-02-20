@@ -24,6 +24,7 @@ from ..stages import (
     SeoPolishStage,
     QualityGateStage,
     MetaStage,
+    FormattingStage,
 )
 
 
@@ -32,7 +33,7 @@ class PipelineRunner:
     Orchestrates the multi-stage article writing pipeline.
 
     Flow:
-    topic -> Intent -> Research -> Structure -> Drafting -> Editing -> Linking -> SEO Polish -> Quality Gate -> Meta -> article.md
+    topic -> Intent -> Research -> Structure -> Drafting -> Editing -> Linking -> SEO Polish -> Quality Gate -> Meta -> Formatting -> article.md
 
     Features:
     - Executes stages sequentially with shared context
@@ -54,6 +55,7 @@ class PipelineRunner:
         ghost_url: Optional[str] = None,
         ghost_admin_key: Optional[str] = None,
         database_url: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
     ):
         """
         Initialize the pipeline runner.
@@ -89,6 +91,7 @@ class PipelineRunner:
         self.ghost_url = ghost_url
         self.ghost_admin_key = ghost_admin_key
         self.database_url = database_url
+        self.openai_api_key = openai_api_key or ""
 
         # Initialize internal linker if database_url is provided
         self.linker = None
@@ -117,6 +120,7 @@ class PipelineRunner:
             SeoPolishStage(client=self.client, model=self.model),
             QualityGateStage(client=self.client, model=self.model),
             MetaStage(client=self.client, model=self.model),
+            FormattingStage(client=self.client, model=self.model, openai_api_key=self.openai_api_key),
         ]
 
     async def run(

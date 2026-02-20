@@ -409,6 +409,61 @@ class TerminologyCanon:
 
 
 @dataclass
+class FormattingAsset:
+    """An asset produced by the formatting stage."""
+    type: Literal["cover", "diagram"]
+    filename: str
+    path: str
+    alt: str
+    caption: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.type,
+            "filename": self.filename,
+            "path": self.path,
+            "alt": self.alt,
+            "caption": self.caption,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "FormattingAsset":
+        return cls(
+            type=data["type"],
+            filename=data["filename"],
+            path=data["path"],
+            alt=data["alt"],
+            caption=data.get("caption", ""),
+        )
+
+
+@dataclass
+class FormattingResult:
+    """Output of Formatting stage."""
+    assets: List[FormattingAsset] = field(default_factory=list)
+    cover_generated: bool = False
+    diagrams_count: int = 0
+    errors: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "assets": [a.to_dict() for a in self.assets],
+            "cover_generated": self.cover_generated,
+            "diagrams_count": self.diagrams_count,
+            "errors": self.errors,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "FormattingResult":
+        return cls(
+            assets=[FormattingAsset.from_dict(a) for a in data.get("assets", [])],
+            cover_generated=data.get("cover_generated", False),
+            diagrams_count=data.get("diagrams_count", 0),
+            errors=data.get("errors", []),
+        )
+
+
+@dataclass
 class QualityGateResult:
     """Output of Quality Gate stage."""
     article_md: str

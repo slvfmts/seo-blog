@@ -62,6 +62,7 @@ services:
       SECRET_KEY: ${SECRET_KEY}
       AUTH_EMAIL: ${AUTH_EMAIL}
       AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
       UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
     volumes:
       - ./src:/app/src

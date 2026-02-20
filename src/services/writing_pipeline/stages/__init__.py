@@ -11,6 +11,7 @@ from .linking import LinkingStage
 from .seo_polish import SeoPolishStage
 from .quality_gate import QualityGateStage
 from .meta import MetaStage
+from .formatting import FormattingStage
 
 __all__ = [
     "IntentStage",
@@ -22,4 +23,5 @@ __all__ = [
     "SeoPolishStage",
     "QualityGateStage",
     "MetaStage",
+    "FormattingStage",
 ]

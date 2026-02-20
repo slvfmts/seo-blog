@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     dataforseo_login: str = ""
     dataforseo_password: str = ""
 
+    # OpenAI (DALL-E covers)
+    openai_api_key: str = ""
+
     # Auth
     secret_key: str = "change-me-in-production"
     auth_email: str = ""

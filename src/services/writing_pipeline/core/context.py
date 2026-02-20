@@ -44,6 +44,7 @@ class WritingContext:
     keyword_metrics: Optional[KeywordMetricsResult] = None
     draft_meta: Optional[DraftMeta] = None  # v3 drafting metadata
     quality_report: Optional[Dict[str, Any]] = None  # v3 quality gate report
+    formatting_result: Optional[Any] = None  # FormattingResult from formatting stage
 
     # External data (fetched before pipeline starts)
     existing_posts: List[Dict[str, Any]] = field(default_factory=list)

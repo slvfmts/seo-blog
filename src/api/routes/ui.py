@@ -1302,7 +1302,10 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
             "drafting": "pending",
             "editing": "pending",
             "linking": "pending",
+            "seo_polish": "pending",
+            "quality_gate": "pending",
             "meta": "pending",
+            "formatting": "pending",
         }
         db.commit()
 
@@ -1318,6 +1321,7 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
             ghost_url=settings.ghost_url or None,
             ghost_admin_key=settings.ghost_admin_key or None,
             database_url=settings.database_url or None,
+            openai_api_key=getattr(settings, 'openai_api_key', None),
         )
 
         # Stage progress callback — updates DB after each stage
