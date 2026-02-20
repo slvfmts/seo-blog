@@ -349,6 +349,66 @@ class CoverageItem:
 
 
 @dataclass
+class ClaimEvidence:
+    """Evidence backing a claim."""
+    source_title: str
+    source_url: str
+    supporting_quote_or_note: str  # ≤25 words quote or summary note
+
+
+@dataclass
+class ClaimItem:
+    """A verified claim that may be used in the article."""
+    claim_text: str  # 1-2 sentences
+    claim_type: Literal["definition", "benchmark", "best_practice", "process", "metric", "tooling"]
+    evidence: ClaimEvidence
+    allowed_numeric: bool  # whether exact numbers may be used
+    allowed_ranges: Optional[str] = None  # e.g. "5-15%"
+    use_rules: str = ""  # context, segment, caveats
+
+
+@dataclass
+class ClaimBank:
+    """Bank of verified claims and disallowed patterns."""
+    allowed_claims: List[ClaimItem]
+    disallowed_claim_patterns: List[str]  # e.g. "гарантированно", "всегда", regex-like
+
+
+@dataclass
+class UniqueAngle:
+    """Unique editorial angle for the article."""
+    article_role: Literal["pillar", "cluster"]
+    primary_intent: str  # one phrase: why the reader came
+    differentiators: List[str]  # 5-7 bullets: what makes this article unique
+    must_not_cover: List[str]  # 5-7 bullets: topics covered elsewhere in cluster
+
+
+@dataclass
+class ClusterOverlapEntry:
+    """Overlap with an existing post in the cluster."""
+    post_slug: str
+    overlap_topics: List[str]  # 3-7 topics already covered there
+    avoid_sections: List[str]  # H2-level blocks not to repeat
+    suggest_links: List[str]  # 1-3 places to link to this post
+
+
+@dataclass
+class ExampleSnippet:
+    """A micro-example suitable for insertion in the article."""
+    scenario: str  # e.g. "B2B SaaS с длинным внедрением"
+    snippet: str  # 1-2 sentences
+    where_to_use: Literal["intro", "process", "metrics", "strategy", "tools", "faq"]
+    source_basis: str  # URL or "PAA/общепринятый паттерн"
+
+
+@dataclass
+class TerminologyCanon:
+    """Canonical terminology for the article."""
+    terms: Dict[str, str]  # term -> normalized spelling / explanation / when to use
+    do_not_use: List[str]  # forbidden formulations, keyword-bag patterns
+
+
+@dataclass
 class ResearchResult:
     """
     Output of Research stage (Fact Packer).
@@ -371,6 +431,13 @@ class ResearchResult:
     competitor_analysis: Optional[Dict[str, Any]] = None
     eeat_signals: Optional[Dict[str, Any]] = None
     keyword_clusters: Optional["KeywordClusteringResult"] = None
+
+    # v2 fields (EDI-82)
+    claim_bank: Optional[ClaimBank] = None
+    unique_angle: Optional[UniqueAngle] = None
+    cluster_overlap_map: List[ClusterOverlapEntry] = field(default_factory=list)
+    example_snippets: List[ExampleSnippet] = field(default_factory=list)
+    terminology_canon: Optional[TerminologyCanon] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "ResearchResult":
@@ -480,6 +547,65 @@ class ResearchResult:
             competitor_analysis=data.get("competitor_analysis"),
             eeat_signals=data.get("eeat_signals"),
             keyword_clusters=KeywordClusteringResult.from_dict(data["keyword_clusters"]) if data.get("keyword_clusters") else None,
+            claim_bank=cls._parse_claim_bank(data.get("claim_bank")) if data.get("claim_bank") else None,
+            unique_angle=cls._parse_unique_angle(data.get("unique_angle")) if data.get("unique_angle") else None,
+            cluster_overlap_map=[
+                ClusterOverlapEntry(
+                    post_slug=e["post_slug"],
+                    overlap_topics=e.get("overlap_topics", []),
+                    avoid_sections=e.get("avoid_sections", []),
+                    suggest_links=e.get("suggest_links", []),
+                )
+                for e in data.get("cluster_overlap_map", [])
+            ],
+            example_snippets=[
+                ExampleSnippet(
+                    scenario=es["scenario"],
+                    snippet=es["snippet"],
+                    where_to_use=es.get("where_to_use", "process"),
+                    source_basis=es.get("source_basis", ""),
+                )
+                for es in data.get("example_snippets", [])
+            ],
+            terminology_canon=TerminologyCanon(
+                terms=data["terminology_canon"].get("terms", {}),
+                do_not_use=data["terminology_canon"].get("do_not_use", []),
+            ) if data.get("terminology_canon") else None,
+        )
+
+    @staticmethod
+    def _parse_claim_bank(data: dict) -> ClaimBank:
+        claims = []
+        for c in data.get("allowed_claims", []):
+            ev_data = c.get("evidence", {})
+            if isinstance(ev_data, str):
+                ev = ClaimEvidence(source_title="", source_url="", supporting_quote_or_note=ev_data)
+            else:
+                ev = ClaimEvidence(
+                    source_title=ev_data.get("source_title", ""),
+                    source_url=ev_data.get("source_url", ""),
+                    supporting_quote_or_note=ev_data.get("supporting_quote_or_note", ""),
+                )
+            claims.append(ClaimItem(
+                claim_text=c["claim_text"],
+                claim_type=c.get("claim_type", "definition"),
+                evidence=ev,
+                allowed_numeric=c.get("allowed_numeric", False),
+                allowed_ranges=c.get("allowed_ranges"),
+                use_rules=c.get("use_rules", ""),
+            ))
+        return ClaimBank(
+            allowed_claims=claims,
+            disallowed_claim_patterns=data.get("disallowed_claim_patterns", []),
+        )
+
+    @staticmethod
+    def _parse_unique_angle(data: dict) -> UniqueAngle:
+        return UniqueAngle(
+            article_role=data.get("article_role", "cluster"),
+            primary_intent=data.get("primary_intent", ""),
+            differentiators=data.get("differentiators", []),
+            must_not_cover=data.get("must_not_cover", []),
         )
 
     def to_dict(self) -> dict:
@@ -589,6 +715,52 @@ class ResearchResult:
             "competitor_analysis": self.competitor_analysis,
             "eeat_signals": self.eeat_signals,
             "keyword_clusters": self.keyword_clusters.to_dict() if self.keyword_clusters else None,
+            "claim_bank": {
+                "allowed_claims": [
+                    {
+                        "claim_text": c.claim_text,
+                        "claim_type": c.claim_type,
+                        "evidence": {
+                            "source_title": c.evidence.source_title,
+                            "source_url": c.evidence.source_url,
+                            "supporting_quote_or_note": c.evidence.supporting_quote_or_note,
+                        },
+                        "allowed_numeric": c.allowed_numeric,
+                        "allowed_ranges": c.allowed_ranges,
+                        "use_rules": c.use_rules,
+                    }
+                    for c in self.claim_bank.allowed_claims
+                ],
+                "disallowed_claim_patterns": self.claim_bank.disallowed_claim_patterns,
+            } if self.claim_bank else None,
+            "unique_angle": {
+                "article_role": self.unique_angle.article_role,
+                "primary_intent": self.unique_angle.primary_intent,
+                "differentiators": self.unique_angle.differentiators,
+                "must_not_cover": self.unique_angle.must_not_cover,
+            } if self.unique_angle else None,
+            "cluster_overlap_map": [
+                {
+                    "post_slug": e.post_slug,
+                    "overlap_topics": e.overlap_topics,
+                    "avoid_sections": e.avoid_sections,
+                    "suggest_links": e.suggest_links,
+                }
+                for e in self.cluster_overlap_map
+            ],
+            "example_snippets": [
+                {
+                    "scenario": es.scenario,
+                    "snippet": es.snippet,
+                    "where_to_use": es.where_to_use,
+                    "source_basis": es.source_basis,
+                }
+                for es in self.example_snippets
+            ],
+            "terminology_canon": {
+                "terms": self.terminology_canon.terms,
+                "do_not_use": self.terminology_canon.do_not_use,
+            } if self.terminology_canon else None,
         }
 
 

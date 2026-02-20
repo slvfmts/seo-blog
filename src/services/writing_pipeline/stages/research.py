@@ -730,8 +730,8 @@ class ResearchStage(WritingStage):
         context: WritingContext,
         competitor_pages: Optional[Dict[str, Any]] = None,
     ) -> tuple[ResearchResult, int]:
-        """Pack search results into structured research pack."""
-        prompt_template = self._load_prompt("research_packer_v1")
+        """Pack search results into structured research pack (v2 with claim_bank, unique_angle, etc.)."""
+        prompt_template = self._load_prompt("research_packer_v2")
 
         intent_json = json.dumps(context.intent.to_dict(), ensure_ascii=False, indent=2)
         search_json = json.dumps(context.search_results, ensure_ascii=False, indent=2)
@@ -758,6 +758,16 @@ class ResearchStage(WritingStage):
         else:
             prompt = prompt.replace("{{competitor_pages_json}}", "null")
 
+        # Add existing posts for cluster overlap analysis
+        if context.existing_posts:
+            existing_posts_summary = self._format_existing_posts_for_prompt(context.existing_posts)
+            prompt = prompt.replace(
+                "{{existing_posts_json}}",
+                existing_posts_summary,
+            )
+        else:
+            prompt = prompt.replace("{{existing_posts_json}}", "null")
+
         response_text, tokens = self._call_llm(
             prompt,
             max_tokens=8192,
@@ -766,6 +776,22 @@ class ResearchStage(WritingStage):
 
         data = self._parse_json_response(response_text)
         return ResearchResult.from_dict(data), tokens
+
+    def _format_existing_posts_for_prompt(self, existing_posts: List[Dict[str, Any]]) -> str:
+        """Format existing posts for inclusion in research packer prompt."""
+        if not existing_posts:
+            return "null"
+
+        items = []
+        for post in existing_posts:
+            items.append({
+                "title": post.get("title", ""),
+                "slug": post.get("slug", ""),
+                "excerpt": post.get("excerpt", post.get("custom_excerpt", ""))[:300],
+                "url": post.get("url", ""),
+            })
+
+        return json.dumps(items, ensure_ascii=False, indent=2)
 
     def _format_keyword_metrics_for_prompt(self, metrics: KeywordMetricsResult) -> str:
         """Format keyword metrics for inclusion in prompt."""
