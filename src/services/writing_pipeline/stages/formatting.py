@@ -90,9 +90,13 @@ class FormattingStage(WritingStage):
         client: anthropic.Anthropic,
         model: str = "claude-sonnet-4-20250514",
         openai_api_key: str = "",
+        openai_proxy_url: str = "",
+        openai_proxy_secret: str = "",
     ):
         super().__init__(client=client, model=model)
         self.openai_api_key = openai_api_key
+        self.openai_proxy_url = openai_proxy_url
+        self.openai_proxy_secret = openai_proxy_secret
 
     @property
     def name(self) -> str:
@@ -178,7 +182,12 @@ class FormattingStage(WritingStage):
         try:
             import openai
 
-            client = openai.OpenAI(api_key=self.openai_api_key)
+            client_kwargs = {"api_key": self.openai_api_key}
+            if self.openai_proxy_url:
+                client_kwargs["base_url"] = self.openai_proxy_url
+                if self.openai_proxy_secret:
+                    client_kwargs["default_headers"] = {"x-proxy-token": self.openai_proxy_secret}
+            client = openai.OpenAI(**client_kwargs)
 
             # Prepare article summary for cover prompt (first ~3000 chars + headings)
             headings = re.findall(r'^#{1,3}\s+(.+)$', article_md, re.MULTILINE)

@@ -56,6 +56,7 @@ class PipelineRunner:
         ghost_admin_key: Optional[str] = None,
         database_url: Optional[str] = None,
         openai_api_key: Optional[str] = None,
+        openai_proxy_url: Optional[str] = None,
     ):
         """
         Initialize the pipeline runner.
@@ -92,6 +93,8 @@ class PipelineRunner:
         self.ghost_admin_key = ghost_admin_key
         self.database_url = database_url
         self.openai_api_key = openai_api_key or ""
+        self.openai_proxy_url = openai_proxy_url or ""
+        self.openai_proxy_secret = proxy_secret or ""  # reuse Anthropic proxy secret
 
         # Initialize internal linker if database_url is provided
         self.linker = None
@@ -120,7 +123,7 @@ class PipelineRunner:
             SeoPolishStage(client=self.client, model=self.model),
             QualityGateStage(client=self.client, model=self.model),
             MetaStage(client=self.client, model=self.model),
-            FormattingStage(client=self.client, model=self.model, openai_api_key=self.openai_api_key),
+            FormattingStage(client=self.client, model=self.model, openai_api_key=self.openai_api_key, openai_proxy_url=self.openai_proxy_url, openai_proxy_secret=self.openai_proxy_secret),
         ]
 
     async def run(

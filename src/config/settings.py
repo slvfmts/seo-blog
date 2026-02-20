@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     # OpenAI (DALL-E covers)
     openai_api_key: str = ""
+    openai_proxy_url: str = ""  # Cloudflare Worker URL для обхода geo-блокировки OpenAI
 
     # Auth
     secret_key: str = "change-me-in-production"

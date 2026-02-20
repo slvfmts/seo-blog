@@ -129,6 +129,7 @@ async def main():
         ghost_admin_key=ghost_admin_key,
         database_url=database_url,
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+        openai_proxy_url=os.getenv("OPENAI_PROXY_URL", ""),
     )
 
     # Pipeline configuration

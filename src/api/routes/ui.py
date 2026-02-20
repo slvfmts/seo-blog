@@ -1322,6 +1322,7 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
             ghost_admin_key=settings.ghost_admin_key or None,
             database_url=settings.database_url or None,
             openai_api_key=getattr(settings, 'openai_api_key', None),
+            openai_proxy_url=getattr(settings, 'openai_proxy_url', None),
         )
 
         # Stage progress callback — updates DB after each stage

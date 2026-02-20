@@ -63,6 +63,7 @@ services:
       AUTH_EMAIL: ${AUTH_EMAIL}
       AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_PROXY_URL: ${OPENAI_PROXY_URL}
       UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
     volumes:
       - ./src:/app/src
