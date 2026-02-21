@@ -1159,7 +1159,7 @@ async def validate_draft(request: Request, draft_id: UUID, db: Session = Depends
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
 
-    if draft.status not in ("generated", "validated", "validation_failed"):
+    if draft.status not in ("generated", "validated", "validation_failed", "pipeline_completed"):
         return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=303)
 
     try:
@@ -1181,7 +1181,7 @@ async def approve_draft(request: Request, draft_id: UUID, db: Session = Depends(
         raise HTTPException(status_code=404, detail="Draft not found")
 
     # Allow approve from any post-generation status
-    if draft.status in ("generated", "validated", "validation_failed"):
+    if draft.status in ("generated", "validated", "validation_failed", "pipeline_completed"):
         draft.status = "approved"
         db.commit()
 
