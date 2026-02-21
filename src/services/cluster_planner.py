@@ -116,7 +116,10 @@ class ClusterPlanner:
 {snippets_text}
 """
 
+        today = datetime.now().strftime("%Y-%m-%d")
         prompt = f"""Ты SEO-стратег. Для большой темы "{big_topic}" (регион: {region}) сгенерируй {target_count * 3} подтем-кандидатов для статей.
+
+Сегодня: {today}
 {kb_section}
 Правила:
 - Каждая подтема — конкретная, чтобы по ней можно было написать отдельную статью
@@ -236,7 +239,10 @@ class ClusterPlanner:
             kw_data.append({"keyword": kw, "volume": vol})
         kw_data.sort(key=lambda x: x["volume"], reverse=True)
 
+        today = datetime.now().strftime("%Y-%m-%d")
         prompt = f"""Ты SEO-стратег. На основе ключевых слов ниже создай кластерный план для темы "{big_topic}" (регион: {region}).
+
+Сегодня: {today}
 
 ## Ключевые слова с объёмами:
 {json.dumps(kw_data[:200], ensure_ascii=False, indent=2)}

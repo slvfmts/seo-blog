@@ -3,6 +3,7 @@ Intent Stage - Analyzes topic and creates editorial contract.
 """
 
 import logging
+from datetime import datetime
 from ..core.stage import WritingStage
 from ..core.context import WritingContext
 from ..contracts import IntentResult
@@ -42,6 +43,7 @@ class IntentStage(WritingStage):
                 prompt_template = self._load_prompt("intent_v1")
                 prompt = prompt_template.replace("{{topic}}", context.topic)
                 prompt = prompt.replace("{{region}}", context.region)
+                prompt = prompt.replace("{{today}}", datetime.now().strftime("%Y-%m-%d"))
 
                 # Append brief context to the prompt
                 prompt += f"""
@@ -62,6 +64,7 @@ class IntentStage(WritingStage):
                 prompt_template = self._load_prompt("intent_v1")
                 prompt = prompt_template.replace("{{topic}}", context.topic)
                 prompt = prompt.replace("{{region}}", context.region)
+                prompt = prompt.replace("{{today}}", datetime.now().strftime("%Y-%m-%d"))
 
             # Call LLM
             response_text, tokens = self._call_llm(
