@@ -1972,6 +1972,42 @@ async def delete_brief(
     )
 
 
+def _update_cluster_status(db, cluster_id: str):
+    """Check if all briefs in cluster are done and update cluster status."""
+    cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
+    if not cluster:
+        return
+
+    child_ids = [c.id for c in db.query(models.Cluster).filter(
+        models.Cluster.parent_cluster_id == cluster_id,
+    ).all()]
+    all_ids = [cluster.id] + child_ids
+
+    briefs = db.query(models.Brief).filter(
+        models.Brief.cluster_id.in_(all_ids),
+        models.Brief.status.in_(["in_writing", "completed"]),
+    ).all()
+
+    if not briefs:
+        return
+
+    statuses = [b.status for b in briefs]
+    if all(s == "completed" for s in statuses):
+        cluster.status = "published"
+        db.commit()
+    elif any(s == "in_writing" for s in statuses):
+        pass  # still in_progress
+    else:
+        # All done but some might have failed (brief stayed in_writing with failed draft)
+        has_running = db.query(models.Draft).filter(
+            models.Draft.brief_id.in_([b.id for b in briefs]),
+            models.Draft.status == "pipeline_running",
+        ).first()
+        if not has_running:
+            cluster.status = "published"
+            db.commit()
+
+
 def _run_pipeline_for_brief(
     brief_id: str,
     site_id: str,
@@ -1980,6 +2016,7 @@ def _run_pipeline_for_brief(
     brief_data: dict,
     settings,
     knowledge_base_docs: list = None,
+    cluster_id: str = None,
 ):
     """Background task: run pipeline for a single brief."""
     import asyncio
@@ -2053,6 +2090,9 @@ def _run_pipeline_for_brief(
             import traceback
             traceback.print_exc()
             try:
+                brief_obj = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
+                if brief_obj:
+                    brief_obj.status = "error"
                 draft = db.query(models.Draft).filter(
                     models.Draft.brief_id == brief_id,
                     models.Draft.status == "pipeline_running",
@@ -2061,10 +2101,16 @@ def _run_pipeline_for_brief(
                     draft.status = "pipeline_failed"
                     draft.pipeline_status = "failed"
                     draft.pipeline_error = str(e)[:1000]
-                    db.commit()
+                db.commit()
             except Exception:
                 pass
         finally:
+            # Update cluster status after each brief completes
+            if cluster_id:
+                try:
+                    _update_cluster_status(db, cluster_id)
+                except Exception:
+                    pass
             db.close()
 
     asyncio.run(_run())
@@ -2083,6 +2129,13 @@ async def generate_cluster_articles(
     cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster not found")
+
+    # Guard: don't allow double-generation
+    if cluster.status == "in_progress":
+        return RedirectResponse(
+            url=f"/ui/clusters/{cluster_id}?error=Генерация уже запущена",
+            status_code=303,
+        )
 
     # Get approved briefs from this cluster + children
     child_ids = [c.id for c in db.query(models.Cluster).filter(
@@ -2110,6 +2163,7 @@ async def generate_cluster_articles(
 
     region = "ru"
     queued = 0
+    skipped = 0
 
     # Load KB docs from site's attached knowledge folders
     site = db.query(models.Site).filter(models.Site.id == cluster.site_id).first()
@@ -2126,16 +2180,28 @@ async def generate_cluster_articles(
                     })
 
     for brief in approved_briefs:
+        # Skip briefs already being processed or completed
+        if brief.status in ("in_writing", "completed"):
+            skipped += 1
+            continue
+
+        # Validate brief.structure before passing to pipeline
+        structure = brief.structure if isinstance(brief.structure, dict) else {}
+        if not structure:
+            print(f"[cluster-generate] Skipping brief {brief.id}: empty structure")
+            skipped += 1
+            continue
+
         brief_data = {
             "title_candidate": brief.title,
-            "role": brief.structure.get("role", "cluster") if isinstance(brief.structure, dict) else "cluster",
-            "primary_intent": brief.structure.get("primary_intent", "informational") if isinstance(brief.structure, dict) else "informational",
-            "topic_boundaries": brief.structure.get("topic_boundaries", {}) if isinstance(brief.structure, dict) else {},
-            "must_answer_questions": brief.structure.get("must_answer_questions", []) if isinstance(brief.structure, dict) else [],
+            "role": structure.get("role", "cluster"),
+            "primary_intent": structure.get("primary_intent", "informational"),
+            "topic_boundaries": structure.get("topic_boundaries", {}),
+            "must_answer_questions": structure.get("must_answer_questions", []),
             "target_terms": [brief.target_keyword] + (brief.secondary_keywords or []),
-            "unique_angle": brief.structure.get("unique_angle", {}) if isinstance(brief.structure, dict) else {},
-            "internal_links_plan": brief.structure.get("internal_links_plan", []) if isinstance(brief.structure, dict) else [],
-            "seed_queries": brief.structure.get("seed_queries", []) if isinstance(brief.structure, dict) else [],
+            "unique_angle": structure.get("unique_angle", {}),
+            "internal_links_plan": structure.get("internal_links_plan", []),
+            "seed_queries": structure.get("seed_queries", []),
         }
 
         brief.status = "in_writing"
@@ -2150,8 +2216,15 @@ async def generate_cluster_articles(
             brief_data,
             settings,
             kb_docs,
+            str(cluster_id),
         )
         queued += 1
+
+    if queued == 0:
+        return RedirectResponse(
+            url=f"/ui/clusters/{cluster_id}?error=Нет брифов для генерации (пропущено: {skipped})",
+            status_code=303,
+        )
 
     cluster.status = "in_progress"
     db.commit()
