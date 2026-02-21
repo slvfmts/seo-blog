@@ -6,6 +6,7 @@ import json
 import hmac
 import hashlib
 import base64
+import re
 import httpx
 from datetime import datetime
 
@@ -57,6 +58,38 @@ class GhostPublisher:
         scripts = re.findall(r'<script[^>]*>.*?</script>', markdown, re.DOTALL)
         clean = re.sub(r'\s*<script[^>]*>.*?</script>\s*', '\n', markdown, flags=re.DOTALL).rstrip()
         return clean, '\n'.join(scripts)
+
+    def _resolve_link_placeholders(self, content: str) -> str:
+        """Replace [[LINK:slug|text]] placeholders with real markdown links."""
+        placeholders = re.findall(r'\[\[LINK:([^|]+)\|([^\]]+)\]\]', content)
+        if not placeholders:
+            return content
+
+        # Fetch slug→url map from Ghost
+        slug_to_url: dict[str, str] = {}
+        try:
+            token = self._create_jwt_token()
+            headers = {"Authorization": f"Ghost {token}"}
+            with httpx.Client(timeout=30.0) as client:
+                response = client.get(
+                    f"{self.ghost_url}/ghost/api/admin/posts/",
+                    headers=headers,
+                    params={"limit": "all", "fields": "slug,url", "status": "published"},
+                )
+                if response.status_code == 200:
+                    for post in response.json().get("posts", []):
+                        slug_to_url[post["slug"]] = post["url"]
+        except Exception:
+            pass  # Graceful degradation — unresolved placeholders become plain text
+
+        def replace_match(m: re.Match) -> str:
+            slug, text = m.group(1).strip(), m.group(2).strip()
+            url = slug_to_url.get(slug)
+            if url:
+                return f"[{text}]({url})"
+            return text  # No post found — leave anchor as plain text
+
+        return re.sub(r'\[\[LINK:([^|]+)\|([^\]]+)\]\]', replace_match, content)
 
     def _markdown_to_mobiledoc(self, markdown: str) -> str:
         """Конвертирует Markdown в Ghost mobiledoc формат."""
@@ -224,6 +257,7 @@ class GhostPublisher:
         }
 
         clean_content, extracted_scripts = self._extract_script_tags(content_md)
+        clean_content = self._resolve_link_placeholders(clean_content)
         post_data = {
             "posts": [{
                 "mobiledoc": self._markdown_to_mobiledoc(clean_content),
@@ -276,6 +310,7 @@ class GhostPublisher:
 
         # Extract <script> tags (e.g. JSON-LD) from content body
         clean_content, extracted_scripts = self._extract_script_tags(content)
+        clean_content = self._resolve_link_placeholders(clean_content)
 
         post_data = {
             "posts": [{
