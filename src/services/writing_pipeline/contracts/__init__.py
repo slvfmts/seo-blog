@@ -416,6 +416,7 @@ class FormattingAsset:
     path: str
     alt: str
     caption: str = ""
+    ghost_url: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -424,6 +425,7 @@ class FormattingAsset:
             "path": self.path,
             "alt": self.alt,
             "caption": self.caption,
+            "ghost_url": self.ghost_url,
         }
 
     @classmethod
@@ -434,6 +436,7 @@ class FormattingAsset:
             path=data["path"],
             alt=data["alt"],
             caption=data.get("caption", ""),
+            ghost_url=data.get("ghost_url", ""),
         )
 
 
@@ -444,6 +447,8 @@ class FormattingResult:
     cover_generated: bool = False
     diagrams_count: int = 0
     errors: List[str] = field(default_factory=list)
+    cover_ghost_url: str = ""
+    cover_image_alt: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -451,6 +456,8 @@ class FormattingResult:
             "cover_generated": self.cover_generated,
             "diagrams_count": self.diagrams_count,
             "errors": self.errors,
+            "cover_ghost_url": self.cover_ghost_url,
+            "cover_image_alt": self.cover_image_alt,
         }
 
     @classmethod
@@ -460,6 +467,8 @@ class FormattingResult:
             cover_generated=data.get("cover_generated", False),
             diagrams_count=data.get("diagrams_count", 0),
             errors=data.get("errors", []),
+            cover_ghost_url=data.get("cover_ghost_url", ""),
+            cover_image_alt=data.get("cover_image_alt", ""),
         )
 
 
@@ -1288,6 +1297,10 @@ class PipelineResult:
     # SEO metadata
     meta: Optional[MetaResult] = None
 
+    # Cover image
+    cover_image_url: str = ""
+    cover_image_alt: str = ""
+
     # Intermediate results (for debugging/logging)
     intent: IntentResult = None
     research: ResearchResult = None
@@ -1311,6 +1324,8 @@ class PipelineResult:
             "title": self.title,
             "subtitle": self.subtitle,
             "word_count": self.word_count,
+            "cover_image_url": self.cover_image_url,
+            "cover_image_alt": self.cover_image_alt,
             "linking_data": self.linking_data,
             "meta": self.meta.to_dict() if self.meta else None,
             "intent": self.intent.to_dict() if self.intent else None,

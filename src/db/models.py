@@ -135,6 +135,10 @@ class Draft(Base):
     pipeline_error = Column(Text)
     pipeline_output_dir = Column(String(500))  # Path to intermediate files
 
+    # Cover image
+    cover_image_url = Column(String(500))
+    cover_image_alt = Column(String(500))
+
     # CMS
     cms_post_id = Column(String(255))
 

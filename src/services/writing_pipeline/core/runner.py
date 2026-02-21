@@ -123,7 +123,7 @@ class PipelineRunner:
             SeoPolishStage(client=self.client, model=self.model),
             QualityGateStage(client=self.client, model=self.model),
             MetaStage(client=self.client, model=self.model),
-            FormattingStage(client=self.client, model=self.model, openai_api_key=self.openai_api_key, openai_proxy_url=self.openai_proxy_url, openai_proxy_secret=self.openai_proxy_secret),
+            FormattingStage(client=self.client, model=self.model, openai_api_key=self.openai_api_key, openai_proxy_url=self.openai_proxy_url, openai_proxy_secret=self.openai_proxy_secret, ghost_url=self.ghost_url or "", ghost_admin_key=self.ghost_admin_key or ""),
         ]
 
     async def run(
@@ -208,6 +208,13 @@ class PipelineRunner:
                 "content_md": context.edited_md,
             }
 
+        # Extract cover image URL from formatting result
+        cover_image_url = ""
+        cover_image_alt = ""
+        if context.formatting_result and hasattr(context.formatting_result, 'cover_ghost_url'):
+            cover_image_url = context.formatting_result.cover_ghost_url or ""
+            cover_image_alt = context.formatting_result.cover_image_alt or ""
+
         # Build final result
         result = PipelineResult(
             topic=topic,
@@ -217,6 +224,8 @@ class PipelineRunner:
             subtitle=context.outline.subtitle,
             word_count=len(context.edited_md.split()),
             meta=context.meta,
+            cover_image_url=cover_image_url,
+            cover_image_alt=cover_image_alt,
             linking_data=linking_data,
             intent=context.intent,
             research=context.research,

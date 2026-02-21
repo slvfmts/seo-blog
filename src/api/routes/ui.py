@@ -1188,6 +1188,8 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
             meta_title=draft.meta_title,
             meta_description=draft.meta_description,
             status="published",
+            feature_image=draft.cover_image_url or None,
+            feature_image_alt=draft.cover_image_alt or None,
         )
 
         if result["success"]:
@@ -1383,6 +1385,11 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
             draft.meta_title = result.meta.meta_title
             draft.meta_description = result.meta.meta_description
             draft.slug = result.meta.slug
+
+        # Save cover image URL from Formatting stage
+        if result.cover_image_url:
+            draft.cover_image_url = result.cover_image_url
+            draft.cover_image_alt = result.cover_image_alt
 
         # Extract sources from research
         if result.research and result.research.sources:

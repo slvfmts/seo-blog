@@ -69,6 +69,51 @@ class GhostPublisher:
         }
         return json.dumps(mobiledoc)
 
+    def upload_image(self, filepath: str, ref: str = "") -> str | None:
+        """
+        Upload image to Ghost and return its public URL.
+
+        Args:
+            filepath: Local path to image file
+            ref: Optional reference name for the image
+
+        Returns:
+            Ghost image URL (e.g. http://host/content/images/2026/02/cover.png)
+            or None on failure.
+        """
+        import os
+
+        token = self._create_jwt_token()
+        headers = {"Authorization": f"Ghost {token}"}
+
+        filename = os.path.basename(filepath)
+        content_type = "image/png"
+        if filename.endswith(".jpg") or filename.endswith(".jpeg"):
+            content_type = "image/jpeg"
+        elif filename.endswith(".svg"):
+            content_type = "image/svg+xml"
+
+        try:
+            with open(filepath, "rb") as f:
+                file_data = f.read()
+
+            with httpx.Client(timeout=60.0) as client:
+                response = client.post(
+                    f"{self.ghost_url}/ghost/api/admin/images/upload/",
+                    headers=headers,
+                    files={"file": (filename, file_data, content_type)},
+                    data={"ref": ref or filename},
+                )
+
+            if response.status_code == 201:
+                images = response.json().get("images", [])
+                if images:
+                    return images[0].get("url")
+            return None
+
+        except Exception:
+            return None
+
     def get_posts(self) -> list[dict]:
         """
         Fetch all published posts from Ghost.
@@ -217,6 +262,8 @@ class GhostPublisher:
         meta_description: str = None,
         schema_json_ld: str = None,
         status: str = "published",
+        feature_image: str = None,
+        feature_image_alt: str = None,
     ) -> dict:
         """Публикует статью в Ghost."""
 
@@ -244,6 +291,10 @@ class GhostPublisher:
             post_data["posts"][0]["meta_title"] = meta_title
         if meta_description:
             post_data["posts"][0]["meta_description"] = meta_description
+        if feature_image:
+            post_data["posts"][0]["feature_image"] = feature_image
+        if feature_image_alt:
+            post_data["posts"][0]["feature_image_alt"] = feature_image_alt
         # JSON-LD and other scripts go to Ghost's code injection footer
         all_scripts = '\n'.join(filter(None, [schema_json_ld, extracted_scripts]))
         if all_scripts.strip():
