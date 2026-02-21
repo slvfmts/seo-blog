@@ -21,7 +21,16 @@ class TestAnthropicSmoke:
         _skip_unless_env("ANTHROPIC_API_KEY")
         import anthropic
 
-        client = anthropic.Anthropic()
+        # Use proxy if configured (server is geo-blocked)
+        kwargs = {}
+        proxy_url = os.environ.get("ANTHROPIC_PROXY_URL")
+        proxy_secret = os.environ.get("ANTHROPIC_PROXY_SECRET")
+        if proxy_url:
+            kwargs["base_url"] = proxy_url
+            if proxy_secret:
+                kwargs["default_headers"] = {"x-proxy-token": proxy_secret}
+
+        client = anthropic.Anthropic(**kwargs)
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=50,
