@@ -34,24 +34,29 @@
 
 **Стек:** FastAPI + PostgreSQL + Redis + Ghost CMS, всё в Docker на одном сервере.
 
-**Pipeline (реализован):**
+**Pipeline (реализован, 10 stages):**
 ```
 topic → Intent → Research (Serper + Jina/Trafilatura + DataForSEO) →
-Structure → Drafting → Editing → Linking → Meta → article.md
+Structure → Drafting → Editing → Linking → SEO Polish → Quality Gate →
+Meta → Formatting (DALL-E cover + Mermaid diagrams via kroki.io) → article.md
 ```
 Каждая статья: 2-5 мин, последовательно в batch.
 
 **Реализованные компоненты:**
-- Writing Pipeline (7 stages) с промптами v2
+- Writing Pipeline (10 stages) с промптами v2/v3
 - Brief Generator (Serper.dev + Claude)
 - Validators: SEO Lint, Plagiarism (similarity-based)
-- Ghost Publisher (с extract scripts → codeinjection_foot)
+- Ghost Publisher (с extract scripts → codeinjection_foot, image upload, feature_image)
 - Keyword Expansion (Serper.dev discovery + DataForSEO volume)
 - Knowledge Base (фактура / reference materials)
+- Internal Linker (forward + backward cross-linking при публикации)
+- Formatting: DALL-E 3 covers (через OpenAI proxy) + Mermaid diagrams (через kroki.io)
+- Position Monitoring (DataForSEO SERP tracking + decay detection)
 - Web UI: Jinja2 + Tailwind + HTMX
-- Session-based login
+- Session-based login (bcrypt)
+- LLM retry with backoff (overloaded, 429, 5xx)
 
-**НЕ реализовано:** Temporal, BullMQ, multi-tenant, Researcher/Clustering/Strategy agents, GSC/GA4, Monitoring, Iteration.
+**НЕ реализовано:** Temporal, BullMQ, multi-tenant, Researcher/Clustering/Strategy agents, GSC/GA4, Iteration agent.
 
 ---
 
@@ -61,8 +66,8 @@ Structure → Drafting → Editing → Linking → Meta → article.md
 |------|------------|
 | `src/api/routes/ui.py` | UI routes (все страницы) |
 | `src/services/writing_pipeline/core/runner.py` | Pipeline orchestrator |
-| `src/services/writing_pipeline/stages/` | Все stages (intent, research, structure, drafting, editing, meta) |
-| `src/services/writing_pipeline/prompts/` | Промпты (v1 и v2) |
+| `src/services/writing_pipeline/stages/` | Все stages (intent, research, structure, drafting, editing, linking, seo_polish, quality_gate, meta, formatting) |
+| `src/services/writing_pipeline/prompts/` | Промпты (v1, v2, v3) |
 | `src/services/writing_pipeline/contracts/__init__.py` | Контракты между stages |
 | `src/services/writing_pipeline/data_sources/dataforseo.py` | DataForSEO client |
 | `src/services/writing_pipeline/data_sources/serper.py` | Serper.dev client |
@@ -70,7 +75,9 @@ Structure → Drafting → Editing → Linking → Meta → article.md
 | `src/services/generator.py` | Legacy article generator (deprecated) |
 | `src/db/models.py` | SQLAlchemy models |
 | `src/templates/` | Jinja2 templates |
-| `src/config.py` | Settings from env |
+| `src/config/settings.py` | Settings from env |
+| `src/services/internal_linker.py` | Internal cross-linking engine |
+| `src/services/monitoring/position_tracker.py` | SERP position monitoring |
 
 ---
 
@@ -100,17 +107,27 @@ REDIS_URL=redis://redis:6379/0
 GHOST_URL=http://ghost:2368
 GHOST_ADMIN_KEY=<key>
 ANTHROPIC_API_KEY=<key>
+ANTHROPIC_PROXY_URL=<url>          # Cloudflare Worker proxy (optional)
+ANTHROPIC_PROXY_SECRET=<secret>    # Proxy auth token (optional)
+OPENAI_API_KEY=<key>               # For DALL-E cover generation
+OPENAI_PROXY_URL=<url>             # OpenAI proxy for geo-blocked regions (optional)
 SERPER_API_KEY=<key>
+JINA_API_KEY=<key>                 # For web page extraction (optional, fallback to trafilatura)
 DATAFORSEO_LOGIN=<login>
 DATAFORSEO_PASSWORD=<password>
-UI_PASSWORD=<password>
+AUTH_EMAIL=<email>                 # Login email
+AUTH_PASSWORD_HASH=<bcrypt_hash>   # bcrypt password hash
+SECRET_KEY=<key>                   # Session secret
 ```
 
 ---
 
-## TODO (Phase 3)
+## TODO
 
-- [ ] Alembic миграции вместо create_all
+- [ ] Alembic миграции вместо create_all (ручные ALTER TABLE пока)
 - [ ] Логирование в файл
 - [ ] Health check для всех сервисов
 - [ ] Deprecate generator.py в пользу Writing Pipeline
+- [ ] Улучшить обложки: формат 16:9, качество генерации (EDI-89)
+- [ ] Баг: [[LINK:...]] плейсхолдеры не резолвятся в HTML (EDI-90)
+- [ ] Оптимизация расхода токенов (EDI-88)

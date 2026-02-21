@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import (
     Column, String, Text, Integer, Float, Boolean,
-    DateTime, ForeignKey, Enum, JSON, UniqueConstraint, Table
+    DateTime, ForeignKey, JSON, UniqueConstraint, Table
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship

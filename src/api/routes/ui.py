@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, Request, Form, HTTPException, Background
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 import markdown
 
 from src.db.session import get_db, SessionLocal
@@ -622,7 +621,10 @@ async def generate_articles_for_topic(
                     "drafting": "pending",
                     "editing": "pending",
                     "linking": "pending",
+                    "seo_polish": "pending",
+                    "quality_gate": "pending",
                     "meta": "pending",
+                    "formatting": "pending",
                 },
             )
             db.add(draft)
@@ -1474,7 +1476,10 @@ async def create_pipeline(
                 "drafting": "pending",
                 "editing": "pending",
                 "linking": "pending",
+                "seo_polish": "pending",
+                "quality_gate": "pending",
                 "meta": "pending",
+                "formatting": "pending",
             },
         )
         db.add(draft)
