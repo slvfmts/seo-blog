@@ -21,8 +21,10 @@ RUN playwright install chromium 2>/dev/null || echo "Playwright Chromium install
 
 # Копируем код
 COPY src/ ./src/
+COPY tests/ ./tests/
 COPY alembic/ ./alembic/
 COPY alembic.ini .
+COPY pytest.ini .
 
 # Порт
 EXPOSE 8000

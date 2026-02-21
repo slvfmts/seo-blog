@@ -55,7 +55,7 @@ class TestMetaResult(unittest.TestCase):
         self.assertEqual(d["meta_title"], "Title")
         self.assertEqual(d["meta_description"], "Desc")
         self.assertEqual(d["slug"], "test-slug")
-        self.assertEqual(set(d.keys()), {"meta_title", "meta_description", "slug"})
+        self.assertEqual(set(d.keys()), {"meta_title", "meta_description", "slug", "schema_json_ld"})
 
     def test_from_dict(self):
         data = {
@@ -231,9 +231,10 @@ class TestMetaPromptTemplate(unittest.TestCase):
 
 
 class TestDraftingPromptTemplate(unittest.TestCase):
-    """Test drafting_v1.txt has existing_posts placeholder."""
+    """Test drafting_v1.txt has required placeholders."""
 
-    def test_has_existing_posts_placeholder(self):
+    def test_has_required_placeholders(self):
+        """drafting_v1 must have intent_spec, outline, research_pack placeholders."""
         prompt_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "src/services/writing_pipeline/prompts/drafting_v1.txt",
@@ -241,19 +242,20 @@ class TestDraftingPromptTemplate(unittest.TestCase):
         with open(prompt_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        self.assertIn("{{existing_posts}}", content)
+        self.assertIn("{{intent_spec_json}}", content)
+        self.assertIn("{{outline_json}}", content)
+        self.assertIn("{{research_pack_json}}", content)
 
-    def test_has_internal_linking_instructions(self):
+    def test_internal_linking_in_linking_prompt(self):
+        """Internal linking instructions live in linking_v1.txt (separate stage)."""
         prompt_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "src/services/writing_pipeline/prompts/drafting_v1.txt",
+            "src/services/writing_pipeline/prompts/linking_v1.txt",
         )
         with open(prompt_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # Should mention internal links
         self.assertIn("внутренн", content.lower())
-        self.assertIn("2-5", content)
 
 
 # =============================================================================
