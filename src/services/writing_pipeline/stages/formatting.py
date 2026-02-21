@@ -225,7 +225,7 @@ class FormattingStage(WritingStage):
             image_prompt = COVER_STYLE_PREFIX + scene_description
 
             response = client.images.generate(
-                model="gpt-image-1",
+                model="gpt-image-1.5",
                 prompt=image_prompt,
                 size="1536x1024",
                 quality="medium",
