@@ -22,32 +22,25 @@ from ..contracts import FormattingResult, FormattingAsset
 logger = logging.getLogger(__name__)
 
 
-COVER_PROMPT = """Ты создаёшь ОБЛОЖКУ для статьи. На входе будет текст статьи ниже. Твоя задача — САМОСТОЯТЕЛЬНО выделить 3–5 ключевых понятий и превратить их в "метафору второго уровня" (система/механизм/экосистема/архитектура), без банальных корпоративных клише.
+COVER_SCENE_PROMPT = """Ты — арт-директор. Прочитай статью и опиши ОДНУ конкретную сцену для обложки в 4-6 предложениях на английском.
 
-СТИЛЬ СЕРИИ (не менять между статьями):
-- Формат: квадрат 1:1, одно изображение.
-- Визуальный стиль: современный минималистичный 3D (не фотореализм), чистая геометрия, матовые материалы + стеклянные/полупрозрачные элементы, резкий контраст.
-- Палитра: тёмный фон (глубокий индиго/графит) + 2–3 неоновых акцента (циан, маджента, лайм). Никаких пастельных "корпоративных" цветов.
-- Свет: выразительный rim light, аккуратные мягкие тени, ощущение "техно-объекта".
-- Композиция: центрированный "тотем" (главный объект) + 2–6 вторичных элементов вокруг/на орбите, много негативного пространства.
-- Никакого текста, букв, цифр, логотипов, водяных знаков, скриншотов интерфейса.
-
-СМЫСЛ (сам выбираешь объекты):
-1) Прочитай статью и выпиши для себя 3–5 ключевых понятий.
-2) Придумай метафору второго уровня: не "люди/карандаши/рукопожатия", а "архитектура/схема/сеть/панель/модуль/узлы/порталы/слои/сигналы/контуры".
-3) Собери один главный объект-символ (тотем), который объединяет смысл статьи.
-4) Добавь вторичные элементы, которые намекают на процесс/взаимодействие/метрики.
-5) Избегай буквальной иллюстрации "что написано" — делай абстрактную, но читаемую метафору.
-
-ЗАПРЕТЫ (строго):
-- никаких людей/персонажей/рук/карандашей/человечков/маскотов
-- никаких офисных сцен, рукопожатий, графиков с цифрами, "успешного успеха"
-- никаких клипартных иконок, смайлов, стоковой пошлости
-- никаких кривых линий: связи только прямые/дуги с идеальной геометрией
-- не перегружать: максимум 8 объектов в кадре
+Правила:
+- Опиши визуальную метафору, а не буквальную иллюстрацию
+- Один центральный объект + 2-4 вторичных элемента
+- Стиль: современный минималистичный 3D, матовые материалы + стекло, тёмный фон (индиго/графит), неоновые акценты (циан, маджента, лайм), rim lighting
+- НЕ описывай людей, руки, лица, офисные сцены, рукопожатия
+- НЕ упоминай текст, буквы, цифры, логотипы
+- Пиши ТОЛЬКО описание сцены, без пояснений
 
 [ТЕКСТ СТАТЬИ]
 """
+
+COVER_STYLE_PREFIX = (
+    "Wide 16:9 digital artwork. Modern minimalist 3D render, matte materials with glass/translucent elements. "
+    "Dark indigo-graphite background. Neon accents: cyan, magenta, lime. Sharp rim lighting, soft shadows. "
+    "Centered composition, lots of negative space. No text, no letters, no numbers, no logos, no people, no hands. "
+    "Scene: "
+)
 
 DIAGRAM_PROMPT = """Ты — генератор смысловых визуализаций для статьи. На входе текст статьи. Сгенерируй 2–3 диаграммы, которые помогают понять материал: взаимодействие сущностей, последовательность этапов, причинно-следственные связи метрик. Это НЕ креативные иллюстрации и НЕ инфографика со статистикой — только ясные схемы.
 
@@ -204,13 +197,24 @@ class FormattingStage(WritingStage):
         self, article_md: str, slug: str, assets_dir: str,
         publisher, article_title: str,
     ) -> tuple[Optional[FormattingAsset], Optional[str]]:
-        """Generate cover image via DALL-E 3 and upload to Ghost."""
+        """Generate cover image via two-stage approach: Claude describes scene, gpt-image-1.5 renders."""
         if not self.openai_api_key:
             return None, "No OpenAI API key configured"
 
         try:
             import openai
+            import base64 as b64
 
+            # Stage 1: Claude generates scene description
+            article_truncated = article_md[:6000]
+            scene_prompt = COVER_SCENE_PROMPT + article_truncated
+            scene_description, scene_tokens = self._call_llm(
+                scene_prompt, max_tokens=300, temperature=0.7,
+            )
+            scene_description = scene_description.strip()
+            logger.info(f"Cover scene description: {scene_description[:200]}")
+
+            # Stage 2: gpt-image-1.5 renders the scene
             client_kwargs = {"api_key": self.openai_api_key}
             if self.openai_proxy_url:
                 client_kwargs["base_url"] = self.openai_proxy_url
@@ -218,36 +222,26 @@ class FormattingStage(WritingStage):
                     client_kwargs["default_headers"] = {"x-proxy-token": self.openai_proxy_secret}
             client = openai.OpenAI(**client_kwargs)
 
-            # Prepare article summary — DALL-E prompt limit is 4000 chars
-            headings = re.findall(r'^#{1,3}\s+(.+)$', article_md, re.MULTILINE)
-            headings_text = "\n\nЗаголовки: " + " | ".join(headings) if headings else ""
-            base_len = len(COVER_PROMPT) + len(headings_text)
-            max_article = 4000 - base_len - 50  # 50 char safety margin
-            article_summary = article_md[:max(500, max_article)]
-
-            prompt = COVER_PROMPT + article_summary + headings_text
+            image_prompt = COVER_STYLE_PREFIX + scene_description
 
             response = client.images.generate(
-                model="dall-e-3",
-                prompt=prompt,
-                size="1024x1024",
-                quality="standard",
+                model="gpt-image-1",
+                prompt=image_prompt,
+                size="1536x1024",
+                quality="medium",
                 n=1,
             )
 
-            image_url = response.data[0].url
-
-            # Download the image
-            async with httpx.AsyncClient() as http:
-                img_response = await http.get(image_url)
-                img_response.raise_for_status()
+            # gpt-image-1 returns base64
+            image_base64 = response.data[0].b64_json
+            image_bytes = b64.b64decode(image_base64)
 
             filename = f"{slug}__cover.png"
             filepath = os.path.join(assets_dir, filename)
             with open(filepath, "wb") as f:
-                f.write(img_response.content)
+                f.write(image_bytes)
 
-            logger.info(f"Cover generated: {filepath}")
+            logger.info(f"Cover generated: {filepath} ({len(image_bytes)} bytes)")
 
             # Dynamic alt-text from article title
             alt_text = f"{article_title} — обложка статьи" if article_title else "Обложка статьи"
