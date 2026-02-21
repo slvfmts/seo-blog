@@ -2032,6 +2032,10 @@ def _run_pipeline_for_brief(
                 return
 
             # Create draft
+            all_stages = [
+                "intent", "research", "structure", "drafting", "editing",
+                "linking", "seo_polish", "quality_gate", "meta", "formatting",
+            ]
             draft = models.Draft(
                 site_id=site_id,
                 brief_id=brief_id,
@@ -2040,9 +2044,23 @@ def _run_pipeline_for_brief(
                 status="pipeline_running",
                 pipeline_status="running",
                 pipeline_started_at=datetime.utcnow(),
+                pipeline_stages={s: "pending" for s in all_stages},
             )
             db.add(draft)
             db.commit()
+            draft_id = str(draft.id)
+
+            # Stage progress callback
+            def on_stage_complete(stage_name: str, status: str):
+                try:
+                    d = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+                    if d and d.pipeline_stages:
+                        stages = dict(d.pipeline_stages)
+                        stages[stage_name] = status
+                        d.pipeline_stages = stages
+                        db.commit()
+                except Exception:
+                    db.rollback()
 
             runner = PipelineRunner(
                 anthropic_api_key=settings.anthropic_api_key,
@@ -2068,6 +2086,7 @@ def _run_pipeline_for_brief(
                 region=region,
                 brief=brief_data,
                 config=config if config else None,
+                on_stage_complete=on_stage_complete,
             )
 
             # Update draft
@@ -2082,6 +2101,7 @@ def _run_pipeline_for_brief(
             draft.status = "pipeline_completed"
             draft.pipeline_status = "completed"
             draft.pipeline_completed_at = datetime.utcnow()
+            draft.pipeline_stages = {s: "completed" for s in all_stages}
 
             brief.status = "completed"
             db.commit()
