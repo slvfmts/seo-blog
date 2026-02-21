@@ -604,33 +604,33 @@ class ResearchResult:
             ],
             examples=[
                 Example(
-                    id=e["id"],
-                    example=e["example"],
+                    id=e.get("id", f"ex-{i}"),
+                    example=e.get("example", e.get("text", "")),
                     why_it_matters=e.get("why_it_matters", ""),
                     source_id=e.get("source_id"),
                     confidence=e.get("confidence", "medium"),
                 )
-                for e in data.get("examples", [])
+                for i, e in enumerate(data.get("examples", []))
             ],
             edge_cases=[
                 EdgeCase(
-                    id=ec["id"],
-                    case=ec["case"],
-                    impact=ec["impact"],
+                    id=ec.get("id", f"ec-{i}"),
+                    case=ec.get("case", ""),
+                    impact=ec.get("impact", ""),
                     source_id=ec.get("source_id"),
-                    confidence=ec["confidence"],
+                    confidence=ec.get("confidence", "medium"),
                 )
-                for ec in data.get("edge_cases", [])
+                for i, ec in enumerate(data.get("edge_cases", []))
             ],
             pitfalls_and_myths=[
                 Pitfall(
-                    id=p["id"],
-                    item=p["item"],
-                    why_wrong_or_risky=p["why_wrong_or_risky"],
+                    id=p.get("id", f"p-{i}"),
+                    item=p.get("item", ""),
+                    why_wrong_or_risky=p.get("why_wrong_or_risky", ""),
                     source_id=p.get("source_id"),
-                    confidence=p["confidence"],
+                    confidence=p.get("confidence", "medium"),
                 )
-                for p in data.get("pitfalls_and_myths", [])
+                for i, p in enumerate(data.get("pitfalls_and_myths", []))
             ],
             contradictions=[
                 Contradiction(
