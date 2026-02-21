@@ -1,19 +1,18 @@
 """
-Yandex Wordstat provider via Yandex Cloud Search API.
+Yandex Wordstat provider via Yandex Cloud Search API v2.
 
-API docs: https://yandex.cloud/ru/docs/search-api/operations/wordstat
-Auth: Api-Key header
-Endpoints:
-  - POST /v2/wordstat/top — volumes + related queries
-  - POST /v2/wordstat/dynamics — monthly trend data
-  - POST /v2/wordstat/regions — regional breakdown
+Endpoint: POST https://searchapi.api.cloud.yandex.net/v2/wordstat/topRequests
+Auth: Api-Key header (service account API key)
+Docs: https://yandex.cloud/en/docs/search-api/api-ref/Wordstat/getTop
+
+Required role on service account: search-api.webSearch.user
 
 Region 225 = all Russia.
 """
 
 import asyncio
 import logging
-from typing import List, Optional
+from typing import Optional
 
 import httpx
 
@@ -26,19 +25,22 @@ BASE_URL = "https://searchapi.api.cloud.yandex.net/v2/wordstat"
 
 class YandexWordstatProvider(VolumeProvider):
     """
-    Yandex Wordstat via Yandex Cloud Search API (free Preview tier).
+    Yandex Wordstat via Yandex Cloud Search API v2.
 
     Primary data source for Russian-language keyword volumes.
+    Uses /topRequests endpoint — returns totalCount + top related phrases.
     """
 
     def __init__(
         self,
         api_key: str,
+        folder_id: str = "",
         region_id: int = 225,  # 225 = all Russia
         timeout: float = 60.0,
         max_concurrent: int = 3,
     ):
         self.api_key = api_key
+        self.folder_id = folder_id
         self.region_id = region_id
         self.timeout = timeout
         self._semaphore = asyncio.Semaphore(max_concurrent)
@@ -47,11 +49,17 @@ class YandexWordstatProvider(VolumeProvider):
     def source_name(self) -> str:
         return "wordstat"
 
+    def _headers(self) -> dict:
+        return {
+            "Authorization": f"Api-Key {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
     async def get_volumes(self, keywords: list[str], language_code: str = "ru") -> list[VolumeResult]:
         """
-        Fetch volumes from Wordstat GetTop endpoint.
+        Fetch volumes from Wordstat topRequests endpoint.
 
-        Each keyword requires a separate API call (Wordstat limitation).
+        Each keyword requires a separate API call.
         We run them concurrently with a semaphore.
         """
         if not keywords:
@@ -68,27 +76,34 @@ class YandexWordstatProvider(VolumeProvider):
             else:
                 volume_results.append(result)
 
+        found = sum(1 for r in volume_results if r.volume > 0)
+        logger.info(f"Wordstat: got volumes for {found}/{len(volume_results)} keywords")
         return volume_results
 
     async def _fetch_single_volume(self, keyword: str) -> VolumeResult:
-        """Fetch volume for a single keyword via GetTop."""
+        """Fetch volume for a single keyword via topRequests."""
         async with self._semaphore:
+            body = {
+                "phrase": keyword,
+                "regions": [str(self.region_id)],
+                "devices": ["DEVICE_ALL"],
+            }
+            if self.folder_id:
+                body["folderId"] = self.folder_id
+
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
-                    f"{BASE_URL}/top",
-                    headers={
-                        "Authorization": f"Api-Key {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "query": keyword,
-                        "region_id": self.region_id,
-                    },
+                    f"{BASE_URL}/topRequests",
+                    headers=self._headers(),
+                    json=body,
                     timeout=self.timeout,
                 )
 
                 if resp.status_code != 200:
-                    logger.error(f"Wordstat GetTop HTTP {resp.status_code} for '{keyword}': {resp.text[:300]}")
+                    logger.error(
+                        f"Wordstat topRequests HTTP {resp.status_code} for '{keyword}': "
+                        f"{resp.text[:300]}"
+                    )
                     return VolumeResult(keyword=keyword, volume=0, source="wordstat")
 
                 data = resp.json()
@@ -96,19 +111,25 @@ class YandexWordstatProvider(VolumeProvider):
 
     def _parse_top_response(self, keyword: str, data: dict) -> VolumeResult:
         """
-        Parse GetTop response.
+        Parse topRequests response.
 
-        Expected structure:
+        Response structure:
         {
-          "query": "seo оптимизация",
-          "impressions": 12345,
-          "items": [
-            {"query": "seo оптимизация сайта", "impressions": 4567},
-            ...
+          "totalCount": "12345",       # total impressions (string!)
+          "results": [                 # top matching phrases
+            {"phrase": "seo оптимизация сайта", "count": "4567"}
+          ],
+          "associations": [            # related queries
+            {"phrase": "продвижение сайта", "count": "3456"}
           ]
         }
         """
-        volume = data.get("impressions", 0) or 0
+        # totalCount is the main volume metric
+        total = data.get("totalCount", 0)
+        try:
+            volume = int(total)
+        except (ValueError, TypeError):
+            volume = 0
 
         return VolumeResult(
             keyword=keyword,
@@ -117,19 +138,22 @@ class YandexWordstatProvider(VolumeProvider):
         )
 
     async def get_suggestions(self, keyword: str) -> list[str]:
-        """Get related queries from Wordstat GetTop response."""
+        """Get related queries from Wordstat topRequests — results + associations."""
         async with self._semaphore:
+            body = {
+                "phrase": keyword,
+                "regions": [str(self.region_id)],
+                "devices": ["DEVICE_ALL"],
+                "numPhrases": "50",
+            }
+            if self.folder_id:
+                body["folderId"] = self.folder_id
+
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
-                    f"{BASE_URL}/top",
-                    headers={
-                        "Authorization": f"Api-Key {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "query": keyword,
-                        "region_id": self.region_id,
-                    },
+                    f"{BASE_URL}/topRequests",
+                    headers=self._headers(),
+                    json=body,
                     timeout=self.timeout,
                 )
 
@@ -137,27 +161,42 @@ class YandexWordstatProvider(VolumeProvider):
                     return []
 
                 data = resp.json()
-                items = data.get("items", [])
-                return [item["query"] for item in items if item.get("query")]
+                suggestions = []
+
+                # Collect from results (matching phrases)
+                for item in data.get("results", []):
+                    phrase = item.get("phrase", "").strip()
+                    if phrase and phrase.lower() != keyword.lower():
+                        suggestions.append(phrase)
+
+                # Collect from associations (related queries)
+                for item in data.get("associations", []):
+                    phrase = item.get("phrase", "").strip()
+                    if phrase and phrase.lower() != keyword.lower():
+                        suggestions.append(phrase)
+
+                return suggestions
 
     async def get_dynamics(self, keyword: str) -> list[dict]:
         """
         Fetch monthly trend data via Wordstat dynamics endpoint.
 
-        Returns list of {month: "2025-01", impressions: 1234}.
+        Returns list of {date, count, share}.
         """
         async with self._semaphore:
+            body = {
+                "phrase": keyword,
+                "regions": [str(self.region_id)],
+                "devices": ["DEVICE_ALL"],
+            }
+            if self.folder_id:
+                body["folderId"] = self.folder_id
+
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
                     f"{BASE_URL}/dynamics",
-                    headers={
-                        "Authorization": f"Api-Key {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "query": keyword,
-                        "region_id": self.region_id,
-                    },
+                    headers=self._headers(),
+                    json=body,
                     timeout=self.timeout,
                 )
 
@@ -166,7 +205,7 @@ class YandexWordstatProvider(VolumeProvider):
                     return []
 
                 data = resp.json()
-                return data.get("items", [])
+                return data.get("dynamics", data.get("items", []))
 
     async def get_regions(self, keyword: str) -> dict[int, int]:
         """
@@ -175,17 +214,18 @@ class YandexWordstatProvider(VolumeProvider):
         Returns dict of region_id -> impressions.
         """
         async with self._semaphore:
+            body = {
+                "phrase": keyword,
+                "devices": ["DEVICE_ALL"],
+            }
+            if self.folder_id:
+                body["folderId"] = self.folder_id
+
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
-                    f"{BASE_URL}/regions",
-                    headers={
-                        "Authorization": f"Api-Key {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "query": keyword,
-                        "region_id": self.region_id,
-                    },
+                    f"{BASE_URL}/regionsDistribution",
+                    headers=self._headers(),
+                    json=body,
                     timeout=self.timeout,
                 )
 
@@ -195,9 +235,12 @@ class YandexWordstatProvider(VolumeProvider):
 
                 data = resp.json()
                 result = {}
-                for item in data.get("items", []):
-                    rid = item.get("region_id")
-                    impressions = item.get("impressions", 0)
+                for item in data.get("regions", []):
+                    rid = item.get("regionId")
+                    count = item.get("count", 0)
                     if rid is not None:
-                        result[rid] = impressions
+                        try:
+                            result[int(rid)] = int(count)
+                        except (ValueError, TypeError):
+                            pass
                 return result

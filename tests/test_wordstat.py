@@ -9,7 +9,7 @@ from src.services.writing_pipeline.data_sources.wordstat import YandexWordstatPr
 
 @pytest.fixture
 def provider():
-    return YandexWordstatProvider(api_key="test-api-key", region_id=225)
+    return YandexWordstatProvider(api_key="test-api-key", folder_id="test-folder", region_id=225)
 
 
 # =============================================================================
@@ -27,11 +27,11 @@ class TestGetVolumes:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "query": "seo оптимизация",
-            "impressions": 12345,
-            "items": [
-                {"query": "seo оптимизация сайта", "impressions": 4567},
+            "totalCount": "12345",
+            "results": [
+                {"phrase": "seo оптимизация сайта", "count": "4567"},
             ],
+            "associations": [],
         }
 
         with patch("httpx.AsyncClient") as mock_client_cls:
@@ -91,11 +91,13 @@ class TestGetSuggestions:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "query": "seo",
-            "impressions": 10000,
-            "items": [
-                {"query": "seo оптимизация", "impressions": 5000},
-                {"query": "seo продвижение", "impressions": 3000},
+            "totalCount": "10000",
+            "results": [
+                {"phrase": "seo оптимизация", "count": "5000"},
+                {"phrase": "seo продвижение", "count": "3000"},
+            ],
+            "associations": [
+                {"phrase": "раскрутка сайта", "count": "2000"},
             ],
         }
 
@@ -108,8 +110,9 @@ class TestGetSuggestions:
 
             suggestions = await provider.get_suggestions("seo")
 
-        assert len(suggestions) == 2
+        assert len(suggestions) == 3
         assert "seo оптимизация" in suggestions
+        assert "раскрутка сайта" in suggestions
 
     @pytest.mark.asyncio
     async def test_error_returns_empty(self, provider):
@@ -134,19 +137,24 @@ class TestGetSuggestions:
 
 class TestParseTopResponse:
     def test_normal_response(self, provider):
-        data = {"query": "test", "impressions": 999, "items": []}
+        data = {"totalCount": "999", "results": [], "associations": []}
         result = provider._parse_top_response("test", data)
         assert result.volume == 999
         assert result.keyword == "test"
         assert result.source == "wordstat"
 
-    def test_missing_impressions(self, provider):
-        data = {"query": "test", "items": []}
+    def test_integer_total_count(self, provider):
+        data = {"totalCount": 5000, "results": []}
+        result = provider._parse_top_response("test", data)
+        assert result.volume == 5000
+
+    def test_missing_total_count(self, provider):
+        data = {"results": []}
         result = provider._parse_top_response("test", data)
         assert result.volume == 0
 
-    def test_null_impressions(self, provider):
-        data = {"query": "test", "impressions": None, "items": []}
+    def test_null_total_count(self, provider):
+        data = {"totalCount": None, "results": []}
         result = provider._parse_top_response("test", data)
         assert result.volume == 0
 
@@ -162,3 +170,7 @@ class TestProviderProperties:
     def test_default_region(self):
         p = YandexWordstatProvider(api_key="key")
         assert p.region_id == 225
+
+    def test_folder_id_stored(self):
+        p = YandexWordstatProvider(api_key="key", folder_id="folder123")
+        assert p.folder_id == "folder123"

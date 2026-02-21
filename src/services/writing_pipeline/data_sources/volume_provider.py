@@ -68,8 +68,9 @@ def get_volume_provider(region: str, settings) -> VolumeProvider:
         yandex_key = getattr(settings, "yandex_wordstat_api_key", "")
         if yandex_key:
             from .wordstat import YandexWordstatProvider
+            folder_id = getattr(settings, "yandex_cloud_folder_id", "")
             logger.info("Using YandexWordstatProvider for RU region")
-            return YandexWordstatProvider(api_key=yandex_key)
+            return YandexWordstatProvider(api_key=yandex_key, folder_id=folder_id)
 
         # Try Rush Analytics
         rush_key = getattr(settings, "rush_analytics_api_key", "")

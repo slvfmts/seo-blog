@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     # Yandex Wordstat (RU volumes via Yandex Cloud Search API)
     yandex_wordstat_api_key: str = ""
+    yandex_cloud_folder_id: str = ""
 
     # Rush Analytics (alternative RU volumes, Pro+ plan)
     rush_analytics_api_key: str = ""
