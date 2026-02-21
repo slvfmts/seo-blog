@@ -606,9 +606,9 @@ class ResearchResult:
                 Example(
                     id=e["id"],
                     example=e["example"],
-                    why_it_matters=e["why_it_matters"],
+                    why_it_matters=e.get("why_it_matters", ""),
                     source_id=e.get("source_id"),
-                    confidence=e["confidence"],
+                    confidence=e.get("confidence", "medium"),
                 )
                 for e in data.get("examples", [])
             ],
