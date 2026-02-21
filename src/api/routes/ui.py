@@ -354,14 +354,8 @@ async def fetch_keyword_volume(
     topic_id: UUID,
     db: Session = Depends(get_db),
 ):
-    """Fetch search volume, difficulty, CPC from DataForSEO for all keywords."""
+    """Fetch search volume via best available provider (Wordstat → Rush → DataForSEO)."""
     settings = get_settings()
-
-    if not settings.dataforseo_login or not settings.dataforseo_password:
-        return RedirectResponse(
-            url=f"/ui/topics/{topic_id}?error=DataForSEO credentials not configured (DATAFORSEO_LOGIN, DATAFORSEO_PASSWORD)",
-            status_code=303,
-        )
 
     topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
     if not topic:
@@ -378,46 +372,38 @@ async def fetch_keyword_volume(
         )
 
     try:
-        from src.services.writing_pipeline.data_sources.dataforseo import DataForSEO
+        from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
 
-        client = DataForSEO(
-            login=settings.dataforseo_login,
-            password=settings.dataforseo_password,
-        )
+        region = topic.country or "ru"
+        provider = get_volume_provider(region, settings)
 
-        keyword_texts = [kw.keyword for kw in keywords]
-        language_code = topic.language or "ru"
-        location_code = client.get_safe_location_code(topic.country or "ru")
-
-        result = await client.get_keyword_metrics(
-            keywords=keyword_texts,
-            location_code=location_code,
-            language_code=language_code,
-        )
-
-        if not result.success:
+        if provider.source_name == "none":
             return RedirectResponse(
-                url=f"/ui/topics/{topic_id}?error=DataForSEO error: {result.error}",
+                url=f"/ui/topics/{topic_id}?error=No volume provider configured (set YANDEX_WORDSTAT_API_KEY, RUSH_ANALYTICS_API_KEY, or DATAFORSEO_LOGIN)",
                 status_code=303,
             )
 
+        keyword_texts = [kw.keyword for kw in keywords]
+        language_code = topic.language or "ru"
+
+        results = await provider.get_volumes(keyword_texts, language_code=language_code)
+
         # Build lookup by lowercase keyword
-        metrics_map = {m.keyword.lower(): m for m in result.keywords}
+        metrics_map = {vr.keyword.lower(): vr for vr in results}
 
         updated = 0
         for kw in keywords:
-            m = metrics_map.get(kw.keyword.lower())
-            if m:
-                kw.search_volume = m.search_volume
-                kw.difficulty = m.difficulty
-                kw.cpc = m.cpc
+            vr = metrics_map.get(kw.keyword.lower())
+            if vr:
+                kw.search_volume = vr.volume
+                kw.difficulty = vr.difficulty
+                kw.cpc = vr.cpc
                 updated += 1
 
         db.commit()
 
-        cost_str = f", cost: ${result.cost:.4f}" if result.cost else ""
         return RedirectResponse(
-            url=f"/ui/topics/{topic_id}?success=Обновлено {updated} keywords{cost_str}",
+            url=f"/ui/topics/{topic_id}?success=Обновлено {updated} keywords (источник: {provider.source_name})",
             status_code=303,
         )
 
@@ -465,14 +451,9 @@ async def expand_keywords(
 
     try:
         from src.services.writing_pipeline.data_sources.dataforseo import DataForSEO
-
-        client = DataForSEO(
-            login=settings.dataforseo_login,
-            password=settings.dataforseo_password,
-        )
+        from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
 
         language_code = topic.language or "ru"
-        location_code = client.get_safe_location_code(topic.country or "ru")
         region = topic.country or "ru"
 
         # Build existing keyword set for dedup
@@ -482,46 +463,94 @@ async def expand_keywords(
         new_first = sorted(all_keywords, key=lambda k: (0 if k.status == "new" else 1, k.keyword))
         seeds = [s.keyword for s in new_first[:20]]
 
-        # Discover keywords via Serper.dev (related searches + PAA + autocomplete)
-        # then fetch volume via DataForSEO search_volume (the only working endpoint)
-        result = await client.get_keyword_suggestions_via_serper(
-            seed_keywords=seeds,
-            serper_api_key=settings.serper_api_key,
-            region=region,
-            location_code=location_code,
-            language_code=language_code,
-        )
+        # Step 1: Discover keywords via Serper.dev (related searches + PAA + autocomplete)
+        import httpx, asyncio as _asyncio
+        discovered_keywords = set()
+        gl = "ru" if region.lower() in ["ru", "россия", "russia"] else "us"
+        hl = "ru" if region.lower() in ["ru", "россия", "russia"] else "en"
+        semaphore = _asyncio.Semaphore(5)
 
-        total_cost = result.cost or 0.0
-        errors = []
+        async def search_serper(query):
+            async with semaphore:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        "https://google.serper.dev/search",
+                        headers={"X-API-KEY": settings.serper_api_key, "Content-Type": "application/json"},
+                        json={"q": query, "gl": gl, "hl": hl, "num": 10},
+                        timeout=30.0,
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
 
-        if not result.success:
-            errors.append(f"{result.source}: {result.error}")
-        if result.error and result.success:
-            # Partial error (e.g. volume lookup failed but keywords discovered)
-            errors.append(result.error)
+        async def autocomplete_serper(query):
+            async with semaphore:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        "https://google.serper.dev/autocomplete",
+                        headers={"X-API-KEY": settings.serper_api_key, "Content-Type": "application/json"},
+                        json={"q": query, "gl": gl, "hl": hl},
+                        timeout=30.0,
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
 
-        # Collect unique discovered keywords (skip existing)
-        discovered = {}
-        for kw_m in result.keywords:
-            key = kw_m.keyword.lower().strip()
-            if key in existing_kw_set:
+        tasks = []
+        for seed in seeds:
+            tasks.append(("search", search_serper(seed)))
+            tasks.append(("autocomplete", autocomplete_serper(seed)))
+
+        coros = [t[1] for t in tasks]
+        results = await _asyncio.gather(*coros, return_exceptions=True)
+
+        for i, result in enumerate(results):
+            task_type = tasks[i][0]
+            if isinstance(result, Exception):
                 continue
-            if key in discovered:
-                if kw_m.search_volume > discovered[key].search_volume:
-                    discovered[key] = kw_m
-            else:
-                discovered[key] = kw_m
+            if task_type == "search":
+                for item in result.get("relatedSearches", []):
+                    q = item.get("query", "").strip()
+                    if q:
+                        discovered_keywords.add(q)
+                for item in result.get("peopleAlsoAsk", []):
+                    q = item.get("question", "").strip()
+                    if q:
+                        discovered_keywords.add(q)
+            elif task_type == "autocomplete":
+                for item in result.get("suggestions", []):
+                    q = item.get("value", "").strip()
+                    if q:
+                        discovered_keywords.add(q)
+
+        # Step 1b: Get provider suggestions (Wordstat related queries)
+        provider = get_volume_provider(region, settings)
+        if provider.source_name != "none":
+            for seed in seeds[:5]:
+                try:
+                    suggestions = await provider.get_suggestions(seed)
+                    discovered_keywords.update(suggestions)
+                except Exception:
+                    pass
+
+        # Step 2: Fetch volumes via best available provider
+        new_keywords = [kw for kw in discovered_keywords if kw.lower().strip() not in existing_kw_set]
+
+        volume_map = {}
+        if new_keywords and provider.source_name != "none":
+            vol_results = await provider.get_volumes(new_keywords, language_code=language_code)
+            for vr in vol_results:
+                volume_map[vr.keyword.lower().strip()] = vr
 
         # Save new keywords to DB
         added = 0
-        for kw_m in discovered.values():
+        for kw_text in new_keywords:
+            key = kw_text.lower().strip()
+            vr = volume_map.get(key)
             keyword = models.Keyword(
                 site_id=topic.id,
-                keyword=kw_m.keyword,
-                search_volume=kw_m.search_volume,
-                difficulty=kw_m.difficulty,
-                cpc=kw_m.cpc,
+                keyword=kw_text,
+                search_volume=vr.volume if vr else 0,
+                difficulty=vr.difficulty if vr else 0,
+                cpc=vr.cpc if vr else 0,
                 status="new",
             )
             db.add(keyword)
@@ -529,15 +558,7 @@ async def expand_keywords(
 
         db.commit()
 
-        if errors:
-            import logging
-            logger = logging.getLogger(__name__)
-            for err in errors[:5]:
-                logger.warning(f"Keyword expansion error: {err}")
-
-        msg = f"Добавлено {added} новых keywords (из {len(seeds)} seed, cost: ${total_cost:.2f})"
-        if errors:
-            msg += f", {len(errors)} ошибок API"
+        msg = f"Добавлено {added} новых keywords (из {len(seeds)} seed, источник: {provider.source_name})"
 
         return RedirectResponse(
             url=f"/ui/topics/{topic_id}?success={msg}",
@@ -1754,5 +1775,388 @@ async def skip_iteration_task(
 
     return RedirectResponse(
         url="/ui/iterations?success=Task skipped",
+        status_code=303,
+    )
+
+
+# =============================================================================
+# Cluster Planner routes
+# =============================================================================
+
+@router.get("/clusters", response_class=HTMLResponse)
+async def cluster_list(request: Request, db: Session = Depends(get_db)):
+    """List all clusters (top-level only — no parent)."""
+    clusters = db.query(models.Cluster).filter(
+        models.Cluster.parent_cluster_id.is_(None),
+    ).order_by(models.Cluster.created_at.desc()).all()
+
+    # Enrich with counts
+    for cluster in clusters:
+        cluster.brief_count = len(cluster.briefs)
+        cluster.child_count = len(cluster.children) if hasattr(cluster, 'children') else 0
+
+    return templates.TemplateResponse("clusters/list.html", {
+        "request": request,
+        "clusters": clusters,
+    })
+
+
+@router.get("/clusters/plan", response_class=HTMLResponse)
+async def cluster_plan_form(request: Request, db: Session = Depends(get_db)):
+    """Show cluster planning form."""
+    sites = db.query(models.Site).order_by(models.Site.name).all()
+    return templates.TemplateResponse("clusters/plan.html", {
+        "request": request,
+        "sites": sites,
+    })
+
+
+@router.post("/clusters/plan", response_class=HTMLResponse)
+async def cluster_plan_submit(
+    request: Request,
+    big_topic: str = Form(...),
+    site_id: UUID = Form(...),
+    region: str = Form("ru"),
+    target_count: int = Form(10),
+    db: Session = Depends(get_db),
+):
+    """Generate a cluster plan and save to DB."""
+    settings = get_settings()
+
+    if not settings.anthropic_api_key:
+        return RedirectResponse(
+            url="/ui/clusters/plan?error=ANTHROPIC_API_KEY not configured",
+            status_code=303,
+        )
+
+    try:
+        import anthropic
+        from src.services.cluster_planner import ClusterPlanner
+        from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
+
+        # Init Anthropic client
+        if settings.anthropic_proxy_url and settings.anthropic_proxy_secret:
+            client = anthropic.Anthropic(
+                api_key=settings.anthropic_api_key,
+                base_url=settings.anthropic_proxy_url,
+                default_headers={"x-proxy-token": settings.anthropic_proxy_secret},
+            )
+        else:
+            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+        volume_provider = get_volume_provider(region, settings)
+
+        planner = ClusterPlanner(
+            anthropic_client=client,
+            volume_provider=volume_provider if volume_provider.source_name != "none" else None,
+            serper_api_key=settings.serper_api_key,
+        )
+
+        # Load KB docs from site's knowledge folders
+        kb_docs = []
+        site = db.query(models.Site).filter(models.Site.id == site_id).first()
+        if site:
+            for folder in site.knowledge_folders:
+                for doc in folder.documents:
+                    if doc.content_text:
+                        kb_docs.append({
+                            "id": str(doc.id),
+                            "title": doc.original_filename,
+                            "content_text": doc.content_text,
+                            "word_count": doc.word_count or 0,
+                        })
+
+        plan = await planner.plan(
+            big_topic=big_topic,
+            region=region,
+            target_count=target_count,
+            knowledge_base_docs=kb_docs if kb_docs else None,
+        )
+
+        # Save to DB
+        cluster_id = await planner.save_to_db(plan, str(site_id), db)
+
+        return RedirectResponse(
+            url=f"/ui/clusters/{cluster_id}?success=Кластер создан: 1 pillar + {len(plan.cluster_articles)} cluster статей",
+            status_code=303,
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return RedirectResponse(
+            url=f"/ui/clusters/plan?error={str(e)[:200]}",
+            status_code=303,
+        )
+
+
+@router.get("/clusters/{cluster_id}", response_class=HTMLResponse)
+async def cluster_detail(
+    request: Request,
+    cluster_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Show cluster detail with briefs and child clusters."""
+    cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    # Get pillar brief (brief directly on this cluster)
+    pillar_brief = db.query(models.Brief).filter(
+        models.Brief.cluster_id == cluster_id,
+    ).first()
+
+    # Get child clusters
+    child_clusters = db.query(models.Cluster).filter(
+        models.Cluster.parent_cluster_id == cluster_id,
+    ).order_by(models.Cluster.priority_score.desc().nullslast()).all()
+
+    # Get briefs from child clusters
+    children_briefs = []
+    if child_clusters:
+        child_ids = [c.id for c in child_clusters]
+        children_briefs = db.query(models.Brief).filter(
+            models.Brief.cluster_id.in_(child_ids),
+        ).all()
+
+    # Parse structure JSON for display
+    for brief in [pillar_brief] + children_briefs:
+        if brief and isinstance(brief.structure, str):
+            import json
+            try:
+                brief.structure = json.loads(brief.structure)
+            except Exception:
+                brief.structure = {}
+
+    return templates.TemplateResponse("clusters/detail.html", {
+        "request": request,
+        "cluster": cluster,
+        "pillar_brief": pillar_brief,
+        "child_clusters": child_clusters,
+        "children_briefs": children_briefs,
+    })
+
+
+@router.post("/clusters/{cluster_id}/briefs/{brief_id}/approve", response_class=HTMLResponse)
+async def approve_brief(
+    cluster_id: UUID,
+    brief_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Approve a brief for generation."""
+    brief = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
+    if brief:
+        brief.status = "approved"
+        brief.approved_at = datetime.utcnow()
+        db.commit()
+    return RedirectResponse(
+        url=f"/ui/clusters/{cluster_id}?success=Brief approved",
+        status_code=303,
+    )
+
+
+@router.post("/clusters/{cluster_id}/briefs/{brief_id}/delete", response_class=HTMLResponse)
+async def delete_brief(
+    cluster_id: UUID,
+    brief_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Delete a brief."""
+    brief = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
+    if brief:
+        db.delete(brief)
+        db.commit()
+    return RedirectResponse(
+        url=f"/ui/clusters/{cluster_id}?success=Brief deleted",
+        status_code=303,
+    )
+
+
+def _run_pipeline_for_brief(
+    brief_id: str,
+    site_id: str,
+    topic: str,
+    region: str,
+    brief_data: dict,
+    settings,
+    knowledge_base_docs: list = None,
+):
+    """Background task: run pipeline for a single brief."""
+    import asyncio
+
+    async def _run():
+        from src.db.session import SessionLocal
+        from src.services.writing_pipeline import PipelineRunner
+
+        db = SessionLocal()
+        try:
+            brief = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
+            if not brief:
+                return
+
+            # Create draft
+            draft = models.Draft(
+                site_id=site_id,
+                brief_id=brief_id,
+                title=topic,
+                topic=topic,
+                status="pipeline_running",
+                pipeline_status="running",
+                pipeline_started_at=datetime.utcnow(),
+            )
+            db.add(draft)
+            db.commit()
+
+            runner = PipelineRunner(
+                anthropic_api_key=settings.anthropic_api_key,
+                serper_api_key=settings.serper_api_key,
+                jina_api_key=settings.jina_api_key,
+                dataforseo_login=settings.dataforseo_login,
+                dataforseo_password=settings.dataforseo_password,
+                proxy_url=settings.anthropic_proxy_url,
+                proxy_secret=settings.anthropic_proxy_secret,
+                ghost_url=settings.ghost_url,
+                ghost_admin_key=settings.ghost_admin_key,
+                database_url=settings.database_url,
+                openai_api_key=settings.openai_api_key,
+                openai_proxy_url=settings.openai_proxy_url,
+            )
+
+            config = {}
+            if knowledge_base_docs:
+                config["knowledge_base_docs"] = knowledge_base_docs
+
+            result = await runner.run(
+                topic=topic,
+                region=region,
+                brief=brief_data,
+                config=config if config else None,
+            )
+
+            # Update draft
+            draft.title = result.title
+            draft.slug = result.meta.slug if result.meta else None
+            draft.content_md = result.article_md
+            draft.word_count = result.word_count
+            draft.meta_title = result.meta.meta_title if result.meta else None
+            draft.meta_description = result.meta.meta_description if result.meta else None
+            draft.cover_image_url = result.cover_image_url
+            draft.cover_image_alt = result.cover_image_alt
+            draft.status = "pipeline_completed"
+            draft.pipeline_status = "completed"
+            draft.pipeline_completed_at = datetime.utcnow()
+
+            brief.status = "completed"
+            db.commit()
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                draft = db.query(models.Draft).filter(
+                    models.Draft.brief_id == brief_id,
+                    models.Draft.status == "pipeline_running",
+                ).first()
+                if draft:
+                    draft.status = "pipeline_failed"
+                    draft.pipeline_status = "failed"
+                    draft.pipeline_error = str(e)[:1000]
+                    db.commit()
+            except Exception:
+                pass
+        finally:
+            db.close()
+
+    asyncio.run(_run())
+
+
+@router.post("/clusters/{cluster_id}/generate", response_class=HTMLResponse)
+async def generate_cluster_articles(
+    request: Request,
+    cluster_id: UUID,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Generate articles for all approved briefs in the cluster."""
+    settings = get_settings()
+
+    cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    # Get approved briefs from this cluster + children
+    child_ids = [c.id for c in db.query(models.Cluster).filter(
+        models.Cluster.parent_cluster_id == cluster_id,
+    ).all()]
+    all_cluster_ids = [cluster_id] + child_ids
+
+    approved_briefs = db.query(models.Brief).filter(
+        models.Brief.cluster_id.in_(all_cluster_ids),
+        models.Brief.status == "approved",
+    ).all()
+
+    if not approved_briefs:
+        # If none approved, generate all draft briefs
+        approved_briefs = db.query(models.Brief).filter(
+            models.Brief.cluster_id.in_(all_cluster_ids),
+            models.Brief.status == "draft",
+        ).all()
+
+    if not approved_briefs:
+        return RedirectResponse(
+            url=f"/ui/clusters/{cluster_id}?error=No briefs to generate",
+            status_code=303,
+        )
+
+    region = "ru"
+    queued = 0
+
+    # Load KB docs from site's attached knowledge folders
+    site = db.query(models.Site).filter(models.Site.id == cluster.site_id).first()
+    kb_docs = []
+    if site:
+        for folder in site.knowledge_folders:
+            for doc in folder.documents:
+                if doc.content_text:
+                    kb_docs.append({
+                        "id": str(doc.id),
+                        "title": doc.original_filename,
+                        "content_text": doc.content_text,
+                        "word_count": doc.word_count or 0,
+                    })
+
+    for brief in approved_briefs:
+        brief_data = {
+            "title_candidate": brief.title,
+            "role": brief.structure.get("role", "cluster") if isinstance(brief.structure, dict) else "cluster",
+            "primary_intent": brief.structure.get("primary_intent", "informational") if isinstance(brief.structure, dict) else "informational",
+            "topic_boundaries": brief.structure.get("topic_boundaries", {}) if isinstance(brief.structure, dict) else {},
+            "must_answer_questions": brief.structure.get("must_answer_questions", []) if isinstance(brief.structure, dict) else [],
+            "target_terms": [brief.target_keyword] + (brief.secondary_keywords or []),
+            "unique_angle": brief.structure.get("unique_angle", {}) if isinstance(brief.structure, dict) else {},
+            "internal_links_plan": brief.structure.get("internal_links_plan", []) if isinstance(brief.structure, dict) else [],
+            "seed_queries": brief.structure.get("seed_queries", []) if isinstance(brief.structure, dict) else [],
+        }
+
+        brief.status = "in_writing"
+        db.commit()
+
+        background_tasks.add_task(
+            _run_pipeline_for_brief,
+            str(brief.id),
+            str(cluster.site_id),
+            brief.title,
+            region,
+            brief_data,
+            settings,
+            kb_docs,
+        )
+        queued += 1
+
+    cluster.status = "in_progress"
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/ui/clusters/{cluster_id}?success=Запущена генерация {queued} статей",
         status_code=303,
     )

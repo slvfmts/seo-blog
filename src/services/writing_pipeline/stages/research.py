@@ -30,7 +30,7 @@ class ResearchStage(WritingStage):
     Enhanced with:
     - Full page content fetching via Jina Reader
     - PAA (People Also Ask) query expansion
-    - Keyword metrics from DataForSEO
+    - Keyword metrics via pluggable VolumeProvider (Wordstat / Rush / DataForSEO)
     - Trafilatura fallback for content extraction
     """
 
@@ -41,6 +41,7 @@ class ResearchStage(WritingStage):
         jina_api_key: Optional[str] = None,
         dataforseo_login: Optional[str] = None,
         dataforseo_password: Optional[str] = None,
+        volume_provider=None,
         use_playwright: bool = True,
         **kwargs
     ):
@@ -49,6 +50,7 @@ class ResearchStage(WritingStage):
         self.jina_api_key = jina_api_key
         self.dataforseo_login = dataforseo_login
         self.dataforseo_password = dataforseo_password
+        self.volume_provider = volume_provider  # VolumeProvider instance (optional)
         self.use_playwright = use_playwright
 
         # Lazy-loaded clients
@@ -110,6 +112,16 @@ class ResearchStage(WritingStage):
 
             # Step 1: Generate search queries
             queries, tokens = await self._generate_queries(context)
+
+            # If brief provides seed_queries, add them as additional queries
+            brief = context.config.get("brief")
+            if brief:
+                brief_data = brief if isinstance(brief, dict) else brief.to_dict()
+                from ..contracts import Query
+                for sq in brief_data.get("seed_queries", []):
+                    if sq not in [q.query for q in queries.queries]:
+                        queries.queries.append(Query(query=sq, purpose="other"))
+
             context.queries = queries
             total_tokens += tokens
 
@@ -539,7 +551,9 @@ class ResearchStage(WritingStage):
 
     async def _fetch_keyword_metrics(self, context: WritingContext) -> KeywordMetricsResult:
         """
-        Fetch keyword metrics from DataForSEO.
+        Fetch keyword metrics via VolumeProvider (Wordstat/Rush/DataForSEO).
+
+        Uses pluggable provider if set, otherwise falls back to direct DataForSEO.
 
         Args:
             context: Pipeline context with queries
@@ -547,28 +561,55 @@ class ResearchStage(WritingStage):
         Returns:
             KeywordMetricsResult with metrics for all queries
         """
+        # Collect keywords from queries
+        keywords = [q.query for q in context.queries.queries]
+        keywords.insert(0, context.topic)
+
+        # Add brief target_terms if available
+        brief = context.config.get("brief")
+        if brief:
+            brief_data = brief if isinstance(brief, dict) else brief.to_dict()
+            for term in brief_data.get("target_terms", []):
+                if term.lower() not in {k.lower() for k in keywords}:
+                    keywords.append(term)
+
+        location_name = context.region.lower()
+        lang = "ru" if location_name in ["ru", "russia", "kz"] else "en"
+
+        # Try pluggable VolumeProvider first
+        if self.volume_provider:
+            try:
+                from ..data_sources.volume_provider import VolumeResult
+                results = await self.volume_provider.get_volumes(keywords, language_code=lang)
+                source = self.volume_provider.source_name
+                metrics = {}
+                for vr in results:
+                    metrics[vr.keyword.lower()] = KeywordMetricsData(
+                        keyword=vr.keyword,
+                        search_volume=vr.volume,
+                        difficulty=vr.difficulty,
+                        cpc=vr.cpc,
+                        competition=vr.competition,
+                        competition_level=vr.competition_level,
+                    )
+                logger.info(f"Fetched {len(metrics)} keyword metrics via {source}")
+                return KeywordMetricsResult(metrics=metrics, source=source)
+            except Exception as e:
+                logger.warning(f"VolumeProvider ({self.volume_provider.source_name}) error: {e}, falling back to DataForSEO")
+
+        # Fallback: direct DataForSEO
         dataforseo = self._get_dataforseo()
         if not dataforseo:
             return KeywordMetricsResult(metrics={}, source="none")
-
-        # Collect keywords from queries
-        keywords = [q.query for q in context.queries.queries]
-
-        # Add topic as keyword
-        keywords.insert(0, context.topic)
-
-        # Determine location code
-        location_name = context.region.lower()
 
         try:
             result = await dataforseo.get_keyword_metrics(
                 keywords=keywords,
                 location_name=location_name,
-                language_code="ru" if location_name in ["ru", "russia"] else "en",
+                language_code=lang,
             )
 
             if result.success:
-                # Convert to contract format
                 metrics = {}
                 for kw in result.keywords:
                     metrics[kw.keyword.lower()] = KeywordMetricsData(

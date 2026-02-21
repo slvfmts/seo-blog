@@ -34,8 +34,21 @@ class LinkingStage(WritingStage):
         log = context.start_stage(self.name)
 
         try:
-            if not self.linker or not context.edited_md:
-                logger.info("Linking skipped: no linker configured or no edited content")
+            if not context.edited_md:
+                logger.info("Linking skipped: no edited content")
+                context.complete_stage(tokens_used=0, metadata={"skipped": True})
+                return context
+
+            if not self.linker:
+                # Check if brief has internal_links_plan — use it directly
+                brief = context.config.get("brief")
+                if brief:
+                    brief_data = brief if isinstance(brief, dict) else brief.to_dict()
+                    links_plan = brief_data.get("internal_links_plan", [])
+                    if links_plan:
+                        logger.info(f"Linking: using {len(links_plan)} links from brief (no linker)")
+                        context.config["_brief_links_plan"] = links_plan
+                logger.info("Linking skipped: no linker configured")
                 context.complete_stage(tokens_used=0, metadata={"skipped": True})
                 return context
 

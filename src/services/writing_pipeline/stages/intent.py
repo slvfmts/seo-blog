@@ -28,14 +28,40 @@ class IntentStage(WritingStage):
         return "intent"
 
     async def run(self, context: WritingContext) -> WritingContext:
-        """Execute intent analysis."""
+        """Execute intent analysis. If a brief is in config, use it to seed the intent."""
         log = context.start_stage(self.name)
 
         try:
-            # Load and fill prompt template
-            prompt_template = self._load_prompt("intent_v1")
-            prompt = prompt_template.replace("{{topic}}", context.topic)
-            prompt = prompt.replace("{{region}}", context.region)
+            brief = context.config.get("brief")
+
+            if brief:
+                # Brief-seeded mode: use brief data to create richer intent prompt
+                import json
+                brief_json = json.dumps(brief if isinstance(brief, dict) else brief.to_dict(), ensure_ascii=False, indent=2)
+
+                prompt_template = self._load_prompt("intent_v1")
+                prompt = prompt_template.replace("{{topic}}", context.topic)
+                prompt = prompt.replace("{{region}}", context.region)
+
+                # Append brief context to the prompt
+                prompt += f"""
+
+## Дополнительный контекст: Brief из кластерного плана
+
+У этой статьи есть готовый brief. Используй его для уточнения intent:
+{brief_json}
+
+Учти:
+- topic_boundaries из brief — строго следуй in_scope/out_of_scope
+- must_answer_questions из brief должны войти в must_answer_questions результата
+- unique_angle.must_not_cover → must_not_include
+- role (pillar/cluster) влияет на depth и word_count_range
+"""
+            else:
+                # Standard mode
+                prompt_template = self._load_prompt("intent_v1")
+                prompt = prompt_template.replace("{{topic}}", context.topic)
+                prompt = prompt.replace("{{region}}", context.region)
 
             # Call LLM
             response_text, tokens = self._call_llm(

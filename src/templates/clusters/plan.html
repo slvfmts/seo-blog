@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Планирование кластера — SEO Blog{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Планирование кластера</h1>
+    <p class="mt-1 text-sm text-gray-600">Введите широкую тему — система создаст план из pillar + cluster статей</p>
+</div>
+
+{% if request.query_params.get('error') %}
+<div class="mb-4 bg-red-50 border border-red-200 rounded-md p-4">
+    <p class="text-sm text-red-700">{{ request.query_params.get('error') }}</p>
+</div>
+{% endif %}
+
+<div class="bg-white shadow sm:rounded-lg p-6">
+    <form method="post" action="/ui/clusters/plan" id="plan-form">
+        <div class="space-y-4">
+            <div>
+                <label for="site_id" class="block text-sm font-medium text-gray-700">Тема (сайт)</label>
+                <select id="site_id" name="site_id" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md border">
+                    {% for site in sites %}
+                    <option value="{{ site.id }}">{{ site.name }} ({{ site.country }}/{{ site.language }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label for="big_topic" class="block text-sm font-medium text-gray-700">Широкая тема</label>
+                <input type="text" id="big_topic" name="big_topic" required
+                    class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="контент-маркетинг">
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label for="region" class="block text-sm font-medium text-gray-700">Регион</label>
+                    <select id="region" name="region" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md border">
+                        <option value="ru" selected>Россия (ru)</option>
+                        <option value="us">США (us)</option>
+                        <option value="uk">Великобритания (uk)</option>
+                        <option value="kz">Казахстан (kz)</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="target_count" class="block text-sm font-medium text-gray-700">Кол-во статей</label>
+                    <input type="number" id="target_count" name="target_count" value="10" min="3" max="30"
+                        class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                </div>
+            </div>
+
+            <div class="pt-4">
+                <button type="submit" id="submit-btn"
+                    class="inline-flex items-center px-6 py-3 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    <span id="btn-text">Создать план</span>
+                    <span id="btn-spinner" class="hidden ml-2">
+                        <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </span>
+                </button>
+                <p class="mt-2 text-sm text-gray-500">Генерация занимает 1-3 минуты (зависит от кол-ва статей)</p>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('plan-form').addEventListener('submit', function() {
+    document.getElementById('submit-btn').disabled = true;
+    document.getElementById('btn-text').textContent = 'Генерация...';
+    document.getElementById('btn-spinner').classList.remove('hidden');
+});
+</script>
+{% endblock %}

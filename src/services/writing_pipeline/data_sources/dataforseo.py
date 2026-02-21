@@ -7,6 +7,9 @@ Provides:
 - CPC (cost per click)
 - Competition level
 
+Also exports DataForSEOProvider(VolumeProvider) for use with the
+pluggable volume_provider interface.
+
 API Documentation: https://docs.dataforseo.com/
 Pricing: $50 minimum deposit, ~$0.05/keyword
 """
@@ -560,3 +563,62 @@ class DataForSEO:
             success=True,
             cost=volume_result.cost,
         )
+
+
+# =============================================================================
+# VolumeProvider adapter
+# =============================================================================
+
+class DataForSEOProvider:
+    """
+    VolumeProvider adapter wrapping the DataForSEO client.
+
+    Used as fallback for non-RU regions, or when Wordstat/Rush are unavailable.
+    Implements the VolumeProvider interface from volume_provider.py.
+    """
+
+    def __init__(self, login: str, password: str, region: str = "us"):
+        from .volume_provider import VolumeProvider  # noqa: avoid circular at module level
+        self._client = DataForSEO(login=login, password=password)
+        self._region = region
+
+    @property
+    def source_name(self) -> str:
+        return "dataforseo"
+
+    async def get_volumes(self, keywords: list, language_code: str = "en") -> list:
+        from .volume_provider import VolumeResult
+
+        location_name = self._region
+        result = await self._client.get_keyword_metrics(
+            keywords=keywords,
+            location_name=location_name,
+            language_code=language_code,
+        )
+
+        volume_results = []
+        if result.success:
+            for kw in result.keywords:
+                volume_results.append(VolumeResult(
+                    keyword=kw.keyword,
+                    volume=kw.search_volume,
+                    source="dataforseo",
+                    difficulty=kw.difficulty,
+                    cpc=kw.cpc,
+                    competition=kw.competition,
+                    competition_level=kw.competition_level,
+                    trend=kw.trend,
+                ))
+        else:
+            logger.warning(f"DataForSEO error: {result.error}")
+            for kw in keywords:
+                volume_results.append(VolumeResult(
+                    keyword=kw,
+                    volume=0,
+                    source="dataforseo",
+                ))
+
+        return volume_results
+
+    async def get_suggestions(self, keyword: str) -> list:
+        return []  # DataForSEO suggestions require Labs endpoint (402)

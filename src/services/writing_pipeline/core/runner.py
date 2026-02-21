@@ -115,6 +115,7 @@ class PipelineRunner:
                 jina_api_key=self.jina_api_key,
                 dataforseo_login=self.dataforseo_login,
                 dataforseo_password=self.dataforseo_password,
+                volume_provider=self._init_volume_provider(),
             ),
             StructureStage(client=self.client, model=self.model),
             DraftingStage(client=self.client, model=self.model),
@@ -126,6 +127,35 @@ class PipelineRunner:
             FormattingStage(client=self.client, model=self.model, openai_api_key=self.openai_api_key, openai_proxy_url=self.openai_proxy_url, openai_proxy_secret=self.openai_proxy_secret, ghost_url=self.ghost_url or "", ghost_admin_key=self.ghost_admin_key or ""),
         ]
 
+    def _init_volume_provider(self):
+        """Initialize the best available volume provider based on env config."""
+        try:
+            from ..data_sources.volume_provider import get_volume_provider
+
+            # Build a lightweight settings-like object from runner params
+            class _ProviderSettings:
+                pass
+
+            s = _ProviderSettings()
+            s.dataforseo_login = self.dataforseo_login or ""
+            s.dataforseo_password = self.dataforseo_password or ""
+
+            # Try to load from real settings (for Yandex/Rush keys)
+            try:
+                from ....config.settings import get_settings
+                real = get_settings()
+                s.yandex_wordstat_api_key = real.yandex_wordstat_api_key
+                s.rush_analytics_api_key = real.rush_analytics_api_key
+            except Exception:
+                s.yandex_wordstat_api_key = ""
+                s.rush_analytics_api_key = ""
+
+            # Default to "ru" — actual region is applied per-run in research stage
+            return get_volume_provider("ru", s)
+        except Exception as e:
+            logger.warning(f"Could not init volume provider: {e}")
+            return None
+
     async def run(
         self,
         topic: str,
@@ -134,6 +164,7 @@ class PipelineRunner:
         save_intermediate: bool = True,
         config: Optional[dict] = None,
         on_stage_complete: Optional[Callable[[str, str], None]] = None,
+        brief: Optional[dict] = None,
     ) -> PipelineResult:
         """
         Run the full writing pipeline.
@@ -167,6 +198,10 @@ class PipelineRunner:
         }
         if config:
             pipeline_config.update(config)
+
+        # Pass brief into config for stages to consume
+        if brief:
+            pipeline_config["brief"] = brief
 
         # Fetch existing posts from Ghost for cluster overlap analysis
         existing_posts = []

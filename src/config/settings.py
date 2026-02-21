@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     dataforseo_login: str = ""
     dataforseo_password: str = ""
 
+    # Yandex Wordstat (RU volumes via Yandex Cloud Search API)
+    yandex_wordstat_api_key: str = ""
+
+    # Rush Analytics (alternative RU volumes, Pro+ plan)
+    rush_analytics_api_key: str = ""
+
     # OpenAI (DALL-E covers)
     openai_api_key: str = ""
     openai_proxy_url: str = ""  # Cloudflare Worker URL для обхода geo-блокировки OpenAI

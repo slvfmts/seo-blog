@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Any, Dict, List
 from datetime import datetime
 
-from ..contracts import IntentResult, ResearchResult, OutlineResult, QueryPlannerResult, KeywordMetricsResult, MetaResult, DraftMeta, QualityGateResult
+from ..contracts import IntentResult, ResearchResult, OutlineResult, QueryPlannerResult, KeywordMetricsResult, MetaResult, DraftMeta, QualityGateResult, ArticleBrief
 
 
 @dataclass
