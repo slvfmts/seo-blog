@@ -938,7 +938,6 @@ async def discover_clusters_for_topic(
     try:
         import anthropic
         from src.services.cluster_planner import ClusterPlanner
-        from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
 
         if settings.anthropic_proxy_url and settings.anthropic_proxy_secret:
             client = anthropic.Anthropic(
@@ -950,12 +949,12 @@ async def discover_clusters_for_topic(
             client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
         region = topic.country or "ru"
-        volume_provider = get_volume_provider(region, settings)
 
         planner = ClusterPlanner(
             anthropic_client=client,
-            volume_provider=volume_provider if volume_provider.source_name != "none" else None,
             serper_api_key=settings.serper_api_key,
+            dataforseo_login=settings.dataforseo_login,
+            dataforseo_password=settings.dataforseo_password,
         )
 
         # Load KB docs
