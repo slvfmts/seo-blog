@@ -22,23 +22,24 @@ from ..contracts import FormattingResult, FormattingAsset
 logger = logging.getLogger(__name__)
 
 
-COVER_SCENE_PROMPT = """Ты — арт-директор. Прочитай статью и опиши ОДНУ конкретную сцену для обложки в 4-6 предложениях на английском.
+COVER_SCENE_PROMPT = """You are an art director for a cozy pixel-art blog. Read the article and describe ONE specific scene for the cover in 3-5 sentences in English.
 
-Правила:
-- Опиши визуальную метафору, а не буквальную иллюстрацию
-- Один центральный объект + 2-4 вторичных элемента
-- Стиль: современный минималистичный 3D, матовые материалы + стекло, тёмный фон (индиго/графит), неоновые акценты (циан, маджента, лайм), rim lighting
-- НЕ описывай людей, руки, лица, офисные сцены, рукопожатия
-- НЕ упоминай текст, буквы, цифры, логотипы
-- Пиши ТОЛЬКО описание сцены, без пояснений
+Rules:
+- The scene should be an atmospheric interior or landscape that metaphorically relates to the article topic
+- Think cozy spaces: a study with bookshelves, a workshop, a window overlooking a city, a garden, a library, a café, a cabin in the woods — pick what fits the topic
+- Include environmental storytelling details: warm lighting (lamps, candles, sunset glow, fireplace), objects on shelves/desks, weather outside windows, plants, cats, mugs
+- Time of day matters: evening/night with warm interior light is preferred, but dawn/morning works too
+- NO people, NO hands, NO faces, NO text, NO letters, NO numbers, NO logos
+- Write ONLY the scene description, nothing else
 
-[ТЕКСТ СТАТЬИ]
+[ARTICLE TEXT]
 """
 
 COVER_STYLE_PREFIX = (
-    "Wide 16:9 digital artwork. Modern minimalist 3D render, matte materials with glass/translucent elements. "
-    "Dark indigo-graphite background. Neon accents: cyan, magenta, lime. Sharp rim lighting, soft shadows. "
-    "Centered composition, lots of negative space. No text, no letters, no numbers, no logos, no people, no hands. "
+    "Wide 16:9 high-quality pixel art illustration. Detailed retro pixel art style inspired by Owlboy and Eastward. "
+    "Rich warm color palette with atmospheric lighting — golden hour, cozy lamplight, or soft moonlight. "
+    "Fine pixel detail on objects and textures, slight dithering for smooth gradients. "
+    "Moody and atmospheric, NOT flat or cartoony. No text, no letters, no numbers, no logos, no people, no hands. "
     "Scene: "
 )
 
@@ -228,7 +229,7 @@ class FormattingStage(WritingStage):
                 model="gpt-image-1.5",
                 prompt=image_prompt,
                 size="1536x1024",
-                quality="medium",
+                quality="high",
                 n=1,
             )
 
