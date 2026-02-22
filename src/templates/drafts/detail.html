@@ -25,8 +25,8 @@
             <div class="px-6 py-4 border-b border-gray-200">
                 <div class="flex justify-between items-start">
                     <h1 class="text-xl font-semibold text-gray-900">{{ draft.title }}</h1>
-                    <div>
-                        {% if draft.pipeline_status == 'running' or draft.status in ('generating', 'pipeline_running') %}
+                    <div class="flex items-center space-x-2">
+                        {% if is_running %}
                         <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
                             <svg class="animate-spin h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -34,6 +34,11 @@
                             </svg>
                             Генерация...
                         </span>
+                        <form method="POST" action="/ui/articles/{{ draft.id }}/cancel" class="inline">
+                            <button type="submit" class="px-3 py-1 text-sm font-medium rounded-full bg-red-100 text-red-700 hover:bg-red-200">
+                                Остановить
+                            </button>
+                        </form>
                         {% elif is_paused %}
                         <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-amber-100 text-amber-800">
                             Пауза
@@ -568,8 +573,8 @@
 {% block scripts %}
 <script>
     {% if is_running %}
-    // Auto-refresh while generating
-    setTimeout(function() { location.reload(); }, 5000);
+    // Auto-refresh while generating (stops when paused/completed)
+    setTimeout(function() { location.reload(); }, 6000);
     {% endif %}
 
     {% if draft.status in ['generated', 'validated', 'validation_failed', 'pipeline_completed'] %}

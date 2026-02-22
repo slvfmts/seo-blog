@@ -14,11 +14,7 @@
             </nav>
             <h1 class="text-2xl font-bold text-gray-900">{{ cluster.name }}</h1>
             <div class="mt-1 flex items-center space-x-3">
-                {% if cluster.topic_type == 'pillar' %}
                 <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">pillar</span>
-                {% else %}
-                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">{{ cluster.topic_type or '-' }}</span>
-                {% endif %}
                 <span class="text-sm text-gray-500">{{ cluster.status }}</span>
                 <span class="text-sm text-gray-500">{{ cluster.estimated_traffic or 0 }} est. traffic</span>
                 {% if cluster.factual_mode and cluster.factual_mode != 'default' %}
@@ -106,12 +102,20 @@
     <div class="bg-white shadow rounded-lg p-5 border-l-4 border-purple-500">
         <div class="flex justify-between items-start">
             <div>
+                {% set pillar_d = brief_drafts.get(pillar_brief.id|string) %}
+                {% if pillar_d %}
+                <a href="/ui/articles/{{ pillar_d.id }}" class="text-base font-medium text-indigo-600 hover:text-indigo-800">{{ pillar_brief.title }}</a>
+                {% else %}
                 <h3 class="text-base font-medium text-gray-900">{{ pillar_brief.title }}</h3>
+                {% endif %}
                 <p class="text-sm text-gray-500 mt-1">{{ pillar_brief.target_keyword }}</p>
+                {% if pillar_brief.structure and pillar_brief.structure.estimated_volume %}
+                <p class="text-xs text-gray-400">Volume: {{ pillar_brief.structure.estimated_volume }}</p>
+                {% endif %}
             </div>
             <div class="flex items-center space-x-2">
                 <span class="px-2 py-1 text-xs rounded bg-purple-100 text-purple-800 font-medium">pillar</span>
-                {% set brief_status_color = {'draft': 'gray', 'approved': 'blue', 'in_writing': 'yellow', 'completed': 'green', 'error': 'red'} %}
+                {% set brief_status_color = {'draft': 'gray', 'approved': 'blue', 'queued': 'indigo', 'in_writing': 'yellow', 'completed': 'green', 'error': 'red', 'cancelled': 'gray'} %}
                 <span class="px-2 py-1 text-xs rounded bg-{{ brief_status_color.get(pillar_brief.status, 'gray') }}-100 text-{{ brief_status_color.get(pillar_brief.status, 'gray') }}-600">{{ pillar_brief.status }}</span>
             </div>
         </div>
@@ -131,15 +135,23 @@
                 <button type="submit" class="text-xs text-green-600 hover:text-green-800 font-medium">Approve</button>
             </form>
             {% endif %}
-            {% if pillar_draft %}
-            <a href="/ui/articles/{{ pillar_draft.id }}" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">Открыть статью &rarr;</a>
+            {% if pillar_brief.status in ('approved', 'draft') %}
+            <form method="post" action="/ui/clusters/{{ cluster.id }}/briefs/{{ pillar_brief.id }}/generate" class="inline">
+                <button type="submit" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">Генерировать</button>
+            </form>
             {% endif %}
+            {% if pillar_d %}
+            <a href="/ui/articles/{{ pillar_d.id }}" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">Открыть статью &rarr;</a>
+            {% endif %}
+            <form method="post" action="/ui/clusters/{{ cluster.id }}/briefs/{{ pillar_brief.id }}/delete" class="inline">
+                <button type="submit" class="text-xs text-red-500 hover:text-red-700">Delete</button>
+            </form>
         </div>
     </div>
 </div>
 {% endif %}
 
-<!-- Cluster articles -->
+<!-- Cluster articles (all in one table) -->
 <div class="mb-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-3">
         Cluster-статьи
@@ -154,7 +166,7 @@
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Статья</th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-28">Volume</th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-24">Статус</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-32">Действия</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-40">Действия</th>
                 </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
@@ -162,7 +174,11 @@
                 {% set draft = brief_drafts.get(brief.id|string) %}
                 <tr>
                     <td class="px-4 py-3">
+                        {% if draft %}
+                        <a href="/ui/articles/{{ draft.id }}" class="text-sm font-medium text-indigo-600 hover:text-indigo-800">{{ brief.title }}</a>
+                        {% else %}
                         <div class="text-sm font-medium text-gray-900">{{ brief.title }}</div>
+                        {% endif %}
                         <div class="text-xs text-gray-500">{{ brief.target_keyword }}</div>
                         {% if brief.secondary_keywords %}
                         <div class="mt-1 flex flex-wrap gap-1">
@@ -176,12 +192,12 @@
                         {% endif %}
                     </td>
                     <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                        {% set child_cluster = brief_clusters.get(brief.cluster_id|string) %}
-                        {{ child_cluster.estimated_traffic if child_cluster and child_cluster.estimated_traffic else '-' }}
+                        {% set ev = brief.structure.estimated_volume if brief.structure and brief.structure is mapping else None %}
+                        {{ ev if ev else '-' }}
                     </td>
                     <td class="px-4 py-3 whitespace-nowrap">
                         {% if draft %}
-                            {% if draft.pipeline_status == 'running' or draft.status == 'generating' %}
+                            {% if draft.pipeline_status == 'running' or draft.status in ('generating', 'pipeline_running') %}
                             <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
                                 <svg class="animate-spin h-3 w-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -200,6 +216,8 @@
                             {% else %}
                             <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">{{ draft.status }}</span>
                             {% endif %}
+                        {% elif brief.status == 'queued' %}
+                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-indigo-100 text-indigo-800">queued</span>
                         {% else %}
                             <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-{{ {'draft': 'gray', 'approved': 'blue', 'in_writing': 'yellow', 'completed': 'green', 'error': 'red'}.get(brief.status, 'gray') }}-100 text-{{ {'draft': 'gray', 'approved': 'blue', 'in_writing': 'yellow', 'completed': 'green', 'error': 'red'}.get(brief.status, 'gray') }}-600">{{ brief.status }}</span>
                         {% endif %}
@@ -212,6 +230,11 @@
                             {% if brief.status == 'draft' %}
                             <form method="post" action="/ui/clusters/{{ cluster.id }}/briefs/{{ brief.id }}/approve" class="inline">
                                 <button type="submit" class="text-xs text-green-600 hover:text-green-800">Approve</button>
+                            </form>
+                            {% endif %}
+                            {% if brief.status in ('approved', 'draft') and not draft %}
+                            <form method="post" action="/ui/clusters/{{ cluster.id }}/briefs/{{ brief.id }}/generate" class="inline">
+                                <button type="submit" class="text-xs text-indigo-600 hover:text-indigo-800">Генерировать</button>
                             </form>
                             {% endif %}
                             <form method="post" action="/ui/clusters/{{ cluster.id }}/briefs/{{ brief.id }}/delete" class="inline">
@@ -230,12 +253,34 @@
     </div>
     {% endif %}
 </div>
+
+<!-- Keywords (B3) -->
+{% if cluster_keywords %}
+<details class="mb-6">
+    <summary class="bg-white shadow sm:rounded-lg p-4 cursor-pointer hover:bg-gray-50">
+        <span class="text-base font-medium text-gray-900">Ключевые слова ({{ cluster_keywords|length }})</span>
+    </summary>
+    <div class="bg-white shadow sm:rounded-lg mt-1 p-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {% for kw in cluster_keywords[:60] %}
+            <div class="flex justify-between text-sm py-1 px-2 bg-gray-50 rounded">
+                <span class="text-gray-800 truncate">{{ kw.keyword }}</span>
+                <span class="text-gray-500 ml-2 flex-shrink-0">{{ kw.search_volume or '-' }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% if cluster_keywords|length > 60 %}
+        <p class="mt-2 text-xs text-gray-400">... и ещё {{ cluster_keywords|length - 60 }}</p>
+        {% endif %}
+    </div>
+</details>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
 {% if has_running %}
 <script>
-// Auto-refresh while articles are generating
+// HTMX-based polling: reload page every 8s while articles are generating
 setTimeout(function() { location.reload(); }, 8000);
 </script>
 {% endif %}

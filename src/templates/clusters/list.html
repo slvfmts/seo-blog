@@ -31,34 +31,23 @@
         <thead class="bg-gray-50">
             <tr>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Кластер</th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Тип</th>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Статей</th>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Трафик</th>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Статус</th>
                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Дата</th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Действия</th>
             </tr>
         </thead>
         <tbody class="bg-white divide-y divide-gray-200">
             {% for cluster in clusters %}
-            <tr>
+            <tr class="hover:bg-gray-50 cursor-pointer" onclick="window.location='/ui/clusters/{{ cluster.id }}'">
                 <td class="px-6 py-4">
                     <div class="text-sm font-medium text-gray-900">{{ cluster.name }}</div>
                     {% if cluster.site %}
                     <div class="text-sm text-gray-500">{{ cluster.site.name }}</div>
                     {% endif %}
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    {% if cluster.topic_type == 'pillar' %}
-                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">pillar</span>
-                    {% elif cluster.topic_type == 'cluster' %}
-                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">cluster</span>
-                    {% else %}
-                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">{{ cluster.topic_type or '-' }}</span>
-                    {% endif %}
-                </td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {{ cluster.brief_count }}{% if cluster.child_count %} (+ {{ cluster.child_count }} подкластеров){% endif %}
+                    {{ cluster.brief_count }}
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {{ cluster.estimated_traffic or 0 }}
@@ -76,9 +65,6 @@
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {{ cluster.created_at.strftime('%d.%m.%Y') if cluster.created_at else '-' }}
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <a href="/ui/clusters/{{ cluster.id }}" class="text-indigo-600 hover:text-indigo-900">Открыть</a>
                 </td>
             </tr>
             {% endfor %}

@@ -4,12 +4,15 @@ UI routes for Brief workflow web interface.
 
 import asyncio
 import json
+import logging
 import os
 import traceback
 import uuid as uuid_lib
 from uuid import UUID
 from datetime import datetime
 from typing import List
+
+logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -1234,13 +1237,6 @@ async def article_detail(request: Request, draft_id: UUID, db: Session = Depends
         brief = db.query(models.Brief).filter(models.Brief.id == draft.brief_id).first()
         if brief and brief.cluster_id:
             cluster = db.query(models.Cluster).filter(models.Cluster.id == brief.cluster_id).first()
-            # If child cluster, get parent for breadcrumb
-            if cluster and cluster.parent_cluster_id:
-                parent_cluster = db.query(models.Cluster).filter(
-                    models.Cluster.id == cluster.parent_cluster_id,
-                ).first()
-                if parent_cluster:
-                    cluster = parent_cluster
 
     # Pipeline stages definition (all 10)
     all_stages = [
@@ -1257,8 +1253,10 @@ async def article_detail(request: Request, draft_id: UUID, db: Session = Depends
     ]
 
     # Determine if pipeline is active (for auto-refresh)
-    is_running = draft.pipeline_status == "running" or draft.status in ("generating", "pipeline_running")
     is_paused = draft.pipeline_status and draft.pipeline_status.startswith("paused")
+    is_running = (
+        draft.pipeline_status == "running" or draft.status in ("generating", "pipeline_running")
+    ) and not is_paused
 
     return templates.TemplateResponse("drafts/detail.html", {
         "request": request,
@@ -2339,10 +2337,10 @@ async def cluster_list(request: Request, db: Session = Depends(get_db)):
         models.Cluster.parent_cluster_id.is_(None),
     ).order_by(models.Cluster.created_at.desc()).all()
 
-    # Enrich with counts
+    # Enrich with brief count (flat model)
     for cluster in clusters:
         cluster.brief_count = len(cluster.briefs)
-        cluster.child_count = len(cluster.children) if hasattr(cluster, 'children') else 0
+        cluster.child_count = 0  # no more child clusters
 
     return templates.TemplateResponse("clusters/list.html", {
         "request": request,
@@ -2387,7 +2385,6 @@ async def cluster_plan_submit(
     try:
         import anthropic
         from src.services.cluster_planner import ClusterPlanner
-        from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
 
         # Init Anthropic client
         if settings.anthropic_proxy_url and settings.anthropic_proxy_secret:
@@ -2399,12 +2396,11 @@ async def cluster_plan_submit(
         else:
             client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
-        volume_provider = get_volume_provider(region, settings)
-
         planner = ClusterPlanner(
             anthropic_client=client,
-            volume_provider=volume_provider if volume_provider.source_name != "none" else None,
             serper_api_key=settings.serper_api_key,
+            dataforseo_login=settings.dataforseo_login,
+            dataforseo_password=settings.dataforseo_password,
         )
 
         # Load KB docs from site's knowledge folders (if site_id provided)
@@ -2457,40 +2453,36 @@ async def cluster_detail(
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster not found")
 
-    # Get pillar brief (brief directly on this cluster)
-    pillar_brief = db.query(models.Brief).filter(
+    # All briefs in this cluster (flat model — no child clusters)
+    all_briefs_raw = db.query(models.Brief).filter(
         models.Brief.cluster_id == cluster_id,
-    ).first()
-
-    # Get child clusters
-    child_clusters = db.query(models.Cluster).filter(
-        models.Cluster.parent_cluster_id == cluster_id,
-    ).order_by(models.Cluster.priority_score.desc().nullslast()).all()
-
-    # Build child cluster lookup
-    brief_clusters = {}
-    child_ids = [c.id for c in child_clusters]
-    for c in child_clusters:
-        brief_clusters[str(c.id)] = c
-
-    # Get briefs from child clusters
-    children_briefs = []
-    if child_clusters:
-        children_briefs = db.query(models.Brief).filter(
-            models.Brief.cluster_id.in_(child_ids),
-        ).all()
-
-    # All briefs (pillar + children)
-    all_briefs = ([pillar_brief] if pillar_brief else []) + children_briefs
+    ).all()
 
     # Parse structure JSON for display
-    for brief in all_briefs:
+    for brief in all_briefs_raw:
         if brief and isinstance(brief.structure, str):
             import json
             try:
                 brief.structure = json.loads(brief.structure)
             except Exception:
                 brief.structure = {}
+
+    # Separate pillar from cluster briefs
+    pillar_brief = None
+    children_briefs = []
+    for b in all_briefs_raw:
+        if b.structure and isinstance(b.structure, dict) and b.structure.get("role") == "pillar":
+            pillar_brief = b
+        else:
+            children_briefs.append(b)
+
+    # Sort cluster briefs by priority (from structure)
+    def brief_priority(b):
+        s = b.structure if isinstance(b.structure, dict) else {}
+        return s.get("priority", 99)
+    children_briefs.sort(key=brief_priority)
+
+    all_briefs = ([pillar_brief] if pillar_brief else []) + children_briefs
 
     # Build brief_id → draft mapping
     brief_ids = [b.id for b in all_briefs if b]
@@ -2510,9 +2502,14 @@ async def cluster_detail(
 
     # Check if any articles are currently generating
     has_running = any(
-        d.pipeline_status == "running" or d.status == "generating"
+        d.pipeline_status == "running" or d.status in ("generating", "pipeline_running")
         for d in drafts
     )
+
+    # Cluster keywords
+    cluster_keywords = db.query(models.Keyword).filter(
+        models.Keyword.cluster_id == cluster_id,
+    ).order_by(models.Keyword.search_volume.desc().nullslast()).all() if cluster.site_id else []
 
     # Knowledge Base folders
     all_folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
@@ -2523,13 +2520,12 @@ async def cluster_detail(
         "cluster": cluster,
         "pillar_brief": pillar_brief,
         "pillar_draft": pillar_draft,
-        "child_clusters": child_clusters,
         "children_briefs": children_briefs,
         "all_briefs": all_briefs,
         "brief_drafts": brief_drafts,
-        "brief_clusters": brief_clusters,
         "approved_count": approved_count,
         "has_running": has_running,
+        "cluster_keywords": cluster_keywords,
         "all_folders": all_folders,
         "attached_folder_ids": attached_folder_ids,
     })
@@ -2540,14 +2536,9 @@ async def approve_all_briefs(
     cluster_id: UUID,
     db: Session = Depends(get_db),
 ):
-    """Approve all draft briefs in the cluster (including children)."""
-    child_ids = [c.id for c in db.query(models.Cluster).filter(
-        models.Cluster.parent_cluster_id == cluster_id,
-    ).all()]
-    all_cluster_ids = [cluster_id] + child_ids
-
+    """Approve all draft briefs in the cluster."""
     count = db.query(models.Brief).filter(
-        models.Brief.cluster_id.in_(all_cluster_ids),
+        models.Brief.cluster_id == cluster_id,
         models.Brief.status == "draft",
     ).update({"status": "approved", "approved_at": datetime.utcnow()}, synchronize_session="fetch")
     db.commit()
@@ -2622,20 +2613,111 @@ async def delete_brief(
     )
 
 
+@router.post("/clusters/{cluster_id}/briefs/{brief_id}/generate", response_class=HTMLResponse)
+async def generate_single_brief(
+    cluster_id: UUID,
+    brief_id: UUID,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Generate article for a single brief."""
+    settings = get_settings()
+    brief = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
+    if not brief:
+        raise HTTPException(status_code=404, detail="Brief not found")
+
+    cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    # Auto-approve if still draft
+    if brief.status == "draft":
+        brief.status = "approved"
+        brief.approved_at = datetime.utcnow()
+
+    structure = brief.structure if isinstance(brief.structure, dict) else {}
+    if not structure:
+        return RedirectResponse(
+            url=f"/ui/clusters/{cluster_id}?error=Brief has empty structure",
+            status_code=303,
+        )
+
+    brief_data = {
+        "title_candidate": brief.title,
+        "role": structure.get("role", "cluster"),
+        "primary_intent": structure.get("primary_intent", "informational"),
+        "topic_boundaries": structure.get("topic_boundaries", {}),
+        "must_answer_questions": structure.get("must_answer_questions", []),
+        "target_terms": [brief.target_keyword] + (brief.secondary_keywords or []),
+        "unique_angle": structure.get("unique_angle", {}),
+        "internal_links_plan": structure.get("internal_links_plan", []),
+        "seed_queries": structure.get("seed_queries", []),
+    }
+
+    # Load KB docs
+    kb_docs = []
+    for folder in cluster.knowledge_folders:
+        for doc in folder.documents:
+            if doc.content_text:
+                kb_docs.append({
+                    "id": str(doc.id),
+                    "title": doc.original_filename,
+                    "content_text": doc.content_text,
+                    "word_count": doc.word_count or 0,
+                })
+
+    brief.status = "in_writing"
+    db.commit()
+
+    background_tasks.add_task(
+        _run_pipeline_for_brief,
+        str(brief.id),
+        str(cluster.site_id) if cluster.site_id else "",
+        brief.title,
+        cluster.region or "ru",
+        brief_data,
+        settings,
+        kb_docs,
+        str(cluster_id),
+        False,  # not step_by_step for single brief
+        cluster.factual_mode or "default",
+    )
+
+    return RedirectResponse(
+        url=f"/ui/clusters/{cluster_id}?success=Запущена генерация: {brief.title}",
+        status_code=303,
+    )
+
+
+@router.post("/articles/{draft_id}/cancel", response_class=HTMLResponse)
+async def cancel_article(draft_id: UUID, db: Session = Depends(get_db)):
+    """Cancel a running pipeline."""
+    draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    if draft.status in ("pipeline_running", "generating"):
+        draft.status = "cancelled"
+        draft.pipeline_status = "cancelled"
+        draft.pipeline_error = "Cancelled by user"
+        if draft.brief_id:
+            brief = db.query(models.Brief).filter(models.Brief.id == draft.brief_id).first()
+            if brief and brief.status == "in_writing":
+                brief.status = "cancelled"
+        db.commit()
+
+    return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=303)
+
+
 def _update_cluster_status(db, cluster_id: str):
     """Check if all briefs in cluster are done and update cluster status."""
     cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
     if not cluster:
         return
 
-    child_ids = [c.id for c in db.query(models.Cluster).filter(
-        models.Cluster.parent_cluster_id == cluster_id,
-    ).all()]
-    all_ids = [cluster.id] + child_ids
-
     briefs = db.query(models.Brief).filter(
-        models.Brief.cluster_id.in_(all_ids),
-        models.Brief.status.in_(["in_writing", "completed"]),
+        models.Brief.cluster_id == cluster_id,
+        models.Brief.status.in_(["in_writing", "completed", "queued"]),
     ).all()
 
     if not briefs:
@@ -2645,10 +2727,9 @@ def _update_cluster_status(db, cluster_id: str):
     if all(s == "completed" for s in statuses):
         cluster.status = "published"
         db.commit()
-    elif any(s == "in_writing" for s in statuses):
+    elif any(s in ("in_writing", "queued") for s in statuses):
         pass  # still in_progress
     else:
-        # All done but some might have failed (brief stayed in_writing with failed draft)
         has_running = db.query(models.Draft).filter(
             models.Draft.brief_id.in_([b.id for b in briefs]),
             models.Draft.status == "pipeline_running",
@@ -2796,8 +2877,13 @@ def _run_pipeline_for_brief(
 
             # Run stages one by one
             for stage in runner.stages:
-                # Update DB: stage is running
+                # Check for cancellation
                 d = db.query(models.Draft).filter(models.Draft.id == local_draft_id).first()
+                if d and d.status == "cancelled":
+                    logger.info(f"[pipeline] Cancelled before {stage.name}")
+                    return
+
+                # Update DB: stage is running
                 if d:
                     stages = dict(d.pipeline_stages or {})
                     stages[stage.name] = "running"
@@ -2878,6 +2964,52 @@ def _run_pipeline_for_brief(
     asyncio.run(_run())
 
 
+def _run_cluster_pipeline_sequential(
+    brief_queue: list,
+    site_id: str,
+    region: str,
+    settings,
+    knowledge_base_docs: list,
+    cluster_id: str,
+    step_by_step: bool,
+    factual_mode: str,
+):
+    """Background task: run pipeline for briefs SEQUENTIALLY, pillar first."""
+    for brief_id, topic, brief_data in brief_queue:
+        # Check if brief was cancelled before starting
+        from src.db.session import SessionLocal
+        db = SessionLocal()
+        try:
+            brief = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
+            if not brief or brief.status == "cancelled":
+                logger.info(f"[seq-gen] Skipping cancelled brief {brief_id}")
+                continue
+            brief.status = "in_writing"
+            db.commit()
+        finally:
+            db.close()
+
+        # Run pipeline for this brief (blocking)
+        _run_pipeline_for_brief(
+            brief_id, site_id, topic, region, brief_data,
+            settings, knowledge_base_docs, cluster_id,
+            step_by_step, factual_mode,
+        )
+
+        # If step_by_step, the first brief will pause — stop processing queue
+        if step_by_step:
+            db = SessionLocal()
+            try:
+                draft = db.query(models.Draft).filter(
+                    models.Draft.brief_id == brief_id,
+                ).order_by(models.Draft.created_at.desc()).first()
+                if draft and draft.pipeline_status and draft.pipeline_status.startswith("paused"):
+                    logger.info(f"[seq-gen] Paused at brief {brief_id}, stopping queue")
+                    break
+            finally:
+                db.close()
+
+
 @router.post("/clusters/{cluster_id}/generate", response_class=HTMLResponse)
 async def generate_cluster_articles(
     request: Request,
@@ -2886,7 +3018,7 @@ async def generate_cluster_articles(
     db: Session = Depends(get_db),
     step_by_step: str = Form("false"),
 ):
-    """Generate articles for all approved briefs in the cluster."""
+    """Generate articles for all approved briefs in the cluster (sequentially, pillar first)."""
     settings = get_settings()
     is_step_by_step = step_by_step.lower() == "true"
 
@@ -2901,21 +3033,16 @@ async def generate_cluster_articles(
             status_code=303,
         )
 
-    # Get approved briefs from this cluster + children
-    child_ids = [c.id for c in db.query(models.Cluster).filter(
-        models.Cluster.parent_cluster_id == cluster_id,
-    ).all()]
-    all_cluster_ids = [cluster_id] + child_ids
-
+    # Get approved briefs from this cluster (flat model)
     approved_briefs = db.query(models.Brief).filter(
-        models.Brief.cluster_id.in_(all_cluster_ids),
+        models.Brief.cluster_id == cluster_id,
         models.Brief.status == "approved",
     ).all()
 
     if not approved_briefs:
         # If none approved, generate all draft briefs
         approved_briefs = db.query(models.Brief).filter(
-            models.Brief.cluster_id.in_(all_cluster_ids),
+            models.Brief.cluster_id == cluster_id,
             models.Brief.status == "draft",
         ).all()
 
@@ -2927,8 +3054,6 @@ async def generate_cluster_articles(
 
     region = cluster.region or "ru"
     factual_mode = cluster.factual_mode or "default"
-    queued = 0
-    skipped = 0
 
     # Load KB docs from cluster's attached knowledge folders first, then site's
     kb_docs = []
@@ -2961,16 +3086,24 @@ async def generate_cluster_articles(
                         })
                         seen_doc_ids.add(str(doc.id))
 
+    # Sort: pillar first, then by priority
+    def brief_sort_key(b):
+        s = b.structure if isinstance(b.structure, dict) else {}
+        is_pillar = 0 if s.get("role") == "pillar" else 1
+        return (is_pillar, s.get("priority", 99))
+    approved_briefs.sort(key=brief_sort_key)
+
+    # Build queue of brief data for sequential processing
+    brief_queue = []
+    skipped = 0
     for brief in approved_briefs:
-        # Skip briefs already being processed or completed
         if brief.status in ("in_writing", "completed"):
             skipped += 1
             continue
 
-        # Validate brief.structure before passing to pipeline
         structure = brief.structure if isinstance(brief.structure, dict) else {}
         if not structure:
-            print(f"[cluster-generate] Skipping brief {brief.id}: empty structure")
+            logger.warning(f"[cluster-generate] Skipping brief {brief.id}: empty structure")
             skipped += 1
             continue
 
@@ -2986,25 +3119,12 @@ async def generate_cluster_articles(
             "seed_queries": structure.get("seed_queries", []),
         }
 
-        brief.status = "in_writing"
-        db.commit()
+        brief.status = "queued"
+        brief_queue.append((str(brief.id), brief.title, brief_data))
 
-        background_tasks.add_task(
-            _run_pipeline_for_brief,
-            str(brief.id),
-            str(cluster.site_id) if cluster.site_id else "",
-            brief.title,
-            region,
-            brief_data,
-            settings,
-            kb_docs,
-            str(cluster_id),
-            is_step_by_step,
-            factual_mode,
-        )
-        queued += 1
+    db.commit()
 
-    if queued == 0:
+    if not brief_queue:
         return RedirectResponse(
             url=f"/ui/clusters/{cluster_id}?error=Нет брифов для генерации (пропущено: {skipped})",
             status_code=303,
@@ -3013,7 +3133,20 @@ async def generate_cluster_articles(
     cluster.status = "in_progress"
     db.commit()
 
+    # One background task processes ALL briefs sequentially
+    background_tasks.add_task(
+        _run_cluster_pipeline_sequential,
+        brief_queue,
+        str(cluster.site_id) if cluster.site_id else "",
+        region,
+        settings,
+        kb_docs,
+        str(cluster_id),
+        is_step_by_step,
+        factual_mode,
+    )
+
     return RedirectResponse(
-        url=f"/ui/clusters/{cluster_id}?success=Запущена генерация {queued} статей",
+        url=f"/ui/clusters/{cluster_id}?success=Запущена генерация {len(brief_queue)} статей (pillar first)",
         status_code=303,
     )
