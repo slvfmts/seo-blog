@@ -131,11 +131,11 @@ class TestClusterPlan:
 
 
 # =============================================================================
-# ClusterPlanner service
+# ClusterPlanner service (search-first API)
 # =============================================================================
 
 class TestClusterPlannerService:
-    """Test ClusterPlanner._generate_seeds and _cluster_and_brief with mocked LLM."""
+    """Test ClusterPlanner methods with mocked LLM."""
 
     def _make_planner(self, llm_response_text: str):
         mock_client = MagicMock()
@@ -151,58 +151,12 @@ class TestClusterPlannerService:
         )
 
     @pytest.mark.asyncio
-    async def test_generate_seeds(self):
-        seeds_json = '["тема 1", "тема 2", "тема 3"]'
-        planner = self._make_planner(seeds_json)
-        seeds = await planner._generate_seeds("big topic", "ru", 5)
-        assert len(seeds) == 3
-        assert seeds[0] == "тема 1"
-
-    @pytest.mark.asyncio
-    async def test_generate_seeds_with_code_block(self):
-        seeds_json = '```json\n["тема 1", "тема 2"]\n```'
-        planner = self._make_planner(seeds_json)
-        seeds = await planner._generate_seeds("big topic", "ru", 5)
-        assert len(seeds) == 2
-
-    @pytest.mark.asyncio
-    async def test_generate_seeds_error_returns_topic(self):
-        planner = self._make_planner("not valid json")
-        seeds = await planner._generate_seeds("fallback topic", "ru", 5)
-        assert seeds == ["fallback topic"]
-
-    @pytest.mark.asyncio
-    async def test_generate_seeds_with_kb_docs(self):
-        seeds_json = '["тема из фактуры", "тема 2"]'
-        planner = self._make_planner(seeds_json)
-        kb_docs = [
-            {"title": "Гайд по SEO", "content_text": "SEO — это оптимизация сайта для поисковых систем.", "word_count": 100},
-            {"title": "Стратегия контента", "content_text": "Контент-стратегия помогает планировать публикации.", "word_count": 50},
-        ]
-        seeds = await planner._generate_seeds("big topic", "ru", 5, knowledge_base_docs=kb_docs)
-        assert len(seeds) == 2
-        # Verify KB context was passed to LLM prompt
-        call_args = planner.client.messages.create.call_args
-        prompt_text = call_args.kwargs["messages"][0]["content"]
-        assert "Фактура" in prompt_text
-        assert "Гайд по SEO" in prompt_text
-
-    @pytest.mark.asyncio
-    async def test_expand_keywords_no_serper(self):
-        planner = self._make_planner("[]")
-        planner.serper_api_key = ""
-        planner.volume_provider = None
-        kws = await planner._expand_keywords(["seed1", "seed2"], "big topic", "ru")
-        # Should contain seeds + big_topic
-        assert "seed1" in kws
-        assert "big topic" in kws
-
-    @pytest.mark.asyncio
     async def test_enrich_volumes_no_provider(self):
         planner = self._make_planner("[]")
         planner.volume_provider = None
         result = await planner._enrich_volumes(["kw1", "kw2"], "ru")
-        assert result == {}
+        assert len(result) == 2
+        assert result[0]["volume"] == 0
 
     @pytest.mark.asyncio
     async def test_cluster_and_brief_success(self):
@@ -232,7 +186,9 @@ class TestClusterPlannerService:
         })
         planner = self._make_planner(plan_response)
         plan = await planner._cluster_and_brief(
-            "big topic", "ru", ["seed1"], ["kw1"], {"kw1": 100}, 5,
+            "big topic", "ru",
+            [{"keyword": "kw1", "volume": 100, "cpc": 0.5, "competition": 0.3}],
+            [], [], target_count=5,
         )
         assert plan.pillar.title_candidate == "Pillar Article"
         assert len(plan.cluster_articles) == 1
@@ -241,7 +197,7 @@ class TestClusterPlannerService:
     async def test_cluster_and_brief_error_returns_minimal(self):
         planner = self._make_planner("invalid json {{{")
         plan = await planner._cluster_and_brief(
-            "fallback topic", "ru", [], [], {}, 5,
+            "fallback topic", "ru", [], [], [], target_count=5,
         )
         assert plan.pillar.title_candidate == "fallback topic"
         assert len(plan.cluster_articles) == 0
