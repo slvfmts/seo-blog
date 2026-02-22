@@ -60,6 +60,7 @@ class TrafilaturaExtractor:
         include_comments: bool = False,
         include_tables: bool = True,
         output_format: str = "markdown",
+        proxy_url: Optional[str] = None,
     ):
         """
         Initialize extractor.
@@ -69,6 +70,7 @@ class TrafilaturaExtractor:
             include_comments: Whether to include page comments
             include_tables: Whether to include tables
             output_format: 'markdown' or 'txt'
+            proxy_url: Optional SOCKS5/HTTP proxy URL for requests
         """
         if not TRAFILATURA_AVAILABLE:
             raise RuntimeError(
@@ -80,6 +82,7 @@ class TrafilaturaExtractor:
         self.include_comments = include_comments
         self.include_tables = include_tables
         self.output_format = output_format
+        self.proxy_url = proxy_url
 
     async def extract_from_url(self, url: str) -> ExtractedContent:
         """
@@ -130,8 +133,12 @@ class TrafilaturaExtractor:
             "Accept-Language": "en-US,en;q=0.5,ru;q=0.3",
         }
 
+        client_kwargs = {}
+        if self.proxy_url:
+            client_kwargs["proxy"] = self.proxy_url
+
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(**client_kwargs) as client:
                 response = await client.get(
                     url,
                     headers=headers,

@@ -43,6 +43,7 @@ class ResearchStage(WritingStage):
         dataforseo_password: Optional[str] = None,
         volume_provider=None,
         use_playwright: bool = True,
+        residential_proxy_url: Optional[str] = None,
         **kwargs
     ):
         super().__init__(*args, **kwargs)
@@ -52,12 +53,15 @@ class ResearchStage(WritingStage):
         self.dataforseo_password = dataforseo_password
         self.volume_provider = volume_provider  # VolumeProvider instance (optional)
         self.use_playwright = use_playwright
+        self.residential_proxy_url = residential_proxy_url or ""
 
         # Lazy-loaded clients
         self._jina_reader = None
         self._trafilatura = None
         self._dataforseo = None
         self._playwright_browser = None
+        self._serper_scraper = None
+        self._trafilatura_proxied = None
 
     @property
     def name(self) -> str:
@@ -91,15 +95,36 @@ class ResearchStage(WritingStage):
             )
         return self._dataforseo
 
-    def _get_playwright_browser(self):
+    def _get_playwright_browser(self, proxy_url: str = None):
         """Lazy-load Playwright browser."""
         if self._playwright_browser is None and self.use_playwright:
             try:
                 from ..data_sources.playwright_browser import PlaywrightBrowser
-                self._playwright_browser = PlaywrightBrowser(max_concurrent=2, timeout_ms=30000)
+                self._playwright_browser = PlaywrightBrowser(
+                    max_concurrent=2, timeout_ms=30000,
+                    proxy_url=proxy_url,
+                )
             except Exception as e:
                 logger.warning(f"Playwright not available: {e}")
         return self._playwright_browser
+
+    def _get_serper_scraper(self):
+        """Lazy-load Serper Scraper client."""
+        if self._serper_scraper is None and self.serper_api_key:
+            from ..data_sources.serper_scrape import SerperScraper
+            self._serper_scraper = SerperScraper(api_key=self.serper_api_key)
+        return self._serper_scraper
+
+    def _get_trafilatura_proxied(self):
+        """Lazy-load Trafilatura with residential proxy."""
+        if self._trafilatura_proxied is None and self.residential_proxy_url:
+            try:
+                from ..data_sources.trafilatura_ext import TrafilaturaExtractor, is_trafilatura_available
+                if is_trafilatura_available():
+                    self._trafilatura_proxied = TrafilaturaExtractor(proxy_url=self.residential_proxy_url)
+            except Exception as e:
+                logger.warning(f"Trafilatura (proxied) not available: {e}")
+        return self._trafilatura_proxied
 
     async def run(self, context: WritingContext) -> WritingContext:
         """Execute research stage."""
@@ -397,8 +422,8 @@ class ResearchStage(WritingStage):
         """
         Fetch full page content for top organic results.
 
-        For Russian regions, uses Trafilatura (direct requests) first since Jina Reader
-        gets blocked with HTTP 451 by Russian websites. For other regions, uses Jina first.
+        Russian chain: Serper Scrape → Trafilatura (proxied) → Playwright (proxied) → skip
+        International chain: Jina → Trafilatura (direct) → Playwright
 
         Args:
             search_results: Search results with organic listings
@@ -429,118 +454,27 @@ class ResearchStage(WritingStage):
 
         logger.info(f"Fetching content from {len(urls_to_fetch)} pages")
 
-        # Determine fetch strategy based on region
-        # For Russian sites, use Trafilatura first (direct requests from our Russian server)
-        # because Jina Reader gets blocked with HTTP 451
         is_russian = region.lower() in ["ru", "россия", "russia"]
 
         from ..data_sources.jina_reader import PageContent
-        contents: List[PageContent] = []
 
         if is_russian:
-            # Try Trafilatura first for Russian content
-            trafilatura = self._get_trafilatura()
-            if trafilatura:
-                logger.info("Using Trafilatura (direct) for Russian content")
-                extracted_list = await trafilatura.extract_batch(
-                    urls_to_fetch,
-                    max_concurrent=3,
-                    delay_between=0.5,
-                )
-                contents = [
-                    PageContent(
-                        url=ext.url,
-                        title=ext.title,
-                        content=ext.content,
-                        word_count=ext.word_count,
-                        success=ext.success,
-                        error=ext.error,
-                    )
-                    for ext in extracted_list
-                ]
-            else:
-                # Fallback to Jina if Trafilatura not available
-                jina = self._get_jina_reader()
-                contents = await jina.fetch_batch(urls_to_fetch, max_concurrent=3)
-
-            # For still-failed URLs, try Jina as backup
-            jina = self._get_jina_reader()
-            failed_urls = [
-                (i, url) for i, (url, content) in enumerate(zip(urls_to_fetch, contents))
-                if not content.success
-            ]
-            if failed_urls:
-                logger.info(f"Trying Jina Reader for {len(failed_urls)} failed URLs")
-                for i, url in failed_urls:
-                    try:
-                        result = await jina.fetch_content(url)
-                        if result.success:
-                            contents[i] = result
-                    except Exception as e:
-                        logger.warning(f"Jina fallback failed for {url}: {e}")
+            contents = await self._fetch_russian_content(urls_to_fetch)
         else:
-            # For non-Russian content, use Jina first (better quality)
-            jina = self._get_jina_reader()
-            contents = await jina.fetch_batch(urls_to_fetch, max_concurrent=3)
+            contents = await self._fetch_international_content(urls_to_fetch)
 
-            # Fallback to Trafilatura for failed fetches
-            trafilatura = self._get_trafilatura()
-            failed_urls = [
-                (i, url) for i, (url, content) in enumerate(zip(urls_to_fetch, contents))
-                if not content.success
-            ]
-
-            if failed_urls and trafilatura:
-                logger.info(f"Using Trafilatura fallback for {len(failed_urls)} URLs")
-                for i, url in failed_urls:
-                    try:
-                        extracted = await trafilatura.extract_from_url(url)
-                        if extracted.success:
-                            contents[i] = PageContent(
-                                url=url,
-                                title=extracted.title,
-                                content=extracted.content,
-                                word_count=extracted.word_count,
-                                success=True,
-                            )
-                    except Exception as e:
-                        logger.warning(f"Trafilatura fallback failed for {url}: {e}")
-
-        # Playwright fallback for still-failed URLs (both Russian and non-Russian)
-        use_pw = self.use_playwright
-        playwright_browser = self._get_playwright_browser() if use_pw else None
-        if playwright_browser:
-            still_failed = [
-                (i, url) for i, (url, content) in enumerate(zip(urls_to_fetch, contents))
-                if not content.success
-            ]
-            if still_failed:
-                logger.info(f"Trying Playwright for {len(still_failed)} still-failed URLs")
-                failed_urls_only = [url for _, url in still_failed]
-                pw_results = await playwright_browser.fetch_batch(failed_urls_only, delay=1.5)
-                for (i, url), pw_result in zip(still_failed, pw_results):
-                    if pw_result.success:
-                        contents[i] = PageContent(
-                            url=pw_result.url,
-                            title=pw_result.title,
-                            content=pw_result.content,
-                            word_count=pw_result.word_count,
-                            success=True,
-                        )
-
-        # Log results and add content to search results
+        # Log results
         success_count = sum(1 for c in contents if c.success)
         logger.info(f"Content fetch results: {success_count}/{len(contents)} successful")
         for url, content in zip(urls_to_fetch, contents):
             if not content.success:
                 logger.warning(f"Failed to fetch {url}: {content.error}")
 
-        # Get Jina reader for truncation utility (always available)
+        # Add content to search results
         jina = self._get_jina_reader()
 
         for url, content in zip(urls_to_fetch, contents):
             if content.success and url in url_to_result_indices:
-                # Truncate content to avoid token limits
                 truncated = jina.truncate_content(content.content, max_words=2000)
 
                 for result_idx, org_idx in url_to_result_indices[url]:
@@ -548,6 +482,118 @@ class ResearchStage(WritingStage):
                     search_results[result_idx]["organic"][org_idx]["page_word_count"] = content.word_count
 
         return search_results
+
+    async def _fetch_russian_content(self, urls: List[str]):
+        """
+        Fetch chain for Russian content:
+        1. Serper Scrape (cloud, ~67% success, 2 credits/page)
+        2. Trafilatura via residential proxy (if configured)
+        3. Playwright via residential proxy (if configured)
+        4. Skip (use snippets only)
+        """
+        from ..data_sources.jina_reader import PageContent
+        contents = [None] * len(urls)
+
+        # Layer 1: Serper Scrape
+        scraper = self._get_serper_scraper()
+        if scraper:
+            logger.info("Layer 1: Serper Scrape for Russian content")
+            scraped = await scraper.fetch_batch(urls, max_concurrent=3)
+            for i, sc in enumerate(scraped):
+                if sc.success:
+                    contents[i] = PageContent(
+                        url=sc.url, title=sc.title, content=sc.content,
+                        word_count=sc.word_count, success=True,
+                    )
+
+        # Layer 2: Trafilatura (proxied if available, otherwise direct)
+        still_needed = [(i, url) for i, url in enumerate(urls) if contents[i] is None]
+        if still_needed:
+            traf = self._get_trafilatura_proxied()
+            if not traf:
+                traf = self._get_trafilatura()  # fallback to direct
+            if traf:
+                logger.info(f"Layer 2: Trafilatura for {len(still_needed)} URLs")
+                for i, url in still_needed:
+                    try:
+                        ext = await traf.extract_from_url(url)
+                        if ext.success:
+                            contents[i] = PageContent(
+                                url=ext.url, title=ext.title, content=ext.content,
+                                word_count=ext.word_count, success=True,
+                            )
+                    except Exception as e:
+                        logger.warning(f"Trafilatura failed for {url}: {e}")
+
+        # Layer 3: Playwright (proxied if available)
+        still_needed = [(i, url) for i, url in enumerate(urls) if contents[i] is None]
+        if still_needed:
+            pw = self._get_playwright_browser(proxy_url=self.residential_proxy_url or None)
+            if pw:
+                logger.info(f"Layer 3: Playwright for {len(still_needed)} URLs")
+                pw_urls = [url for _, url in still_needed]
+                pw_results = await pw.fetch_batch(pw_urls, delay=1.5)
+                for (i, url), pr in zip(still_needed, pw_results):
+                    if pr.success:
+                        contents[i] = PageContent(
+                            url=pr.url, title=pr.title, content=pr.content,
+                            word_count=pr.word_count, success=True,
+                        )
+
+        # Fill remaining with empty PageContent
+        for i in range(len(urls)):
+            if contents[i] is None:
+                contents[i] = PageContent(
+                    url=urls[i], title="", content="", word_count=0,
+                    success=False, error="All fetch layers failed",
+                )
+
+        return contents
+
+    async def _fetch_international_content(self, urls: List[str]):
+        """
+        Fetch chain for non-Russian content:
+        1. Jina Reader
+        2. Trafilatura (direct)
+        3. Playwright
+        """
+        from ..data_sources.jina_reader import PageContent
+
+        # Jina first
+        jina = self._get_jina_reader()
+        contents = await jina.fetch_batch(urls, max_concurrent=3)
+
+        # Trafilatura fallback
+        trafilatura = self._get_trafilatura()
+        failed = [(i, url) for i, (url, c) in enumerate(zip(urls, contents)) if not c.success]
+        if failed and trafilatura:
+            logger.info(f"Trafilatura fallback for {len(failed)} URLs")
+            for i, url in failed:
+                try:
+                    ext = await trafilatura.extract_from_url(url)
+                    if ext.success:
+                        contents[i] = PageContent(
+                            url=url, title=ext.title, content=ext.content,
+                            word_count=ext.word_count, success=True,
+                        )
+                except Exception as e:
+                    logger.warning(f"Trafilatura failed for {url}: {e}")
+
+        # Playwright fallback
+        still_failed = [(i, url) for i, (url, c) in enumerate(zip(urls, contents)) if not c.success]
+        pw = self._get_playwright_browser() if self.use_playwright else None
+        if still_failed and pw:
+            logger.info(f"Playwright fallback for {len(still_failed)} URLs")
+            pw_urls = [url for _, url in still_failed]
+            pw_results = await pw.fetch_batch(pw_urls, delay=1.5)
+            for (i, url), pr in zip(still_failed, pw_results):
+                if pr.success:
+                    contents[i] = PageContent(
+                        url=pr.url, title=pr.title, content=pr.content,
+                        word_count=pr.word_count, success=True,
+                    )
+
+        return contents
 
     async def _fetch_keyword_metrics(self, context: WritingContext) -> KeywordMetricsResult:
         """

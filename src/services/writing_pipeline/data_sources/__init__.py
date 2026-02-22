@@ -9,12 +9,14 @@ Available sources:
 """
 
 from .serper import SerperDataSource
+from .serper_scrape import SerperScraper
 
 # These are imported lazily to avoid dependency issues
 # Use the helper functions to check availability
 
 __all__ = [
     "SerperDataSource",
+    "SerperScraper",
     "get_jina_reader",
     "get_trafilatura_extractor",
     "get_dataforseo_client",

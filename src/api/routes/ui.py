@@ -1348,6 +1348,7 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
             database_url=settings.database_url or None,
             openai_api_key=getattr(settings, 'openai_api_key', None),
             openai_proxy_url=getattr(settings, 'openai_proxy_url', None),
+            residential_proxy_url=getattr(settings, 'residential_proxy_url', None),
         )
 
         # Stage progress callback — updates DB after each stage
@@ -2075,6 +2076,7 @@ def _run_pipeline_for_brief(
                 database_url=settings.database_url,
                 openai_api_key=settings.openai_api_key,
                 openai_proxy_url=settings.openai_proxy_url,
+                residential_proxy_url=getattr(settings, 'residential_proxy_url', None),
             )
 
             config = {}

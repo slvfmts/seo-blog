@@ -57,6 +57,7 @@ class PipelineRunner:
         database_url: Optional[str] = None,
         openai_api_key: Optional[str] = None,
         openai_proxy_url: Optional[str] = None,
+        residential_proxy_url: Optional[str] = None,
     ):
         """
         Initialize the pipeline runner.
@@ -95,6 +96,7 @@ class PipelineRunner:
         self.openai_api_key = openai_api_key or ""
         self.openai_proxy_url = openai_proxy_url or ""
         self.openai_proxy_secret = proxy_secret or ""  # reuse Anthropic proxy secret
+        self.residential_proxy_url = residential_proxy_url or ""
 
         # Initialize internal linker if database_url is provided
         self.linker = None
@@ -116,6 +118,7 @@ class PipelineRunner:
                 dataforseo_login=self.dataforseo_login,
                 dataforseo_password=self.dataforseo_password,
                 volume_provider=self._init_volume_provider(),
+                residential_proxy_url=self.residential_proxy_url,
             ),
             StructureStage(client=self.client, model=self.model),
             DraftingStage(client=self.client, model=self.model),

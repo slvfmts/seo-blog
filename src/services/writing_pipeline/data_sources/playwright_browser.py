@@ -66,9 +66,10 @@ class PlaywrightBrowser:
     - Trafilatura for HTML-to-text extraction
     """
 
-    def __init__(self, max_concurrent: int = 2, timeout_ms: int = 30000):
+    def __init__(self, max_concurrent: int = 2, timeout_ms: int = 30000, proxy_url: Optional[str] = None):
         self._max_concurrent = max_concurrent
         self._timeout_ms = timeout_ms
+        self._proxy_url = proxy_url
         self._browser = None
         self._playwright = None
         self._semaphore = asyncio.Semaphore(max_concurrent)
@@ -103,14 +104,17 @@ class PlaywrightBrowser:
         async with self._semaphore:
             page = None
             try:
-                context = await self._browser.new_context(
-                    user_agent=random.choice(_USER_AGENTS),
-                    viewport={"width": 1920, "height": 1080},
-                    locale="ru-RU",
-                    extra_http_headers={
+                context_kwargs = {
+                    "user_agent": random.choice(_USER_AGENTS),
+                    "viewport": {"width": 1920, "height": 1080},
+                    "locale": "ru-RU",
+                    "extra_http_headers": {
                         "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
                     },
-                )
+                }
+                if self._proxy_url:
+                    context_kwargs["proxy"] = {"server": self._proxy_url}
+                context = await self._browser.new_context(**context_kwargs)
                 page = await context.new_page()
 
                 # Navigate

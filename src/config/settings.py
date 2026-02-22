@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_proxy_url: str = ""  # Cloudflare Worker URL для обхода geo-блокировки OpenAI
 
+    # Residential SOCKS5 proxy (Mac Mini via SSH tunnel)
+    residential_proxy_url: str = ""
+
     # Auth
     secret_key: str = "change-me-in-production"
     auth_email: str = ""

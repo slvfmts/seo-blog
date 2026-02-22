@@ -130,6 +130,7 @@ async def main():
         database_url=database_url,
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         openai_proxy_url=os.getenv("OPENAI_PROXY_URL", ""),
+        residential_proxy_url=os.getenv("RESIDENTIAL_PROXY_URL", ""),
     )
 
     # Pipeline configuration
