@@ -1,130 +1,123 @@
 {% extends "base.html" %}
 
-{% block title %}{{ draft.title }} - SEO Blog{% endblock %}
+{% block title %}{{ draft.title }} — SEO Blog{% endblock %}
 
 {% block content %}
 <div class="mb-6">
     <!-- Breadcrumb -->
     <nav class="flex items-center space-x-2 text-sm text-gray-500">
-        {% if draft.site %}
-        <a href="/ui/topics" class="hover:text-gray-700">Темы</a>
-        <span>&rarr;</span>
+        <a href="/ui/articles" class="hover:text-gray-700">Материалы</a>
+        {% if cluster %}
+        <span>/</span>
+        <a href="/ui/clusters/{{ cluster.id }}" class="hover:text-gray-700">{{ cluster.name[:30] }}{% if cluster.name|length > 30 %}...{% endif %}</a>
+        {% elif draft.site %}
+        <span>/</span>
         <a href="/ui/topics/{{ draft.site_id }}" class="hover:text-gray-700">{{ draft.site.name }}</a>
-        <span>&rarr;</span>
         {% endif %}
-        <a href="/ui/articles" class="hover:text-gray-700">Статьи</a>
-        <span>&rarr;</span>
-        <span class="text-gray-900 font-medium">{{ draft.title[:50] }}{% if draft.title|length > 50 %}...{% endif %}</span>
     </nav>
 </div>
 
 <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
     <!-- Main Content -->
     <div class="lg:col-span-3 space-y-6">
+        <!-- Header -->
         <div class="bg-white shadow rounded-lg overflow-hidden">
             <div class="px-6 py-4 border-b border-gray-200">
                 <div class="flex justify-between items-start">
                     <h1 class="text-xl font-semibold text-gray-900">{{ draft.title }}</h1>
                     <div>
-                        {% if draft.status == 'generating' %}
+                        {% if draft.pipeline_status == 'running' or draft.status in ('generating', 'pipeline_running') %}
                         <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                            Generating...
+                            <svg class="animate-spin h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            Генерация...
                         </span>
-                        {% elif draft.status == 'generated' %}
-                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                            Generated
+                        {% elif is_paused %}
+                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-amber-100 text-amber-800">
+                            Пауза
                         </span>
-                        {% elif draft.status == 'validating' %}
-                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                            Validating...
-                        </span>
-                        {% elif draft.status == 'validated' %}
-                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                            Validated
-                        </span>
-                        {% elif draft.status == 'validation_failed' %}
-                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                            Checked
-                        </span>
+                        {% elif draft.status in ('pipeline_completed', 'generated') %}
+                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-green-100 text-green-800">Готово</span>
                         {% elif draft.status == 'approved' %}
-                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                            Approved
-                        </span>
+                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">Одобрено</span>
                         {% elif draft.status == 'published' %}
-                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
-                            Published
-                        </span>
-                        {% elif draft.status == 'failed' %}
-                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-                            Failed
-                        </span>
+                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">Опубликовано</span>
+                        {% elif draft.status in ('failed', 'pipeline_failed') %}
+                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-red-100 text-red-800">Ошибка</span>
                         {% else %}
-                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-                            {{ draft.status }}
-                        </span>
+                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">{{ draft.status }}</span>
                         {% endif %}
                     </div>
                 </div>
             </div>
 
-            {% if draft.status == 'generating' %}
-            <div class="px-6 py-8">
-                {% if draft.pipeline_stages %}
-                <!-- Pipeline Progress -->
-                <div class="mb-6">
-                    <h3 class="text-sm font-medium text-gray-700 mb-4">Pipeline Progress</h3>
-                    <div class="space-y-3">
-                        {% set stages = [
-                            ('intent', 'Intent Analysis', 'Determining user goal, content type, tone'),
-                            ('research', 'Research', 'Collecting facts from web search'),
-                            ('structure', 'Structure', 'Building article outline'),
-                            ('drafting', 'Drafting', 'Writing the article'),
-                            ('editing', 'Editing', 'Polishing text and formatting')
-                        ] %}
-                        {% for key, name, desc in stages %}
-                        {% set status = draft.pipeline_stages.get(key, 'pending') if draft.pipeline_stages else 'pending' %}
-                        <div class="flex items-center space-x-3">
-                            {% if status == 'completed' %}
-                            <span class="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-green-100">
-                                <svg class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                                </svg>
-                            </span>
-                            <span class="text-sm text-gray-600">{{ name }}</span>
-                            {% elif status == 'running' %}
-                            <span class="flex-shrink-0 w-6 h-6 flex items-center justify-center">
-                                <svg class="animate-spin w-5 h-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                            </span>
-                            <span class="text-sm font-medium text-blue-600">{{ name }} - {{ desc }}</span>
-                            {% elif status == 'failed' %}
-                            <span class="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-red-100">
-                                <svg class="w-4 h-4 text-red-600" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
-                                </svg>
-                            </span>
-                            <span class="text-sm text-red-600">{{ name }}</span>
-                            {% else %}
-                            <span class="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-gray-100">
-                                <span class="w-2 h-2 rounded-full bg-gray-400"></span>
-                            </span>
-                            <span class="text-sm text-gray-400">{{ name }}</span>
-                            {% endif %}
+            <!-- Pipeline Progress (10 stages) -->
+            {% if draft.pipeline_stages %}
+            <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                <h3 class="text-xs font-medium text-gray-500 uppercase mb-3">Pipeline</h3>
+                <div class="flex items-center space-x-1">
+                    {% for key, name, desc in all_stages %}
+                    {% set stage_status = draft.pipeline_stages.get(key, 'pending') if draft.pipeline_stages else 'pending' %}
+                    <div class="flex-1 group relative">
+                        <div class="h-2 rounded-full {% if stage_status == 'completed' %}bg-green-500{% elif stage_status == 'running' %}bg-blue-500 animate-pulse{% elif stage_status == 'failed' %}bg-red-500{% elif stage_status == 'paused' %}bg-amber-500{% else %}bg-gray-200{% endif %}"></div>
+                        <div class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block z-10">
+                            <div class="bg-gray-900 text-white text-xs rounded py-1 px-2 whitespace-nowrap">
+                                {{ name }}: {{ stage_status }}
+                            </div>
                         </div>
-                        {% endfor %}
                     </div>
+                    {% endfor %}
                 </div>
-                {% endif %}
+                <div class="flex justify-between mt-1">
+                    <span class="text-xs text-gray-400">Intent</span>
+                    <span class="text-xs text-gray-400">Formatting</span>
+                </div>
+            </div>
+            {% endif %}
 
-                <div class="text-center">
-                    <svg class="animate-spin h-8 w-8 mx-auto text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <p class="mt-4 text-gray-600">Article is being generated...</p>
-                    <p class="mt-2 text-sm text-gray-500">This may take 2-5 minutes. Page will refresh automatically.</p>
+            <!-- Content or Generating State -->
+            {% if is_running %}
+            <div class="px-6 py-8">
+                <!-- Detailed stage list -->
+                <div class="space-y-2 mb-6">
+                    {% for key, name, desc in all_stages %}
+                    {% set stage_status = draft.pipeline_stages.get(key, 'pending') if draft.pipeline_stages else 'pending' %}
+                    <div class="flex items-center space-x-3">
+                        {% if stage_status == 'completed' %}
+                        <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-green-100">
+                            <svg class="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                        </span>
+                        <span class="text-sm text-gray-600">{{ name }}</span>
+                        {% elif stage_status == 'running' %}
+                        <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+                            <svg class="animate-spin w-4 h-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                        </span>
+                        <span class="text-sm font-medium text-blue-600">{{ name }} — {{ desc }}</span>
+                        {% elif stage_status == 'failed' %}
+                        <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-red-100">
+                            <svg class="w-3 h-3 text-red-600" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                            </svg>
+                        </span>
+                        <span class="text-sm text-red-600">{{ name }}</span>
+                        {% else %}
+                        <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-gray-100">
+                            <span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
+                        </span>
+                        <span class="text-sm text-gray-400">{{ name }}</span>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="text-center text-sm text-gray-500">
+                    Страница обновится автоматически...
                 </div>
             </div>
             {% elif draft.content_md %}
@@ -133,26 +126,206 @@
                     {{ draft.content_md | markdown | safe }}
                 </div>
             </div>
+            {% elif is_paused %}
+            <div class="px-6 py-6">
+                <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-amber-700 font-medium">Пауза: {{ draft.pipeline_status.replace('paused_at_', '') }}</p>
+                            <p class="mt-1 text-sm text-amber-600">Просмотрите результат ниже и продолжите генерацию</p>
+                        </div>
+                        <form method="POST" action="/ui/articles/{{ draft.id }}/next-step">
+                            <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">
+                                Далее &rarr;
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                {% set paused_stage = draft.pipeline_status.replace('paused_at_', '') %}
+                {% set paused_data = draft.stage_results.get(paused_stage) if draft.stage_results else None %}
+
+                {% if paused_stage in ('drafting', 'editing') and paused_data and paused_data.content_md %}
+                <form method="POST" action="/ui/articles/{{ draft.id }}/edit-stage">
+                    <input type="hidden" name="stage" value="{{ paused_stage }}">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        {% if paused_stage == 'drafting' %}Черновик{% else %}Отредактированный текст{% endif %}
+                    </label>
+                    <textarea name="content_md" rows="20"
+                        class="block w-full rounded-md border border-gray-300 shadow-sm py-2 px-3 font-mono text-sm focus:border-indigo-500 focus:ring-indigo-500">{{ paused_data.content_md }}</textarea>
+                    <button type="submit" class="mt-2 inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                        Сохранить изменения
+                    </button>
+                </form>
+                {% elif paused_stage == 'research' and paused_data %}
+                <div class="text-sm text-gray-700">
+                    {% if paused_data.sources %}
+                    <h4 class="font-medium mb-2">Источники ({{ paused_data.sources|length }})</h4>
+                    <div class="space-y-2 mb-4">
+                        {% for src in paused_data.sources[:15] %}
+                        <div class="flex items-start space-x-2 bg-gray-50 p-2 rounded">
+                            {% if src.origin == 'kb' %}
+                            <span class="px-1.5 py-0.5 text-xs bg-amber-100 text-amber-700 rounded flex-shrink-0">KB</span>
+                            {% else %}
+                            <span class="px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded flex-shrink-0">Web</span>
+                            {% endif %}
+                            <span>{{ src.title or src.url or 'Source' }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% if paused_data.facts %}
+                    <h4 class="font-medium mb-2">Факты ({{ paused_data.facts|length }})</h4>
+                    <ul class="list-disc list-inside space-y-1">
+                        {% for fact in paused_data.facts[:20] %}
+                        <li>{{ fact if fact is string else fact.text|default('') }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                </div>
+                {% elif paused_stage == 'structure' and paused_data %}
+                <div class="text-sm text-gray-700">
+                    {% if paused_data.sections %}
+                    <h4 class="font-medium mb-2">Структура</h4>
+                    <div class="space-y-2">
+                        {% for section in paused_data.sections %}
+                        <div class="bg-gray-50 p-2 rounded">
+                            <div class="font-medium">{{ section.heading|default(section.title|default('Section')) }}</div>
+                            {% if section.subsections %}
+                            <div class="ml-4 mt-1 space-y-0.5 text-gray-600">
+                                {% for sub in section.subsections %}
+                                <div>— {{ sub.heading|default(sub) }}</div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <pre class="whitespace-pre-wrap text-xs bg-gray-50 p-3 rounded">{{ paused_data | tojson(indent=2) }}</pre>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
             {% else %}
             <div class="px-6 py-12 text-center text-gray-500">
-                No content available
+                Контент пока недоступен
             </div>
             {% endif %}
         </div>
+
+        <!-- Stage Results (expandable) -->
+        {% if draft.stage_results %}
+        <div class="bg-white shadow rounded-lg overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-base font-medium text-gray-900">Промежуточные этапы</h2>
+            </div>
+            <div class="divide-y divide-gray-200">
+                {% for key, name, desc in all_stages %}
+                {% set stage_data = draft.stage_results.get(key) if draft.stage_results else None %}
+                {% if stage_data %}
+                <details class="group">
+                    <summary class="px-6 py-3 cursor-pointer hover:bg-gray-50 flex items-center justify-between">
+                        <div class="flex items-center space-x-2">
+                            <span class="w-5 h-5 flex items-center justify-center rounded-full bg-green-100">
+                                <svg class="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                                </svg>
+                            </span>
+                            <span class="text-sm font-medium text-gray-900">{{ name }}</span>
+                            <span class="text-xs text-gray-500">{{ desc }}</span>
+                        </div>
+                        <svg class="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </summary>
+                    <div class="px-6 py-4 bg-gray-50 text-sm">
+                        {% if key == 'research' and stage_data is mapping %}
+                            {% if stage_data.sources %}
+                            <h4 class="font-medium text-gray-700 mb-2">Источники ({{ stage_data.sources|length }})</h4>
+                            <div class="space-y-2 mb-4">
+                                {% for src in stage_data.sources[:10] %}
+                                <div class="flex items-start space-x-2">
+                                    {% if src.origin == 'kb' %}
+                                    <span class="px-1.5 py-0.5 text-xs bg-amber-100 text-amber-700 rounded">KB</span>
+                                    {% else %}
+                                    <span class="px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded">Web</span>
+                                    {% endif %}
+                                    <div>
+                                        <div class="text-gray-900">{{ src.title or src.url or 'Source' }}</div>
+                                        {% if src.url %}
+                                        <a href="{{ src.url }}" target="_blank" class="text-xs text-blue-600 break-all">{{ src.url[:80] }}</a>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                            {% if stage_data.facts %}
+                            <h4 class="font-medium text-gray-700 mb-2">Факты ({{ stage_data.facts|length }})</h4>
+                            <ul class="list-disc list-inside space-y-1 text-gray-700">
+                                {% for fact in stage_data.facts[:20] %}
+                                <li>{{ fact if fact is string else fact.text|default('') }}</li>
+                                {% endfor %}
+                            </ul>
+                            {% endif %}
+                        {% elif key == 'structure' and stage_data is mapping %}
+                            {% if stage_data.sections %}
+                            <div class="space-y-1">
+                                {% for section in stage_data.sections %}
+                                <div class="text-gray-900 font-medium">{{ section.heading|default(section.title|default('Section')) }}</div>
+                                {% if section.subsections %}
+                                <div class="ml-4 space-y-0.5">
+                                    {% for sub in section.subsections %}
+                                    <div class="text-gray-600">— {{ sub.heading|default(sub) }}</div>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <pre class="whitespace-pre-wrap text-gray-700 text-xs">{{ stage_data | tojson(indent=2) }}</pre>
+                            {% endif %}
+                        {% elif key == 'meta' and stage_data is mapping %}
+                            <dl class="space-y-2">
+                                {% if stage_data.meta_title %}
+                                <div>
+                                    <dt class="text-xs text-gray-500 uppercase">Meta Title</dt>
+                                    <dd class="text-gray-900">{{ stage_data.meta_title }}</dd>
+                                </div>
+                                {% endif %}
+                                {% if stage_data.meta_description %}
+                                <div>
+                                    <dt class="text-xs text-gray-500 uppercase">Meta Description</dt>
+                                    <dd class="text-gray-900">{{ stage_data.meta_description }}</dd>
+                                </div>
+                                {% endif %}
+                                {% if stage_data.slug %}
+                                <div>
+                                    <dt class="text-xs text-gray-500 uppercase">Slug</dt>
+                                    <dd class="text-gray-900 font-mono">/{{ stage_data.slug }}</dd>
+                                </div>
+                                {% endif %}
+                            </dl>
+                        {% else %}
+                            <pre class="whitespace-pre-wrap text-gray-700 text-xs overflow-x-auto">{{ stage_data | tojson(indent=2) if stage_data is mapping else stage_data }}</pre>
+                        {% endif %}
+                    </div>
+                </details>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
 
         <!-- Pipeline Error -->
         {% if draft.pipeline_error %}
         <div class="bg-red-50 shadow rounded-lg overflow-hidden">
             <div class="px-6 py-4 border-b border-red-200">
-                <h2 class="text-lg font-semibold text-red-800">Pipeline Error</h2>
+                <h2 class="text-base font-semibold text-red-800">Ошибка Pipeline</h2>
             </div>
             <div class="px-6 py-4">
                 <pre class="text-sm text-red-700 whitespace-pre-wrap">{{ draft.pipeline_error }}</pre>
-                <div class="mt-4">
-                    <a href="/ui/articles" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700">
-                        Назад к статьям
-                    </a>
-                </div>
             </div>
         </div>
         {% endif %}
@@ -162,7 +335,7 @@
         <div class="bg-white shadow rounded-lg overflow-hidden">
             <div class="px-6 py-4 border-b border-gray-200">
                 <div class="flex justify-between items-center">
-                    <h2 class="text-lg font-semibold text-gray-900">Validation Results</h2>
+                    <h2 class="text-base font-medium text-gray-900">Валидация</h2>
                     <div class="flex items-center space-x-3">
                         <span class="text-sm text-gray-500">Score:</span>
                         {% set score = draft.validation_score or 0 %}
@@ -170,60 +343,35 @@
                             {{ score }}/100
                         </span>
                         {% if draft.validation_report.overall_status == 'passed' %}
-                        <span class="px-2 py-1 text-xs font-semibold rounded bg-green-100 text-green-800">PASSED</span>
+                        <span class="px-2 py-1 text-xs font-semibold rounded bg-green-100 text-green-800">PASS</span>
                         {% elif draft.validation_report.overall_status == 'warning' %}
-                        <span class="px-2 py-1 text-xs font-semibold rounded bg-yellow-100 text-yellow-800">WARNING</span>
+                        <span class="px-2 py-1 text-xs font-semibold rounded bg-yellow-100 text-yellow-800">WARN</span>
                         {% else %}
-                        <span class="px-2 py-1 text-xs font-semibold rounded bg-red-100 text-red-800">FAILED</span>
+                        <span class="px-2 py-1 text-xs font-semibold rounded bg-red-100 text-red-800">FAIL</span>
                         {% endif %}
                     </div>
                 </div>
             </div>
-            <div class="px-6 py-4 space-y-6">
-                <!-- SEO Lint Results -->
+            <div class="px-6 py-4 space-y-4">
                 {% if draft.validation_report.checks.seo_lint %}
                 {% set seo = draft.validation_report.checks.seo_lint %}
                 <div>
-                    <div class="flex justify-between items-center mb-3">
+                    <div class="flex justify-between items-center mb-2">
                         <h3 class="text-sm font-medium text-gray-700">SEO Lint</h3>
-                        <div class="flex items-center space-x-2">
-                            <span class="text-sm text-gray-500">{{ seo.score }}/100</span>
-                            {% if seo.status == 'passed' %}
-                            <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                            {% elif seo.status == 'warning' %}
-                            <span class="w-2 h-2 bg-yellow-500 rounded-full"></span>
-                            {% else %}
-                            <span class="w-2 h-2 bg-red-500 rounded-full"></span>
-                            {% endif %}
-                        </div>
+                        <span class="text-sm text-gray-500">{{ seo.score }}/100</span>
                     </div>
-                    <div class="space-y-2">
+                    <div class="space-y-1">
                         {% for issue in seo.issues %}
                         <div class="flex items-start space-x-2 text-sm">
                             {% if issue.severity == 'pass' %}
-                            <span class="text-green-500 mt-0.5">
-                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                                </svg>
-                            </span>
+                            <span class="text-green-500 mt-0.5"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg></span>
                             <span class="text-gray-600">{{ issue.message }}</span>
                             {% elif issue.severity == 'warning' %}
-                            <span class="text-yellow-500 mt-0.5">
-                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
-                                </svg>
-                            </span>
+                            <span class="text-yellow-500 mt-0.5"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg></span>
                             <span class="text-yellow-700">{{ issue.message }}</span>
                             {% else %}
-                            <span class="text-red-500 mt-0.5">
-                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
-                                </svg>
-                            </span>
+                            <span class="text-red-500 mt-0.5"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/></svg></span>
                             <span class="text-red-700">{{ issue.message }}</span>
-                            {% endif %}
-                            {% if issue.value and issue.expected %}
-                            <span class="text-gray-400 text-xs">({{ issue.value }} / expected: {{ issue.expected }})</span>
                             {% endif %}
                         </div>
                         {% endfor %}
@@ -231,50 +379,26 @@
                 </div>
                 {% endif %}
 
-                <!-- Plagiarism Results -->
                 {% if draft.validation_report.checks.plagiarism %}
                 {% set plag = draft.validation_report.checks.plagiarism %}
                 <div class="border-t pt-4">
-                    <div class="flex justify-between items-center mb-3">
+                    <div class="flex justify-between items-center mb-2">
                         <h3 class="text-sm font-medium text-gray-700">Plagiarism Check</h3>
-                        <div class="flex items-center space-x-2">
-                            <span class="text-sm text-gray-500">{{ plag.score }}/100</span>
-                            {% if plag.status == 'passed' %}
-                            <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                            {% elif plag.status == 'warning' %}
-                            <span class="w-2 h-2 bg-yellow-500 rounded-full"></span>
-                            {% else %}
-                            <span class="w-2 h-2 bg-red-500 rounded-full"></span>
-                            {% endif %}
-                        </div>
+                        <span class="text-sm text-gray-500">{{ plag.score }}/100</span>
                     </div>
-                    <p class="text-sm text-gray-600 mb-2">
+                    <p class="text-sm text-gray-600">
                         Max similarity: <span class="font-medium {% if plag.max_similarity < 0.15 %}text-green-600{% elif plag.max_similarity < 0.3 %}text-yellow-600{% else %}text-red-600{% endif %}">{{ plag.max_similarity_percent }}</span>
                     </p>
                     {% if plag.matches %}
-                    <div class="space-y-2">
+                    <div class="mt-2 space-y-1">
                         {% for match in plag.matches %}
-                        <div class="text-sm bg-gray-50 p-2 rounded">
-                            <div class="flex justify-between">
-                                <a href="{{ match.url }}" target="_blank" class="text-blue-600 hover:text-blue-800 truncate max-w-md">{{ match.url }}</a>
-                                <span class="font-medium {% if match.similarity < 0.15 %}text-green-600{% elif match.similarity < 0.3 %}text-yellow-600{% else %}text-red-600{% endif %}">{{ match.similarity_percent }}</span>
-                            </div>
-                            {% if match.matched_text %}
-                            <p class="text-xs text-gray-500 mt-1 truncate">Match: "{{ match.matched_text[:100] }}..."</p>
-                            {% endif %}
+                        <div class="text-xs bg-gray-50 p-2 rounded flex justify-between">
+                            <a href="{{ match.url }}" target="_blank" class="text-blue-600 truncate max-w-xs">{{ match.url }}</a>
+                            <span class="font-medium {% if match.similarity < 0.15 %}text-green-600{% elif match.similarity < 0.3 %}text-yellow-600{% else %}text-red-600{% endif %}">{{ match.similarity_percent }}</span>
                         </div>
                         {% endfor %}
                     </div>
                     {% endif %}
-                </div>
-                {% endif %}
-
-                <!-- Error -->
-                {% if draft.validation_report.error %}
-                <div class="border-t pt-4">
-                    <div class="bg-red-50 p-3 rounded">
-                        <p class="text-sm text-red-700">Error: {{ draft.validation_report.error }}</p>
-                    </div>
                 </div>
                 {% endif %}
             </div>
@@ -284,11 +408,19 @@
 
     <!-- Sidebar -->
     <div class="lg:col-span-1 space-y-6">
-        <!-- Topic & Keyword Info -->
-        {% if draft.site or draft.keyword %}
+        <!-- Brief & Cluster Info -->
         <div class="bg-white shadow rounded-lg p-4">
             <h3 class="text-sm font-medium text-gray-700 mb-3">Привязка</h3>
             <dl class="space-y-3">
+                {% if cluster %}
+                <div>
+                    <dt class="text-xs text-gray-500 uppercase">Кластер</dt>
+                    <dd class="mt-1">
+                        <a href="/ui/clusters/{{ cluster.id }}" class="text-sm text-indigo-600 hover:text-indigo-900">{{ cluster.name }}</a>
+                    </dd>
+                </div>
+                {% endif %}
+
                 {% if draft.site %}
                 <div>
                     <dt class="text-xs text-gray-500 uppercase">Тема</dt>
@@ -298,26 +430,22 @@
                 </div>
                 {% endif %}
 
-                {% if draft.keyword %}
+                {% if brief %}
                 <div>
-                    <dt class="text-xs text-gray-500 uppercase">Keyword</dt>
-                    <dd class="mt-1 text-sm font-medium text-gray-900">{{ draft.keyword.keyword }}</dd>
-                    {% if draft.keyword.search_volume %}
-                    <dd class="text-xs text-gray-500">Volume: {{ draft.keyword.search_volume }} | Difficulty: {{ draft.keyword.difficulty or '-' }}</dd>
-                    {% endif %}
+                    <dt class="text-xs text-gray-500 uppercase">Ключевое слово</dt>
+                    <dd class="mt-1 text-sm font-medium text-gray-900">{{ brief.target_keyword }}</dd>
                 </div>
                 {% endif %}
             </dl>
         </div>
-        {% endif %}
 
         <!-- Meta Info -->
         <div class="bg-white shadow rounded-lg p-4">
-            <h3 class="text-sm font-medium text-gray-700 mb-3">Meta Information</h3>
+            <h3 class="text-sm font-medium text-gray-700 mb-3">Meta</h3>
             <dl class="space-y-3">
                 {% if draft.word_count %}
                 <div>
-                    <dt class="text-xs text-gray-500 uppercase">Word Count</dt>
+                    <dt class="text-xs text-gray-500 uppercase">Кол-во слов</dt>
                     <dd class="mt-1 text-sm font-medium text-gray-900">{{ draft.word_count }}</dd>
                 </div>
                 {% endif %}
@@ -326,7 +454,7 @@
                 <div>
                     <dt class="text-xs text-gray-500 uppercase">Meta Title</dt>
                     <dd class="mt-1 text-sm text-gray-900">{{ draft.meta_title }}</dd>
-                    <dd class="text-xs text-gray-400">{{ draft.meta_title | length }}/70 chars</dd>
+                    <dd class="text-xs text-gray-400">{{ draft.meta_title|length }}/70</dd>
                 </div>
                 {% endif %}
 
@@ -334,45 +462,57 @@
                 <div>
                     <dt class="text-xs text-gray-500 uppercase">Meta Description</dt>
                     <dd class="mt-1 text-sm text-gray-900">{{ draft.meta_description }}</dd>
-                    <dd class="text-xs text-gray-400">{{ draft.meta_description | length }}/160 chars</dd>
+                    <dd class="text-xs text-gray-400">{{ draft.meta_description|length }}/160</dd>
                 </div>
                 {% endif %}
 
                 {% if draft.slug %}
                 <div>
                     <dt class="text-xs text-gray-500 uppercase">Slug</dt>
-                    <dd class="mt-1 text-sm font-mono text-gray-900 break-all">{{ draft.slug }}</dd>
+                    <dd class="mt-1 text-sm font-mono text-gray-900 break-all">/{{ draft.slug }}</dd>
                 </div>
                 {% endif %}
 
                 <div>
-                    <dt class="text-xs text-gray-500 uppercase">Created</dt>
-                    <dd class="mt-1 text-sm text-gray-900">{{ draft.created_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+                    <dt class="text-xs text-gray-500 uppercase">Создан</dt>
+                    <dd class="mt-1 text-sm text-gray-900">{{ draft.created_at.strftime('%d.%m.%Y %H:%M') }}</dd>
                 </div>
+
+                {% if draft.pipeline_started_at %}
+                <div>
+                    <dt class="text-xs text-gray-500 uppercase">Pipeline начат</dt>
+                    <dd class="mt-1 text-sm text-gray-900">{{ draft.pipeline_started_at.strftime('%d.%m.%Y %H:%M') }}</dd>
+                </div>
+                {% endif %}
+
+                {% if draft.pipeline_completed_at %}
+                <div>
+                    <dt class="text-xs text-gray-500 uppercase">Pipeline завершён</dt>
+                    <dd class="mt-1 text-sm text-gray-900">{{ draft.pipeline_completed_at.strftime('%d.%m.%Y %H:%M') }}</dd>
+                </div>
+                {% endif %}
             </dl>
         </div>
 
         <!-- Actions -->
         <div class="bg-white shadow rounded-lg p-4">
-            <h3 class="text-sm font-medium text-gray-700 mb-3">Actions</h3>
+            <h3 class="text-sm font-medium text-gray-700 mb-3">Действия</h3>
             <div class="space-y-2">
                 {% if draft.status in ('generated', 'validated', 'validation_failed', 'pipeline_completed') %}
-                <!-- Approve (primary action) -->
                 <form method="POST" action="/ui/articles/{{ draft.id }}/approve">
                     <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                        Approve Draft
+                        Одобрить
                     </button>
                 </form>
-                <!-- Validate (optional, informational) -->
                 <form method="POST" action="/ui/articles/{{ draft.id }}/validate" id="validate-form">
                     <button type="submit" id="validate-btn" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-md text-sm font-medium">
-                        <span id="val-btn-text">{% if draft.validation_report %}Re-validate{% else %}Run SEO Check{% endif %}</span>
+                        <span id="val-btn-text">{% if draft.validation_report %}Перепроверить{% else %}SEO-проверка{% endif %}</span>
                         <span id="val-btn-loading" class="hidden">
                             <svg class="animate-spin h-4 w-4 inline mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                             </svg>
-                            Validating...
+                            Проверка...
                         </span>
                     </button>
                 </form>
@@ -380,20 +520,20 @@
                 {% elif draft.status == 'approved' %}
                 <form method="POST" action="/ui/articles/{{ draft.id }}/publish" id="publish-form">
                     <button type="submit" id="publish-btn" class="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                        <span id="pub-btn-text">Publish to Ghost</span>
+                        <span id="pub-btn-text">Опубликовать</span>
                         <span id="pub-btn-loading" class="hidden">
                             <svg class="animate-spin h-4 w-4 inline mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                             </svg>
-                            Publishing...
+                            Публикация...
                         </span>
                     </button>
                 </form>
 
                 {% elif draft.status == 'published' %}
                 <div class="text-center py-2">
-                    <span class="text-green-600 font-medium">Published!</span>
+                    <span class="text-green-600 font-medium">Опубликовано</span>
                     {% if draft.cms_post_id %}
                     <p class="mt-1 text-xs text-gray-500">Ghost ID: {{ draft.cms_post_id }}</p>
                     {% endif %}
@@ -405,13 +545,13 @@
         <!-- Sources -->
         {% if draft.sources_used %}
         <div class="bg-white shadow rounded-lg p-4">
-            <h3 class="text-sm font-medium text-gray-700 mb-3">Sources Used</h3>
+            <h3 class="text-sm font-medium text-gray-700 mb-3">Источники</h3>
             <ul class="space-y-2">
-                {% for source in draft.sources_used %}
+                {% for source in draft.sources_used[:15] %}
                 <li class="text-xs">
                     {% if source.url %}
                     <a href="{{ source.url }}" target="_blank" class="text-blue-600 hover:text-blue-800 break-all">
-                        {{ source.title or source.url }}
+                        {{ source.title or source.url[:60] }}
                     </a>
                     {% else %}
                     <span class="text-gray-700">{{ source.title }}</span>
@@ -427,14 +567,12 @@
 
 {% block scripts %}
 <script>
-    {% if draft.status == 'generating' or draft.status == 'validating' %}
-    // Auto-refresh while processing
-    setTimeout(function() {
-        location.reload();
-    }, 5000);
+    {% if is_running %}
+    // Auto-refresh while generating
+    setTimeout(function() { location.reload(); }, 5000);
     {% endif %}
 
-    {% if draft.status in ['generated', 'validated', 'validation_failed'] %}
+    {% if draft.status in ['generated', 'validated', 'validation_failed', 'pipeline_completed'] %}
     const validateForm = document.getElementById('validate-form');
     if (validateForm) {
         validateForm.addEventListener('submit', function() {
@@ -446,11 +584,14 @@
     {% endif %}
 
     {% if draft.status == 'approved' %}
-    document.getElementById('publish-form').addEventListener('submit', function() {
-        document.getElementById('publish-btn').disabled = true;
-        document.getElementById('pub-btn-text').classList.add('hidden');
-        document.getElementById('pub-btn-loading').classList.remove('hidden');
-    });
+    const publishForm = document.getElementById('publish-form');
+    if (publishForm) {
+        publishForm.addEventListener('submit', function() {
+            document.getElementById('publish-btn').disabled = true;
+            document.getElementById('pub-btn-text').classList.add('hidden');
+            document.getElementById('pub-btn-loading').classList.remove('hidden');
+        });
+    }
     {% endif %}
 </script>
 {% endblock %}

@@ -24,6 +24,14 @@ site_knowledge_folders = Table(
     Column('folder_id', UUID(as_uuid=True), ForeignKey('knowledge_folders.id', ondelete='CASCADE'), primary_key=True),
 )
 
+# M2M association table: clusters <-> knowledge_folders
+cluster_knowledge_folders = Table(
+    'cluster_knowledge_folders',
+    Base.metadata,
+    Column('cluster_id', UUID(as_uuid=True), ForeignKey('clusters.id', ondelete='CASCADE'), primary_key=True),
+    Column('folder_id', UUID(as_uuid=True), ForeignKey('knowledge_folders.id', ondelete='CASCADE'), primary_key=True),
+)
+
 
 class Brief(Base):
     """ТЗ (Brief) для статьи."""
@@ -50,6 +58,9 @@ class Brief(Base):
 
     # SEO
     serp_analysis = Column(JSON)  # {paa_questions: [], featured_snippet_target: bool}
+
+    # Factual mode: default | kb_priority | kb_only (inherits from cluster, can override)
+    factual_mode = Column(String(20), default="default")
 
     # Статус
     status = Column(String(50), default="draft")  # draft → approved → in_writing → completed
@@ -128,12 +139,18 @@ class Draft(Base):
     validation_report = Column(JSON)
 
     # Writing Pipeline fields
-    pipeline_status = Column(String(50))  # None | running | completed | failed
+    pipeline_status = Column(String(50))  # None | running | completed | failed | paused_at_research | paused_at_structure | paused_at_draft | paused_at_edit
     pipeline_stages = Column(JSON)  # {"intent": "completed", "research": "running", ...}
     pipeline_started_at = Column(DateTime)
     pipeline_completed_at = Column(DateTime)
     pipeline_error = Column(Text)
     pipeline_output_dir = Column(String(500))  # Path to intermediate files
+
+    # Stage results: JSON with serialized output of each completed stage
+    stage_results = Column(JSON)  # {"intent": {...}, "research": {...}, ...}
+
+    # Generation mode
+    step_by_step = Column(Boolean, default=False)  # True = pause at key stages
 
     # Cover image
     cover_image_url = Column(String(500))
@@ -244,7 +261,7 @@ class Cluster(Base):
     __tablename__ = "clusters"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=False)
+    site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=True)  # nullable — cluster can exist without a topic
 
     name = Column(String(255), nullable=False)
     primary_keyword_id = Column(UUID(as_uuid=True), nullable=True)  # FK добавим позже
@@ -263,6 +280,12 @@ class Cluster(Base):
     estimated_traffic = Column(Integer)
     competition_level = Column(String(20))  # low | medium | high
 
+    # Factual mode: default | kb_priority | kb_only
+    factual_mode = Column(String(20), default="default")
+
+    # Region/language (used when no site_id)
+    region = Column(String(10), default="ru")
+
     status = Column(String(50), default="new")  # new | planned | in_progress | published | monitoring
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -273,6 +296,7 @@ class Cluster(Base):
     parent = relationship("Cluster", remote_side=[id], backref="children")
     roadmap_items = relationship("ContentRoadmap", back_populates="cluster")
     briefs = relationship("Brief", back_populates="cluster")
+    knowledge_folders = relationship("KnowledgeFolder", secondary=cluster_knowledge_folders, back_populates="clusters")
 
 
 class ContentRoadmap(Base):
@@ -408,6 +432,7 @@ class KnowledgeFolder(Base):
     # Relationships
     documents = relationship("KnowledgeDocument", back_populates="folder", cascade="all, delete-orphan")
     sites = relationship("Site", secondary=site_knowledge_folders, back_populates="knowledge_folders")
+    clusters = relationship("Cluster", secondary=cluster_knowledge_folders, back_populates="knowledge_folders")
 
 
 class KnowledgeDocument(Base):

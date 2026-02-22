@@ -3,6 +3,7 @@ UI routes for Brief workflow web interface.
 """
 
 import asyncio
+import json
 import os
 import traceback
 import uuid as uuid_lib
@@ -95,16 +96,11 @@ async def logout(request: Request):
 @router.get("/topics", response_class=HTMLResponse)
 async def list_topics(request: Request, db: Session = Depends(get_db)):
     """List all topics (sites)."""
-    # Get all sites with keyword and brief counts
     sites = db.query(models.Site).order_by(models.Site.created_at.desc()).all()
 
     topics = []
     for site in sites:
-        keyword_count = db.query(models.Keyword).filter(models.Keyword.site_id == site.id).count()
-        selected_count = db.query(models.Keyword).filter(
-            models.Keyword.site_id == site.id,
-            models.Keyword.status == 'selected'
-        ).count()
+        cluster_count = db.query(models.Cluster).filter(models.Cluster.site_id == site.id).count()
         article_count = db.query(models.Draft).filter(models.Draft.site_id == site.id).count()
 
         topics.append({
@@ -115,8 +111,7 @@ async def list_topics(request: Request, db: Session = Depends(get_db)):
             "language": site.language,
             "country": site.country,
             "created_at": site.created_at,
-            "keyword_count": keyword_count,
-            "selected_count": selected_count,
+            "cluster_count": cluster_count,
             "article_count": article_count,
         })
 
@@ -235,36 +230,34 @@ async def create_topic(
 async def topic_detail(
     request: Request,
     topic_id: UUID,
-    error: str = None,
-    success: str = None,
     db: Session = Depends(get_db),
 ):
-    """Show topic details with keywords."""
+    """Show topic details with clusters."""
     topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
 
-    # Get keywords with their briefs
-    keywords = db.query(models.Keyword).filter(
-        models.Keyword.site_id == topic_id
-    ).order_by(models.Keyword.status, models.Keyword.keyword).all()
+    # Get clusters for this topic (top-level only)
+    clusters = db.query(models.Cluster).filter(
+        models.Cluster.site_id == topic_id,
+        models.Cluster.parent_cluster_id.is_(None),
+    ).order_by(models.Cluster.created_at.desc()).all()
+
+    # Enrich clusters with brief counts
+    for cluster in clusters:
+        child_ids = [c.id for c in cluster.children] if cluster.children else []
+        all_ids = [cluster.id] + child_ids
+        cluster.brief_count = db.query(models.Brief).filter(
+            models.Brief.cluster_id.in_(all_ids),
+        ).count()
 
     # Count articles for this topic
     article_count = db.query(models.Draft).filter(
         models.Draft.site_id == topic_id,
     ).count()
 
-    # Calculate stats
-    stats = {
-        "total": len(keywords),
-        "new": sum(1 for kw in keywords if kw.status == "new"),
-        "selected": sum(1 for kw in keywords if kw.status == "selected"),
-        "rejected": sum(1 for kw in keywords if kw.status == "rejected"),
-        "brief_created": sum(1 for kw in keywords if kw.status == "brief_created"),
-        "writing": sum(1 for kw in keywords if kw.status == "writing"),
-        "targeted": sum(1 for kw in keywords if kw.status == "targeted"),
-        "article_count": article_count,
-    }
+    # Total traffic across clusters
+    total_traffic = sum(c.estimated_traffic or 0 for c in clusters)
 
     # Knowledge Base folders
     all_folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
@@ -273,8 +266,9 @@ async def topic_detail(
     return templates.TemplateResponse("topics/detail.html", {
         "request": request,
         "topic": topic,
-        "keywords": keywords,
-        "stats": stats,
+        "clusters": clusters,
+        "article_count": article_count,
+        "total_traffic": total_traffic,
         "all_folders": all_folders,
         "attached_folder_ids": attached_folder_ids,
         "error": request.query_params.get("error"),
@@ -919,6 +913,83 @@ async def update_topic_kb(
     )
 
 
+@router.post("/topics/{topic_id}/discover-clusters", response_class=HTMLResponse)
+async def discover_clusters_for_topic(
+    request: Request,
+    topic_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Discover potential clusters for a topic via Serper + LLM."""
+    settings = get_settings()
+
+    topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    if not settings.anthropic_api_key or not settings.serper_api_key:
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error=ANTHROPIC_API_KEY and SERPER_API_KEY required",
+            status_code=303,
+        )
+
+    try:
+        import anthropic
+        from src.services.cluster_planner import ClusterPlanner
+        from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
+
+        if settings.anthropic_proxy_url and settings.anthropic_proxy_secret:
+            client = anthropic.Anthropic(
+                api_key=settings.anthropic_api_key,
+                base_url=settings.anthropic_proxy_url,
+                default_headers={"x-proxy-token": settings.anthropic_proxy_secret},
+            )
+        else:
+            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+        region = topic.country or "ru"
+        volume_provider = get_volume_provider(region, settings)
+
+        planner = ClusterPlanner(
+            anthropic_client=client,
+            volume_provider=volume_provider if volume_provider.source_name != "none" else None,
+            serper_api_key=settings.serper_api_key,
+        )
+
+        # Load KB docs
+        kb_docs = []
+        for folder in topic.knowledge_folders:
+            for doc in folder.documents:
+                if doc.content_text:
+                    kb_docs.append({
+                        "id": str(doc.id),
+                        "title": doc.original_filename,
+                        "content_text": doc.content_text,
+                        "word_count": doc.word_count or 0,
+                    })
+
+        plan = await planner.plan(
+            big_topic=topic.name,
+            region=region,
+            target_count=10,
+            knowledge_base_docs=kb_docs if kb_docs else None,
+        )
+
+        cluster_id = await planner.save_to_db(plan, str(topic.id), db)
+
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?success=Найдено {1 + len(plan.cluster_articles)} кластеров",
+            status_code=303,
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error={str(e)[:200]}",
+            status_code=303,
+        )
+
+
 # ============ Briefs Pages ============
 
 @router.get("/briefs", response_class=HTMLResponse)
@@ -1097,6 +1168,7 @@ async def generate_draft(request: Request, brief_id: UUID, db: Session = Depends
 async def list_articles(
     request: Request,
     site_id: UUID = None,
+    cluster_id: UUID = None,
     status: str = None,
     db: Session = Depends(get_db),
 ):
@@ -1107,8 +1179,31 @@ async def list_articles(
         query = query.filter(models.Draft.site_id == site_id)
     if status:
         query = query.filter(models.Draft.status == status)
+    if cluster_id:
+        # Filter by cluster: find briefs in this cluster + children
+        child_ids = [c.id for c in db.query(models.Cluster).filter(
+            models.Cluster.parent_cluster_id == cluster_id,
+        ).all()]
+        all_cluster_ids = [cluster_id] + child_ids
+        brief_ids = [b.id for b in db.query(models.Brief).filter(
+            models.Brief.cluster_id.in_(all_cluster_ids),
+        ).all()]
+        query = query.filter(models.Draft.brief_id.in_(brief_ids))
 
     drafts = query.order_by(models.Draft.created_at.desc()).all()
+
+    # Build brief→cluster mapping for display
+    brief_ids = [d.brief_id for d in drafts if d.brief_id]
+    brief_cluster_map = {}  # brief_id → cluster
+    if brief_ids:
+        briefs = db.query(models.Brief).filter(models.Brief.id.in_(brief_ids)).all()
+        cluster_ids = list(set(b.cluster_id for b in briefs if b.cluster_id))
+        clusters = {str(c.id): c for c in db.query(models.Cluster).filter(
+            models.Cluster.id.in_(cluster_ids),
+        ).all()} if cluster_ids else {}
+        for b in briefs:
+            if b.cluster_id:
+                brief_cluster_map[str(b.id)] = clusters.get(str(b.cluster_id))
 
     # Get all sites for filter dropdown
     sites = db.query(models.Site).order_by(models.Site.name).all()
@@ -1117,7 +1212,9 @@ async def list_articles(
         "request": request,
         "drafts": drafts,
         "sites": sites,
+        "brief_cluster_map": brief_cluster_map,
         "current_site_id": site_id,
+        "current_cluster_id": cluster_id,
         "current_status": status,
         "success": request.query_params.get("success"),
     })
@@ -1130,9 +1227,47 @@ async def article_detail(request: Request, draft_id: UUID, db: Session = Depends
     if not draft:
         raise HTTPException(status_code=404, detail="Article not found")
 
+    # Load brief and cluster for breadcrumbs/context
+    brief = None
+    cluster = None
+    if draft.brief_id:
+        brief = db.query(models.Brief).filter(models.Brief.id == draft.brief_id).first()
+        if brief and brief.cluster_id:
+            cluster = db.query(models.Cluster).filter(models.Cluster.id == brief.cluster_id).first()
+            # If child cluster, get parent for breadcrumb
+            if cluster and cluster.parent_cluster_id:
+                parent_cluster = db.query(models.Cluster).filter(
+                    models.Cluster.id == cluster.parent_cluster_id,
+                ).first()
+                if parent_cluster:
+                    cluster = parent_cluster
+
+    # Pipeline stages definition (all 10)
+    all_stages = [
+        ("intent", "Intent Analysis", "Определение интента и тональности"),
+        ("research", "Research", "Сбор фактов и источников"),
+        ("structure", "Structure", "Построение структуры статьи"),
+        ("drafting", "Drafting", "Написание черновика"),
+        ("editing", "Editing", "Редактирование и полировка"),
+        ("linking", "Linking", "Внутренняя перелинковка"),
+        ("seo_polish", "SEO Polish", "SEO-оптимизация"),
+        ("quality_gate", "Quality Gate", "Проверка качества"),
+        ("meta", "Meta", "Meta-теги и slug"),
+        ("formatting", "Formatting", "Обложка и форматирование"),
+    ]
+
+    # Determine if pipeline is active (for auto-refresh)
+    is_running = draft.pipeline_status == "running" or draft.status in ("generating", "pipeline_running")
+    is_paused = draft.pipeline_status and draft.pipeline_status.startswith("paused")
+
     return templates.TemplateResponse("drafts/detail.html", {
         "request": request,
         "draft": draft,
+        "brief": brief,
+        "cluster": cluster,
+        "all_stages": all_stages,
+        "is_running": is_running,
+        "is_paused": is_paused,
     })
 
 
@@ -1299,6 +1434,419 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
         pass  # Handle error silently for now
 
     return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=303)
+
+
+# ============ Step-by-Step Pipeline Controls ============
+
+def _resume_pipeline_for_draft(draft_id: str, settings):
+    """Background task: resume pipeline from paused state."""
+    import asyncio
+
+    async def _run():
+        from src.db.session import SessionLocal
+        from src.services.writing_pipeline.core.context import WritingContext
+
+        db = SessionLocal()
+        try:
+            draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+            if not draft or not draft.pipeline_status or not draft.pipeline_status.startswith("paused"):
+                return
+
+            paused_at = draft.pipeline_status.replace("paused_at_", "")
+            brief = db.query(models.Brief).filter(models.Brief.id == draft.brief_id).first() if draft.brief_id else None
+
+            runner = _create_runner(settings)
+
+            # Rebuild config from brief
+            config = {
+                "expand_paa": True,
+                "fetch_page_content": True,
+                "max_pages_to_fetch": 5,
+                "max_paa_queries": 3,
+                "use_playwright": True,
+            }
+            if brief and brief.structure:
+                structure = brief.structure if isinstance(brief.structure, dict) else {}
+                config["brief"] = {
+                    "title_candidate": brief.title,
+                    "role": structure.get("role", "cluster"),
+                    "primary_intent": structure.get("primary_intent", "informational"),
+                    "topic_boundaries": structure.get("topic_boundaries", {}),
+                    "must_answer_questions": structure.get("must_answer_questions", []),
+                    "target_terms": [brief.target_keyword] + (brief.secondary_keywords or []),
+                    "unique_angle": structure.get("unique_angle", {}),
+                    "internal_links_plan": structure.get("internal_links_plan", []),
+                    "seed_queries": structure.get("seed_queries", []),
+                }
+
+            # Load KB docs
+            kb_docs = []
+            if brief and brief.cluster_id:
+                cluster = db.query(models.Cluster).filter(models.Cluster.id == brief.cluster_id).first()
+                if cluster:
+                    for folder in cluster.knowledge_folders:
+                        for doc in folder.documents:
+                            if doc.content_text:
+                                kb_docs.append({
+                                    "id": str(doc.id),
+                                    "title": doc.original_filename,
+                                    "content_text": doc.content_text,
+                                    "word_count": doc.word_count or 0,
+                                })
+                    if cluster.factual_mode and cluster.factual_mode != "default":
+                        config["factual_mode"] = cluster.factual_mode
+            if kb_docs:
+                config["knowledge_base_docs"] = kb_docs
+
+            # Rebuild context from stage_results
+            existing_posts = []
+            if settings.ghost_url and settings.ghost_admin_key:
+                try:
+                    from src.services.publisher import GhostPublisher
+                    publisher = GhostPublisher(ghost_url=settings.ghost_url, admin_key=settings.ghost_admin_key)
+                    existing_posts = publisher.get_posts()
+                except Exception:
+                    pass
+
+            context = WritingContext(
+                topic=draft.topic or draft.title,
+                region=config.get("region", "ru"),
+                started_at=draft.pipeline_started_at or datetime.utcnow(),
+                config=config,
+                existing_posts=existing_posts,
+            )
+
+            # Replay completed stages from stage_results to rebuild context
+            sr = draft.stage_results or {}
+            # We need to re-run stages from paused_at onward, but context needs prior data
+            # Run completed stages through runner to rebuild context
+            found_paused = False
+            stages_to_run = []
+
+            for stage in runner.stages:
+                if stage.name == paused_at:
+                    found_paused = True
+                    continue  # Skip the paused stage (already completed)
+                if found_paused:
+                    stages_to_run.append(stage)
+                else:
+                    # Re-run completed stages to rebuild context
+                    # (This is needed because context isn't serializable as a whole)
+                    # However, re-running is expensive, so instead skip stages
+                    # that are already completed and use run_stage for the rest
+                    pass
+
+            # Actually, re-running all prior stages is too expensive.
+            # Instead, we need to run only the remaining stages.
+            # The context fields that downstream stages need:
+            # - structure→drafting needs outline
+            # - drafting→editing needs draft_md
+            # - editing→linking needs edited_md
+            # We can reconstruct these from stage_results.
+
+            # Reconstruct what we can from stage_results
+            if sr.get("intent"):
+                try:
+                    from src.services.writing_pipeline.contracts import IntentResult
+                    context.intent = IntentResult.from_dict(sr["intent"]) if hasattr(IntentResult, 'from_dict') else None
+                except Exception:
+                    pass
+
+            if sr.get("research"):
+                try:
+                    from src.services.writing_pipeline.contracts import ResearchResult
+                    context.research = ResearchResult.from_dict(sr["research"]) if hasattr(ResearchResult, 'from_dict') else None
+                except Exception:
+                    pass
+
+            if sr.get("structure"):
+                try:
+                    from src.services.writing_pipeline.contracts import OutlineResult
+                    context.outline = OutlineResult.from_dict(sr["structure"]) if hasattr(OutlineResult, 'from_dict') else None
+                except Exception:
+                    pass
+
+            if sr.get("drafting") and sr["drafting"].get("content_md"):
+                context.draft_md = sr["drafting"]["content_md"]
+
+            if sr.get("editing") and sr["editing"].get("content_md"):
+                context.edited_md = sr["editing"]["content_md"]
+
+            # Mark draft as running again
+            draft.pipeline_status = "running"
+            db.commit()
+
+            # Determine which stages still need to run
+            completed = set()
+            pipeline_stages = draft.pipeline_stages or {}
+            for s in ALL_PIPELINE_STAGES:
+                if pipeline_stages.get(s) == "completed":
+                    completed.add(s)
+
+            for stage in runner.stages:
+                if stage.name in completed:
+                    continue
+
+                # Update DB: stage is running
+                d = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+                if d:
+                    stages = dict(d.pipeline_stages or {})
+                    stages[stage.name] = "running"
+                    d.pipeline_stages = stages
+                    db.commit()
+
+                # Execute stage
+                context = await stage.run(context)
+
+                # Update DB: stage completed
+                d = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+                if d:
+                    stages = dict(d.pipeline_stages or {})
+                    stages[stage.name] = "completed"
+                    d.pipeline_stages = stages
+
+                    sr_dict = dict(d.stage_results or {})
+                    sr_dict[stage.name] = _serialize_stage_result(context, stage.name)
+                    d.stage_results = sr_dict
+                    db.commit()
+
+                # Check if we should pause again
+                if draft.step_by_step and stage.name in PAUSE_STAGES:
+                    d = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+                    if d:
+                        d.pipeline_status = f"paused_at_{stage.name}"
+                        db.commit()
+                    return
+
+            # All stages done
+            d = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+            if d:
+                d.title = context.outline.title if context.outline else draft.title
+                d.slug = context.meta.slug if context.meta else None
+                d.content_md = context.edited_md
+                d.word_count = len(context.edited_md.split()) if context.edited_md else 0
+                d.meta_title = context.meta.meta_title if context.meta else None
+                d.meta_description = context.meta.meta_description if context.meta else None
+                if context.formatting_result:
+                    d.cover_image_url = getattr(context.formatting_result, 'cover_ghost_url', '') or ''
+                    d.cover_image_alt = getattr(context.formatting_result, 'cover_image_alt', '') or ''
+                d.status = "pipeline_completed"
+                d.pipeline_status = "completed"
+                d.pipeline_completed_at = datetime.utcnow()
+
+                if brief:
+                    brief.status = "completed"
+                db.commit()
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                d = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+                if d:
+                    d.status = "pipeline_failed"
+                    d.pipeline_status = "failed"
+                    d.pipeline_error = str(e)[:1000]
+                db.commit()
+            except Exception:
+                pass
+        finally:
+            db.close()
+
+    asyncio.run(_run())
+
+
+@router.post("/articles/{draft_id}/next-step", response_class=HTMLResponse)
+async def article_next_step(
+    draft_id: UUID,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Resume pipeline from paused state, running until the next pause point or completion."""
+    settings = get_settings()
+    draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+    if not draft:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    if not draft.pipeline_status or not draft.pipeline_status.startswith("paused"):
+        return RedirectResponse(
+            url=f"/ui/articles/{draft_id}?error=Pipeline не на паузе",
+            status_code=303,
+        )
+
+    background_tasks.add_task(
+        _resume_pipeline_for_draft,
+        str(draft_id),
+        settings,
+    )
+
+    return RedirectResponse(
+        url=f"/ui/articles/{draft_id}",
+        status_code=303,
+    )
+
+
+@router.post("/articles/{draft_id}/edit-stage", response_class=HTMLResponse)
+async def article_edit_stage(
+    request: Request,
+    draft_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Save user edits to a pipeline stage result."""
+    draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+    if not draft:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    form = await request.form()
+    stage = form.get("stage", "")
+    content_md = form.get("content_md", "")
+
+    if not stage or stage not in ALL_PIPELINE_STAGES:
+        return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=303)
+
+    sr = dict(draft.stage_results or {})
+
+    if stage in ("drafting", "editing") and content_md:
+        sr[stage] = {"content_md": content_md[:50000]}
+    else:
+        # For other stages, store the raw form data as JSON
+        try:
+            import json
+            data = json.loads(form.get("data", "{}"))
+            sr[stage] = data
+        except Exception:
+            pass
+
+    draft.stage_results = sr
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/ui/articles/{draft_id}?success=Этап обновлён",
+        status_code=303,
+    )
+
+
+@router.post("/articles/{draft_id}/enrich-from-kb", response_class=HTMLResponse)
+async def article_enrich_from_kb(
+    draft_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Enrich research stage with additional facts from KB."""
+    import anthropic as anthropic_module
+
+    settings = get_settings()
+    draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+    if not draft:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    # Load KB docs from brief's cluster
+    kb_docs = []
+    if draft.brief_id:
+        brief = db.query(models.Brief).filter(models.Brief.id == draft.brief_id).first()
+        if brief and brief.cluster_id:
+            cluster = db.query(models.Cluster).filter(models.Cluster.id == brief.cluster_id).first()
+            if cluster:
+                for folder in cluster.knowledge_folders:
+                    for doc in folder.documents:
+                        if doc.content_text:
+                            kb_docs.append({
+                                "id": str(doc.id),
+                                "title": doc.original_filename,
+                                "content_text": doc.content_text[:4000],
+                            })
+                # Also check site-level KB
+                if cluster.site_id:
+                    site = db.query(models.Site).filter(models.Site.id == cluster.site_id).first()
+                    if site:
+                        seen = {d["id"] for d in kb_docs}
+                        for folder in site.knowledge_folders:
+                            for doc in folder.documents:
+                                if doc.content_text and str(doc.id) not in seen:
+                                    kb_docs.append({
+                                        "id": str(doc.id),
+                                        "title": doc.original_filename,
+                                        "content_text": doc.content_text[:4000],
+                                    })
+
+    if not kb_docs:
+        return RedirectResponse(
+            url=f"/ui/articles/{draft_id}?error=Нет KB-документов для обогащения",
+            status_code=303,
+        )
+
+    # Get current research from stage_results
+    sr = dict(draft.stage_results or {})
+    current_research = sr.get("research", {})
+
+    # Build prompt for LLM to extract additional facts from KB
+    kb_text = "\n\n".join([f"## {d['title']}\n{d['content_text']}" for d in kb_docs[:10]])
+    current_facts_json = json.dumps(current_research.get("facts", []), ensure_ascii=False)
+
+    prompt = f"""Проанализируй материалы из базы знаний и извлеки дополнительные факты для статьи "{draft.title}".
+
+## Текущие факты (уже есть):
+{current_facts_json}
+
+## Материалы из базы знаний:
+{kb_text}
+
+Извлеки НОВЫЕ факты, которых нет в текущем списке. Каждый факт должен быть конкретным и полезным для статьи.
+
+Ответь JSON-массивом объектов:
+[{{"text": "факт", "source": "название документа", "origin": "kb"}}]
+
+Если новых фактов нет — верни пустой массив []."""
+
+    try:
+        if settings.anthropic_proxy_url and settings.anthropic_proxy_secret:
+            client = anthropic_module.Anthropic(
+                api_key=settings.anthropic_api_key,
+                base_url=settings.anthropic_proxy_url,
+                default_headers={"x-proxy-token": settings.anthropic_proxy_secret},
+            )
+        else:
+            client = anthropic_module.Anthropic(api_key=settings.anthropic_api_key)
+
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            temperature=0.3,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+        new_facts = json.loads(text)
+
+        # Merge new facts into research
+        existing_facts = current_research.get("facts", [])
+        if isinstance(existing_facts, list):
+            existing_facts.extend(new_facts)
+        current_research["facts"] = existing_facts
+
+        # Add KB sources
+        existing_sources = current_research.get("sources", [])
+        for doc in kb_docs:
+            existing_sources.append({
+                "title": doc["title"],
+                "url": f"kb://{doc['id']}",
+                "origin": "kb",
+            })
+        current_research["sources"] = existing_sources
+
+        sr["research"] = current_research
+        draft.stage_results = sr
+        db.commit()
+
+        return RedirectResponse(
+            url=f"/ui/articles/{draft_id}?success=Добавлено {len(new_facts)} фактов из KB",
+            status_code=303,
+        )
+    except Exception as e:
+        return RedirectResponse(
+            url=f"/ui/articles/{draft_id}?error=Ошибка обогащения: {str(e)[:200]}",
+            status_code=303,
+        )
 
 
 # ============ Pipeline Pages ============
@@ -1816,12 +2364,13 @@ async def cluster_plan_form(request: Request, db: Session = Depends(get_db)):
 async def cluster_plan_submit(
     request: Request,
     big_topic: str = Form(...),
-    site_id: UUID = Form(...),
+    site_id: str = Form(""),
     region: str = Form("ru"),
     target_count: int = Form(10),
+    factual_mode: str = Form("default"),
     db: Session = Depends(get_db),
 ):
-    """Generate a cluster plan and save to DB."""
+    """Generate a cluster plan and save to DB. site_id is optional."""
     settings = get_settings()
 
     if not settings.anthropic_api_key:
@@ -1829,6 +2378,11 @@ async def cluster_plan_submit(
             url="/ui/clusters/plan?error=ANTHROPIC_API_KEY not configured",
             status_code=303,
         )
+
+    # Resolve optional site_id
+    resolved_site_id = None
+    if site_id and site_id.strip():
+        resolved_site_id = site_id.strip()
 
     try:
         import anthropic
@@ -1853,19 +2407,20 @@ async def cluster_plan_submit(
             serper_api_key=settings.serper_api_key,
         )
 
-        # Load KB docs from site's knowledge folders
+        # Load KB docs from site's knowledge folders (if site_id provided)
         kb_docs = []
-        site = db.query(models.Site).filter(models.Site.id == site_id).first()
-        if site:
-            for folder in site.knowledge_folders:
-                for doc in folder.documents:
-                    if doc.content_text:
-                        kb_docs.append({
-                            "id": str(doc.id),
-                            "title": doc.original_filename,
-                            "content_text": doc.content_text,
-                            "word_count": doc.word_count or 0,
-                        })
+        if resolved_site_id:
+            site = db.query(models.Site).filter(models.Site.id == resolved_site_id).first()
+            if site:
+                for folder in site.knowledge_folders:
+                    for doc in folder.documents:
+                        if doc.content_text:
+                            kb_docs.append({
+                                "id": str(doc.id),
+                                "title": doc.original_filename,
+                                "content_text": doc.content_text,
+                                "word_count": doc.word_count or 0,
+                            })
 
         plan = await planner.plan(
             big_topic=big_topic,
@@ -1874,8 +2429,8 @@ async def cluster_plan_submit(
             knowledge_base_docs=kb_docs if kb_docs else None,
         )
 
-        # Save to DB
-        cluster_id = await planner.save_to_db(plan, str(site_id), db)
+        # Save to DB (site_id can be None)
+        cluster_id = await planner.save_to_db(plan, resolved_site_id, db, factual_mode=factual_mode, region=region)
 
         return RedirectResponse(
             url=f"/ui/clusters/{cluster_id}?success=Кластер создан: 1 pillar + {len(plan.cluster_articles)} cluster статей",
@@ -1897,7 +2452,7 @@ async def cluster_detail(
     cluster_id: UUID,
     db: Session = Depends(get_db),
 ):
-    """Show cluster detail with briefs and child clusters."""
+    """Show cluster detail with briefs, draft links, and generation controls."""
     cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster not found")
@@ -1912,16 +2467,24 @@ async def cluster_detail(
         models.Cluster.parent_cluster_id == cluster_id,
     ).order_by(models.Cluster.priority_score.desc().nullslast()).all()
 
+    # Build child cluster lookup
+    brief_clusters = {}
+    child_ids = [c.id for c in child_clusters]
+    for c in child_clusters:
+        brief_clusters[str(c.id)] = c
+
     # Get briefs from child clusters
     children_briefs = []
     if child_clusters:
-        child_ids = [c.id for c in child_clusters]
         children_briefs = db.query(models.Brief).filter(
             models.Brief.cluster_id.in_(child_ids),
         ).all()
 
+    # All briefs (pillar + children)
+    all_briefs = ([pillar_brief] if pillar_brief else []) + children_briefs
+
     # Parse structure JSON for display
-    for brief in [pillar_brief] + children_briefs:
+    for brief in all_briefs:
         if brief and isinstance(brief.structure, str):
             import json
             try:
@@ -1929,13 +2492,99 @@ async def cluster_detail(
             except Exception:
                 brief.structure = {}
 
+    # Build brief_id → draft mapping
+    brief_ids = [b.id for b in all_briefs if b]
+    drafts = db.query(models.Draft).filter(
+        models.Draft.brief_id.in_(brief_ids),
+    ).all() if brief_ids else []
+
+    brief_drafts = {}
+    for d in drafts:
+        brief_drafts[str(d.brief_id)] = d
+
+    # Pillar draft
+    pillar_draft = brief_drafts.get(str(pillar_brief.id)) if pillar_brief else None
+
+    # Count approved briefs
+    approved_count = sum(1 for b in all_briefs if b and b.status == "approved")
+
+    # Check if any articles are currently generating
+    has_running = any(
+        d.pipeline_status == "running" or d.status == "generating"
+        for d in drafts
+    )
+
+    # Knowledge Base folders
+    all_folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
+    attached_folder_ids = {str(f.id) for f in cluster.knowledge_folders} if hasattr(cluster, 'knowledge_folders') and cluster.knowledge_folders else set()
+
     return templates.TemplateResponse("clusters/detail.html", {
         "request": request,
         "cluster": cluster,
         "pillar_brief": pillar_brief,
+        "pillar_draft": pillar_draft,
         "child_clusters": child_clusters,
         "children_briefs": children_briefs,
+        "all_briefs": all_briefs,
+        "brief_drafts": brief_drafts,
+        "brief_clusters": brief_clusters,
+        "approved_count": approved_count,
+        "has_running": has_running,
+        "all_folders": all_folders,
+        "attached_folder_ids": attached_folder_ids,
     })
+
+
+@router.post("/clusters/{cluster_id}/approve-all", response_class=HTMLResponse)
+async def approve_all_briefs(
+    cluster_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Approve all draft briefs in the cluster (including children)."""
+    child_ids = [c.id for c in db.query(models.Cluster).filter(
+        models.Cluster.parent_cluster_id == cluster_id,
+    ).all()]
+    all_cluster_ids = [cluster_id] + child_ids
+
+    count = db.query(models.Brief).filter(
+        models.Brief.cluster_id.in_(all_cluster_ids),
+        models.Brief.status == "draft",
+    ).update({"status": "approved", "approved_at": datetime.utcnow()}, synchronize_session="fetch")
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/ui/clusters/{cluster_id}?success=Одобрено {count} брифов",
+        status_code=303,
+    )
+
+
+@router.post("/clusters/{cluster_id}/kb", response_class=HTMLResponse)
+async def update_cluster_kb(
+    cluster_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Update knowledge base folders attached to a cluster."""
+    cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    form = await request.form()
+    folder_ids = form.getlist("folder_ids")
+
+    # Clear and re-attach
+    cluster.knowledge_folders = []
+    if folder_ids:
+        folders = db.query(models.KnowledgeFolder).filter(
+            models.KnowledgeFolder.id.in_(folder_ids),
+        ).all()
+        cluster.knowledge_folders = folders
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/ui/clusters/{cluster_id}?success=Фактура обновлена",
+        status_code=303,
+    )
 
 
 @router.post("/clusters/{cluster_id}/briefs/{brief_id}/approve", response_class=HTMLResponse)
@@ -2009,6 +2658,63 @@ def _update_cluster_status(db, cluster_id: str):
             db.commit()
 
 
+ALL_PIPELINE_STAGES = [
+    "intent", "research", "structure", "drafting", "editing",
+    "linking", "seo_polish", "quality_gate", "meta", "formatting",
+]
+
+# Stages where step-by-step mode pauses for user review
+PAUSE_STAGES = {"research", "structure", "drafting", "editing"}
+
+
+def _serialize_stage_result(context, stage_name: str) -> dict:
+    """Serialize a stage's output from context for storage in Draft.stage_results."""
+    try:
+        if stage_name == "intent" and context.intent:
+            return context.intent.to_dict() if hasattr(context.intent, 'to_dict') else {"raw": str(context.intent)}
+        elif stage_name == "research" and context.research:
+            return context.research.to_dict() if hasattr(context.research, 'to_dict') else {"raw": str(context.research)}
+        elif stage_name == "structure" and context.outline:
+            return context.outline.to_dict() if hasattr(context.outline, 'to_dict') else {"raw": str(context.outline)}
+        elif stage_name == "drafting" and context.draft_md:
+            return {"content_md": context.draft_md[:50000]}
+        elif stage_name == "editing" and context.edited_md:
+            return {"content_md": context.edited_md[:50000]}
+        elif stage_name == "meta" and context.meta:
+            return context.meta.to_dict() if hasattr(context.meta, 'to_dict') else {"raw": str(context.meta)}
+        elif stage_name == "quality_gate" and context.quality_report:
+            return context.quality_report if isinstance(context.quality_report, dict) else {"raw": str(context.quality_report)}
+        elif stage_name == "formatting" and context.formatting_result:
+            return {"cover_url": getattr(context.formatting_result, 'cover_ghost_url', ''), "cover_alt": getattr(context.formatting_result, 'cover_image_alt', '')}
+        elif stage_name in ("linking", "seo_polish"):
+            # These modify edited_md in place
+            if context.edited_md:
+                return {"content_md_length": len(context.edited_md)}
+        return {}
+    except Exception:
+        return {}
+
+
+def _create_runner(settings):
+    """Create a PipelineRunner from settings."""
+    from src.services.writing_pipeline import PipelineRunner
+    return PipelineRunner(
+        anthropic_api_key=settings.anthropic_api_key,
+        serper_api_key=settings.serper_api_key,
+        jina_api_key=settings.jina_api_key,
+        dataforseo_login=settings.dataforseo_login,
+        dataforseo_password=settings.dataforseo_password,
+        proxy_url=settings.anthropic_proxy_url,
+        proxy_secret=settings.anthropic_proxy_secret,
+        ghost_url=settings.ghost_url,
+        ghost_admin_key=settings.ghost_admin_key,
+        database_url=settings.database_url,
+        openai_api_key=settings.openai_api_key,
+        openai_proxy_url=settings.openai_proxy_url,
+        residential_proxy_url=getattr(settings, 'residential_proxy_url', None),
+    )
+
+
 def _run_pipeline_for_brief(
     brief_id: str,
     site_id: str,
@@ -2018,13 +2724,15 @@ def _run_pipeline_for_brief(
     settings,
     knowledge_base_docs: list = None,
     cluster_id: str = None,
+    step_by_step: bool = False,
+    factual_mode: str = "default",
 ):
     """Background task: run pipeline for a single brief."""
     import asyncio
 
     async def _run():
         from src.db.session import SessionLocal
-        from src.services.writing_pipeline import PipelineRunner
+        from src.services.writing_pipeline.core.context import WritingContext
 
         db = SessionLocal()
         try:
@@ -2032,81 +2740,113 @@ def _run_pipeline_for_brief(
             if not brief:
                 return
 
-            # Create draft
-            all_stages = [
-                "intent", "research", "structure", "drafting", "editing",
-                "linking", "seo_polish", "quality_gate", "meta", "formatting",
-            ]
             draft = models.Draft(
-                site_id=site_id,
+                site_id=site_id if site_id else None,
                 brief_id=brief_id,
                 title=topic,
                 topic=topic,
                 status="pipeline_running",
                 pipeline_status="running",
                 pipeline_started_at=datetime.utcnow(),
-                pipeline_stages={s: "pending" for s in all_stages},
+                pipeline_stages={s: "pending" for s in ALL_PIPELINE_STAGES},
+                step_by_step=step_by_step,
+                stage_results={},
             )
             db.add(draft)
             db.commit()
-            draft_id = str(draft.id)
+            local_draft_id = str(draft.id)
 
-            # Stage progress callback
-            def on_stage_complete(stage_name: str, status: str):
-                try:
-                    d = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
-                    if d and d.pipeline_stages:
-                        stages = dict(d.pipeline_stages)
-                        stages[stage_name] = status
-                        d.pipeline_stages = stages
-                        db.commit()
-                except Exception:
-                    db.rollback()
-
-            runner = PipelineRunner(
-                anthropic_api_key=settings.anthropic_api_key,
-                serper_api_key=settings.serper_api_key,
-                jina_api_key=settings.jina_api_key,
-                dataforseo_login=settings.dataforseo_login,
-                dataforseo_password=settings.dataforseo_password,
-                proxy_url=settings.anthropic_proxy_url,
-                proxy_secret=settings.anthropic_proxy_secret,
-                ghost_url=settings.ghost_url,
-                ghost_admin_key=settings.ghost_admin_key,
-                database_url=settings.database_url,
-                openai_api_key=settings.openai_api_key,
-                openai_proxy_url=settings.openai_proxy_url,
-                residential_proxy_url=getattr(settings, 'residential_proxy_url', None),
-            )
+            runner = _create_runner(settings)
 
             config = {}
             if knowledge_base_docs:
                 config["knowledge_base_docs"] = knowledge_base_docs
+            if factual_mode and factual_mode != "default":
+                config["factual_mode"] = factual_mode
+            if brief_data:
+                config["brief"] = brief_data
 
-            result = await runner.run(
+            # Initialize context
+            pipeline_config = {
+                "expand_paa": True,
+                "fetch_page_content": True,
+                "max_pages_to_fetch": 5,
+                "max_paa_queries": 3,
+                "use_playwright": True,
+            }
+            pipeline_config.update(config)
+
+            # Fetch existing posts for overlap analysis
+            existing_posts = []
+            if settings.ghost_url and settings.ghost_admin_key:
+                try:
+                    from src.services.publisher import GhostPublisher
+                    publisher = GhostPublisher(ghost_url=settings.ghost_url, admin_key=settings.ghost_admin_key)
+                    existing_posts = publisher.get_posts()
+                except Exception:
+                    pass
+
+            context = WritingContext(
                 topic=topic,
                 region=region,
-                brief=brief_data,
-                config=config if config else None,
-                on_stage_complete=on_stage_complete,
+                started_at=datetime.now(),
+                config=pipeline_config,
+                existing_posts=existing_posts,
             )
 
-            # Update draft
-            draft.title = result.title
-            draft.slug = result.meta.slug if result.meta else None
-            draft.content_md = result.article_md
-            draft.word_count = result.word_count
-            draft.meta_title = result.meta.meta_title if result.meta else None
-            draft.meta_description = result.meta.meta_description if result.meta else None
-            draft.cover_image_url = result.cover_image_url
-            draft.cover_image_alt = result.cover_image_alt
-            draft.status = "pipeline_completed"
-            draft.pipeline_status = "completed"
-            draft.pipeline_completed_at = datetime.utcnow()
-            draft.pipeline_stages = {s: "completed" for s in all_stages}
+            # Run stages one by one
+            for stage in runner.stages:
+                # Update DB: stage is running
+                d = db.query(models.Draft).filter(models.Draft.id == local_draft_id).first()
+                if d:
+                    stages = dict(d.pipeline_stages or {})
+                    stages[stage.name] = "running"
+                    d.pipeline_stages = stages
+                    db.commit()
 
-            brief.status = "completed"
-            db.commit()
+                # Execute stage
+                context = await stage.run(context)
+
+                # Update DB: stage completed + save result
+                d = db.query(models.Draft).filter(models.Draft.id == local_draft_id).first()
+                if d:
+                    stages = dict(d.pipeline_stages or {})
+                    stages[stage.name] = "completed"
+                    d.pipeline_stages = stages
+
+                    sr = dict(d.stage_results or {})
+                    sr[stage.name] = _serialize_stage_result(context, stage.name)
+                    d.stage_results = sr
+                    db.commit()
+
+                # Check if we should pause (step-by-step mode)
+                if step_by_step and stage.name in PAUSE_STAGES:
+                    d = db.query(models.Draft).filter(models.Draft.id == local_draft_id).first()
+                    if d:
+                        d.pipeline_status = f"paused_at_{stage.name}"
+                        d.status = "pipeline_running"
+                        db.commit()
+                    return  # Stop here; user will resume via /next-step
+
+            # All stages done
+            context.completed_at = datetime.now()
+            d = db.query(models.Draft).filter(models.Draft.id == local_draft_id).first()
+            if d:
+                d.title = context.outline.title if context.outline else topic
+                d.slug = context.meta.slug if context.meta else None
+                d.content_md = context.edited_md
+                d.word_count = len(context.edited_md.split()) if context.edited_md else 0
+                d.meta_title = context.meta.meta_title if context.meta else None
+                d.meta_description = context.meta.meta_description if context.meta else None
+                if context.formatting_result:
+                    d.cover_image_url = getattr(context.formatting_result, 'cover_ghost_url', '') or ''
+                    d.cover_image_alt = getattr(context.formatting_result, 'cover_image_alt', '') or ''
+                d.status = "pipeline_completed"
+                d.pipeline_status = "completed"
+                d.pipeline_completed_at = datetime.utcnow()
+
+                brief.status = "completed"
+                db.commit()
 
         except Exception as e:
             import traceback
@@ -2144,9 +2884,11 @@ async def generate_cluster_articles(
     cluster_id: UUID,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    step_by_step: str = Form("false"),
 ):
     """Generate articles for all approved briefs in the cluster."""
     settings = get_settings()
+    is_step_by_step = step_by_step.lower() == "true"
 
     cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
     if not cluster:
@@ -2183,23 +2925,41 @@ async def generate_cluster_articles(
             status_code=303,
         )
 
-    region = "ru"
+    region = cluster.region or "ru"
+    factual_mode = cluster.factual_mode or "default"
     queued = 0
     skipped = 0
 
-    # Load KB docs from site's attached knowledge folders
-    site = db.query(models.Site).filter(models.Site.id == cluster.site_id).first()
+    # Load KB docs from cluster's attached knowledge folders first, then site's
     kb_docs = []
-    if site:
-        for folder in site.knowledge_folders:
-            for doc in folder.documents:
-                if doc.content_text:
-                    kb_docs.append({
-                        "id": str(doc.id),
-                        "title": doc.original_filename,
-                        "content_text": doc.content_text,
-                        "word_count": doc.word_count or 0,
-                    })
+    seen_doc_ids = set()
+
+    # Cluster-level KB folders
+    for folder in cluster.knowledge_folders:
+        for doc in folder.documents:
+            if doc.content_text and str(doc.id) not in seen_doc_ids:
+                kb_docs.append({
+                    "id": str(doc.id),
+                    "title": doc.original_filename,
+                    "content_text": doc.content_text,
+                    "word_count": doc.word_count or 0,
+                })
+                seen_doc_ids.add(str(doc.id))
+
+    # Site-level KB folders (if cluster is tied to a site)
+    if cluster.site_id:
+        site = db.query(models.Site).filter(models.Site.id == cluster.site_id).first()
+        if site:
+            for folder in site.knowledge_folders:
+                for doc in folder.documents:
+                    if doc.content_text and str(doc.id) not in seen_doc_ids:
+                        kb_docs.append({
+                            "id": str(doc.id),
+                            "title": doc.original_filename,
+                            "content_text": doc.content_text,
+                            "word_count": doc.word_count or 0,
+                        })
+                        seen_doc_ids.add(str(doc.id))
 
     for brief in approved_briefs:
         # Skip briefs already being processed or completed
@@ -2232,13 +2992,15 @@ async def generate_cluster_articles(
         background_tasks.add_task(
             _run_pipeline_for_brief,
             str(brief.id),
-            str(cluster.site_id),
+            str(cluster.site_id) if cluster.site_id else "",
             brief.title,
             region,
             brief_data,
             settings,
             kb_docs,
             str(cluster_id),
+            is_step_by_step,
+            factual_mode,
         )
         queued += 1
 

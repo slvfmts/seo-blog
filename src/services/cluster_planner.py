@@ -337,7 +337,7 @@ class ClusterPlanner:
                 generated_at=datetime.now(timezone.utc).isoformat(),
             )
 
-    async def save_to_db(self, plan: ClusterPlan, site_id: str, db_session) -> str:
+    async def save_to_db(self, plan: ClusterPlan, site_id: Optional[str], db_session, factual_mode: str = "default", region: str = "ru") -> str:
         """
         Save cluster plan to database.
 
@@ -345,8 +345,10 @@ class ClusterPlanner:
 
         Args:
             plan: The generated cluster plan
-            site_id: Site UUID
+            site_id: Site UUID (can be None for standalone clusters)
             db_session: SQLAlchemy session
+            factual_mode: default | kb_priority | kb_only
+            region: Region code
 
         Returns:
             Parent cluster ID
@@ -362,6 +364,8 @@ class ClusterPlanner:
             intent=plan.pillar.primary_intent,
             topic_type="pillar",
             estimated_traffic=plan.pillar.estimated_volume,
+            factual_mode=factual_mode,
+            region=region,
             status="planned",
         )
         db_session.add(parent_cluster)
@@ -374,8 +378,10 @@ class ClusterPlanner:
             title=plan.pillar.title_candidate,
             target_keyword=plan.pillar.target_terms[0] if plan.pillar.target_terms else plan.big_topic,
             secondary_keywords=plan.pillar.target_terms[1:30] if len(plan.pillar.target_terms) > 1 else [],
+            factual_mode=factual_mode,
             structure={
                 "role": plan.pillar.role,
+                "primary_intent": plan.pillar.primary_intent,
                 "topic_boundaries": plan.pillar.topic_boundaries,
                 "must_answer_questions": plan.pillar.must_answer_questions,
                 "unique_angle": plan.pillar.unique_angle,
@@ -397,6 +403,8 @@ class ClusterPlanner:
                 parent_cluster_id=parent_cluster.id,
                 estimated_traffic=article.estimated_volume,
                 priority_score=float(100 - article.priority),
+                factual_mode=factual_mode,
+                region=region,
                 status="planned",
             )
             db_session.add(child_cluster)
@@ -408,8 +416,10 @@ class ClusterPlanner:
                 title=article.title_candidate,
                 target_keyword=article.target_terms[0] if article.target_terms else article.title_candidate,
                 secondary_keywords=article.target_terms[1:30] if len(article.target_terms) > 1 else [],
+                factual_mode=factual_mode,
                 structure={
                     "role": article.role,
+                    "primary_intent": article.primary_intent,
                     "topic_boundaries": article.topic_boundaries,
                     "must_answer_questions": article.must_answer_questions,
                     "unique_angle": article.unique_angle,
@@ -420,16 +430,17 @@ class ClusterPlanner:
             )
             db_session.add(brief)
 
-            # Save target keywords
-            for kw_text in article.target_terms[:30]:
-                kw = Keyword(
-                    id=uuid4(),
-                    site_id=site_id,
-                    keyword=kw_text,
-                    cluster_id=child_cluster.id,
-                    status="clustered",
-                )
-                db_session.add(kw)
+            # Save target keywords only if site_id is provided
+            if site_id:
+                for kw_text in article.target_terms[:30]:
+                    kw = Keyword(
+                        id=uuid4(),
+                        site_id=site_id,
+                        keyword=kw_text,
+                        cluster_id=child_cluster.id,
+                        status="clustered",
+                    )
+                    db_session.add(kw)
 
         db_session.commit()
         logger.info(f"Saved cluster plan: {parent_cluster.id} with {len(plan.cluster_articles)} children")

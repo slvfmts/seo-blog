@@ -130,6 +130,7 @@ class ResearchStage(WritingStage):
         """Execute research stage."""
         log = context.start_stage(self.name)
         total_tokens = 0
+        factual_mode = context.config.get("factual_mode", "default")
 
         try:
             if context.intent is None:
@@ -156,24 +157,36 @@ class ResearchStage(WritingStage):
                 with open(output_path, "w", encoding="utf-8") as f:
                     json.dump(queries.to_dict(), f, ensure_ascii=False, indent=2)
 
-            # Step 2: Execute initial searches
-            search_results = await self._execute_searches(context)
+            search_results = []
 
-            # Step 3: PAA Expansion (if enabled)
-            expand_paa = context.config.get("expand_paa", True)
-            if expand_paa and self.serper_api_key:
-                paa_results = await self._expand_paa_queries(context, search_results)
-                search_results.extend(paa_results)
+            # In kb_only mode: skip web search entirely
+            if factual_mode != "kb_only":
+                # Step 2: Execute initial searches
+                search_results = await self._execute_searches(context)
 
-            # Step 4: Fetch full page content for top results
-            fetch_content = context.config.get("fetch_page_content", True)
-            max_pages = context.config.get("max_pages_to_fetch", 5)
-            if fetch_content:
-                search_results = await self._fetch_page_contents(
-                    search_results, max_pages, region=context.region
-                )
+                # Step 3: PAA Expansion (if enabled)
+                expand_paa = context.config.get("expand_paa", True)
+                if expand_paa and self.serper_api_key:
+                    paa_results = await self._expand_paa_queries(context, search_results)
+                    search_results.extend(paa_results)
 
-            # Step 4b: Inject Knowledge Base documents (if attached)
+                # Step 4: Fetch full page content for top results
+                fetch_content = context.config.get("fetch_page_content", True)
+                max_pages = context.config.get("max_pages_to_fetch", 5)
+                if fetch_content:
+                    search_results = await self._fetch_page_contents(
+                        search_results, max_pages, region=context.region
+                    )
+
+                # Mark all web results with origin
+                for sr in search_results:
+                    for org in sr.get("organic", []):
+                        if "origin" not in org:
+                            org["origin"] = "web"
+            else:
+                logger.info("factual_mode=kb_only: skipping web search")
+
+            # Inject Knowledge Base documents (if attached)
             kb_docs = context.config.get("knowledge_base_docs", [])
             if kb_docs:
                 kb_result = {
@@ -188,10 +201,17 @@ class ResearchStage(WritingStage):
                         "page_content": doc["content_text"][:4000],
                         "page_word_count": doc.get("word_count", 0),
                         "is_knowledge_base": True,
+                        "origin": "kb",
                     } for doc in kb_docs],
                 }
-                search_results.insert(0, kb_result)
-                logger.info(f"Injected {len(kb_docs)} KB documents into search results")
+                # kb_priority/kb_only: KB first; default: KB appended
+                if factual_mode in ("kb_priority", "kb_only"):
+                    search_results.insert(0, kb_result)
+                else:
+                    search_results.append(kb_result)
+                logger.info(f"Injected {len(kb_docs)} KB documents (mode={factual_mode})")
+            elif factual_mode == "kb_only":
+                logger.warning("factual_mode=kb_only but no KB docs provided — research will be thin")
 
             context.search_results = search_results
 
@@ -854,6 +874,13 @@ class ResearchStage(WritingStage):
             )
         else:
             prompt = prompt.replace("{{existing_posts_json}}", "null")
+
+        # Inject factual mode instructions
+        factual_mode = context.config.get("factual_mode", "default")
+        if factual_mode == "kb_priority":
+            prompt += "\n\nВАЖНО: Приоритет своей фактуры (is_knowledge_base=true). Используй факты из KB в первую очередь. Открытые источники — как дополнение. Помечай в sources origin: 'kb' для фактов из KB и 'web' для остальных."
+        elif factual_mode == "kb_only":
+            prompt += "\n\nВАЖНО: СТРОГО используй только факты из собственной базы знаний (is_knowledge_base=true). Не включай факты из открытых веб-источников. Все sources должны иметь origin: 'kb'."
 
         response_text, tokens = self._call_llm(
             prompt,

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Статьи — SEO Blog{% endblock %}
+{% block title %}Материалы — SEO Blog{% endblock %}
 
 {% block content %}
 <div class="mb-6 flex justify-between items-center">
     <div>
-        <h1 class="text-2xl font-bold text-gray-900">Статьи</h1>
-        <p class="mt-1 text-sm text-gray-600">Все черновики и опубликованные статьи</p>
+        <h1 class="text-2xl font-bold text-gray-900">Материалы</h1>
+        <p class="mt-1 text-sm text-gray-600">Все статьи: черновики, в генерации и опубликованные</p>
     </div>
     <a href="/ui/pipeline/new" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700">
         + Быстрая статья
@@ -33,11 +33,11 @@
 
         <select name="status" onchange="this.form.submit()" class="border border-gray-300 rounded-md shadow-sm py-1.5 px-3 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
             <option value="">Все статусы</option>
-            <option value="generating" {% if current_status == 'generating' %}selected{% endif %}>Generating</option>
-            <option value="generated" {% if current_status == 'generated' %}selected{% endif %}>Generated</option>
-            <option value="approved" {% if current_status == 'approved' %}selected{% endif %}>Approved</option>
-            <option value="published" {% if current_status == 'published' %}selected{% endif %}>Published</option>
-            <option value="failed" {% if current_status == 'failed' %}selected{% endif %}>Failed</option>
+            <option value="pipeline_running" {% if current_status == 'pipeline_running' %}selected{% endif %}>В генерации</option>
+            <option value="pipeline_completed" {% if current_status == 'pipeline_completed' %}selected{% endif %}>Готово</option>
+            <option value="approved" {% if current_status == 'approved' %}selected{% endif %}>Одобрено</option>
+            <option value="published" {% if current_status == 'published' %}selected{% endif %}>Опубликовано</option>
+            <option value="pipeline_failed" {% if current_status == 'pipeline_failed' %}selected{% endif %}>Ошибка</option>
         </select>
     </form>
 </div>
@@ -47,89 +47,63 @@
     <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
             <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Заголовок
-                </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Тема
-                </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Keyword
-                </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Статус
-                </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Слов
-                </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Дата
-                </th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Заголовок</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-40">Кластер</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-28">Статус</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-20">Слов</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-28">Дата</th>
             </tr>
         </thead>
         <tbody class="bg-white divide-y divide-gray-200">
             {% for draft in drafts %}
+            {% set cluster = brief_cluster_map.get(draft.brief_id|string) if draft.brief_id else None %}
             <tr class="hover:bg-gray-50 cursor-pointer" onclick="window.location='/ui/articles/{{ draft.id }}'">
-                <td class="px-6 py-4">
+                <td class="px-4 py-3">
                     <div class="text-sm font-medium text-gray-900">{{ draft.title }}</div>
                     {% if draft.slug %}
                     <div class="text-xs text-gray-500 font-mono">/{{ draft.slug }}</div>
                     {% endif %}
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    {% if draft.site %}
-                    <a href="/ui/topics/{{ draft.site_id }}" class="text-sm text-indigo-600 hover:text-indigo-900" onclick="event.stopPropagation()">
+                <td class="px-4 py-3 whitespace-nowrap">
+                    {% if cluster %}
+                    <a href="/ui/clusters/{{ cluster.id }}" class="text-sm text-indigo-600 hover:text-indigo-900" onclick="event.stopPropagation()">
+                        {{ cluster.name[:25] }}{% if cluster.name|length > 25 %}...{% endif %}
+                    </a>
+                    {% elif draft.site %}
+                    <a href="/ui/topics/{{ draft.site_id }}" class="text-xs text-gray-500 hover:text-gray-700" onclick="event.stopPropagation()">
                         {{ draft.site.name }}
                     </a>
                     {% else %}
-                    <span class="text-xs text-gray-400">Без темы</span>
+                    <span class="text-xs text-gray-400">—</span>
                     {% endif %}
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    {% if draft.keyword %}
-                    <div class="text-sm text-gray-900">{{ draft.keyword.keyword }}</div>
-                    {% if draft.keyword.search_volume %}
-                    <div class="text-xs text-gray-500">vol: {{ draft.keyword.search_volume }}</div>
-                    {% endif %}
-                    {% else %}
-                    <span class="text-xs text-gray-400">-</span>
-                    {% endif %}
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    {% if draft.status == 'generating' %}
+                <td class="px-4 py-3 whitespace-nowrap">
+                    {% if draft.pipeline_status == 'running' or draft.status in ('generating', 'pipeline_running') %}
                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
                         <svg class="animate-spin h-3 w-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                         </svg>
-                        Generating
+                        writing
                     </span>
-                    {% elif draft.status == 'generated' %}
-                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                        Generated
-                    </span>
+                    {% elif draft.pipeline_status and draft.pipeline_status.startswith('paused') %}
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-amber-100 text-amber-800">paused</span>
+                    {% elif draft.status in ('pipeline_completed', 'generated') %}
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">ready</span>
                     {% elif draft.status == 'approved' %}
-                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                        Approved
-                    </span>
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">approved</span>
                     {% elif draft.status == 'published' %}
-                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
-                        Published
-                    </span>
-                    {% elif draft.status == 'failed' %}
-                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-                        Failed
-                    </span>
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">published</span>
+                    {% elif draft.status in ('failed', 'pipeline_failed') %}
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">error</span>
                     {% else %}
-                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-600">
-                        {{ draft.status }}
-                    </span>
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-600">{{ draft.status }}</span>
                     {% endif %}
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
                     {{ draft.word_count or '-' }}
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
                     {{ draft.created_at.strftime('%d.%m.%Y %H:%M') }}
                 </td>
             </tr>
@@ -142,11 +116,11 @@
     <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
     </svg>
-    <h3 class="mt-2 text-sm font-medium text-gray-900">Нет статей</h3>
-    <p class="mt-1 text-sm text-gray-500">Создайте тему и выберите ключевые слова для генерации статей.</p>
+    <h3 class="mt-2 text-sm font-medium text-gray-900">Нет материалов</h3>
+    <p class="mt-1 text-sm text-gray-500">Создайте кластер и запустите генерацию статей.</p>
     <div class="mt-6 space-x-3">
-        <a href="/ui/topics" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700">
-            Перейти к темам
+        <a href="/ui/clusters" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700">
+            Перейти к кластерам
         </a>
         <a href="/ui/pipeline/new" class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
             + Быстрая статья
