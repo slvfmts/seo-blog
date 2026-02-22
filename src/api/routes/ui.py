@@ -950,11 +950,13 @@ async def discover_clusters_for_topic(
 
         region = topic.country or "ru"
 
+        from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
+        volume_provider = get_volume_provider(region=region, settings=settings)
+
         planner = ClusterPlanner(
             anthropic_client=client,
             serper_api_key=settings.serper_api_key,
-            dataforseo_login=settings.dataforseo_login,
-            dataforseo_password=settings.dataforseo_password,
+            volume_provider=volume_provider,
         )
 
         # Load KB docs
@@ -2395,11 +2397,13 @@ async def cluster_plan_submit(
         else:
             client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
+        from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
+        volume_provider = get_volume_provider(region=region, settings=settings)
+
         planner = ClusterPlanner(
             anthropic_client=client,
             serper_api_key=settings.serper_api_key,
-            dataforseo_login=settings.dataforseo_login,
-            dataforseo_password=settings.dataforseo_password,
+            volume_provider=volume_provider,
         )
 
         # Load KB docs from site's knowledge folders (if site_id provided)
@@ -2975,13 +2979,19 @@ def _run_cluster_pipeline_sequential(
 ):
     """Background task: run pipeline for briefs SEQUENTIALLY, pillar first."""
     for brief_id, topic, brief_data in brief_queue:
-        # Check if brief was cancelled before starting
+        # Check if brief or cluster was cancelled before starting
         from src.db.session import SessionLocal
         db = SessionLocal()
         try:
+            # Check cluster-level cancellation
+            cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
+            if cluster and cluster.status == "cancelled":
+                logger.info(f"[seq-gen] Cluster {cluster_id} cancelled, stopping queue")
+                return
+
             brief = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
-            if not brief or brief.status == "cancelled":
-                logger.info(f"[seq-gen] Skipping cancelled brief {brief_id}")
+            if not brief or brief.status in ("cancelled", "completed", "in_writing"):
+                logger.info(f"[seq-gen] Skipping brief {brief_id} (status={brief.status if brief else 'missing'})")
                 continue
             brief.status = "in_writing"
             db.commit()

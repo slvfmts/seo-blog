@@ -4,16 +4,17 @@ ClusterPlanner — generates a cluster plan from a broad topic.
 Search-first approach:
 1. Serper Search — discover real keywords from search (related, PAA, autocomplete)
 2. Competitor Analysis — scrape top pages, extract H2/H3 headings
-3. DataForSEO Volumes — get real volume/CPC/competition via search_volume API
+3. Volume Enrichment — Yandex Wordstat (RU) / DataForSEO (non-RU) via VolumeProvider
 4. LLM Clustering — organize REAL data into briefs (LLM only groups, doesn't invent)
 5. Save to DB
 
 Usage:
+    from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
+    provider = get_volume_provider(region="ru", settings=settings)
     planner = ClusterPlanner(
         anthropic_client=client,
         serper_api_key="...",
-        dataforseo_login="...",
-        dataforseo_password="...",
+        volume_provider=provider,
     )
     plan = await planner.plan("контент-маркетинг", region="ru", target_count=15)
 """
@@ -37,25 +38,22 @@ logger = logging.getLogger(__name__)
 class ClusterPlanner:
     """
     Generates a cluster plan: pillar article + N cluster articles from a broad topic.
-    Search-first: real data from Serper + DataForSEO, LLM only organizes.
+    Search-first: real data from Serper + VolumeProvider (Wordstat/Rush/DataForSEO), LLM only organizes.
     """
 
     def __init__(
         self,
         anthropic_client: anthropic.Anthropic,
         model: str = "claude-sonnet-4-20250514",
-        volume_provider=None,  # kept for backwards compat, not used
+        volume_provider=None,
         serper_api_key: str = "",
-        dataforseo_login: str = "",
-        dataforseo_password: str = "",
         proxy_url: str = "",
         proxy_secret: str = "",
     ):
         self.client = anthropic_client
         self.model = model
         self.serper_api_key = serper_api_key
-        self.dataforseo_login = dataforseo_login
-        self.dataforseo_password = dataforseo_password
+        self.volume_provider = volume_provider  # VolumeProvider instance (Wordstat/Rush/DataForSEO)
 
     async def plan(
         self,
@@ -82,8 +80,8 @@ class ClusterPlanner:
         competitor_headings = await self._analyze_competitors(search_data["top_urls"], region)
         logger.info(f"Step 2: extracted headings from {len(competitor_headings)} pages")
 
-        # Step 3: DataForSEO volumes for discovered keywords
-        kw_with_volumes = await self._enrich_volumes_dataforseo(
+        # Step 3: Volume enrichment via VolumeProvider (Wordstat for RU, DataForSEO for non-RU)
+        kw_with_volumes = await self._enrich_volumes(
             list(search_data["keywords"]), region,
         )
         logger.info(f"Step 3: got volumes for {sum(1 for v in kw_with_volumes if v['volume'] > 0)} keywords")
@@ -245,46 +243,40 @@ class ClusterPlanner:
 
         return competitor_headings
 
-    async def _enrich_volumes_dataforseo(
+    async def _enrich_volumes(
         self, keywords: list[str], region: str,
     ) -> list[dict]:
         """
-        Step 3: Get volumes via DataForSEO search_volume API.
-        Batches of 20, 1s pause between batches. KZ fallback for RU.
+        Step 3: Get volumes via VolumeProvider (Wordstat for RU, DataForSEO for non-RU).
+        Batches of 10 with 1.5s pause to respect Wordstat rate limits (10 req/sec).
         """
         kw_data = [{"keyword": kw, "volume": 0, "cpc": 0, "competition": 0} for kw in keywords]
 
-        if not self.dataforseo_login or not self.dataforseo_password:
+        if not self.volume_provider:
+            logger.warning("No volume_provider configured — returning zero volumes")
             return kw_data
 
+        language_code = "ru" if region.lower() in ["ru", "russia", "kz"] else "en"
+
         try:
-            from .writing_pipeline.data_sources.dataforseo import DataForSEO
-            client = DataForSEO(login=self.dataforseo_login, password=self.dataforseo_password)
-            location_code = client.get_safe_location_code(region)
-            language_code = "ru" if region.lower() in ["ru", "russia", "kz"] else "en"
-
-            # Batch in chunks of 20 with 1s pause
+            # Batch in chunks of 10 with pause to avoid rate limits
             volume_map = {}
-            for i in range(0, len(keywords), 20):
-                chunk = keywords[i:i + 20]
+            batch_size = 10
+            for i in range(0, len(keywords), batch_size):
+                chunk = keywords[i:i + batch_size]
                 try:
-                    result = await client.get_keyword_metrics(
-                        keywords=chunk,
-                        location_code=location_code,
-                        language_code=language_code,
-                    )
-                    if result.success:
-                        for km in result.keywords:
-                            volume_map[km.keyword.lower().strip()] = {
-                                "volume": km.search_volume,
-                                "cpc": km.cpc,
-                                "competition": km.competition,
-                            }
+                    results = await self.volume_provider.get_volumes(chunk, language_code=language_code)
+                    for vr in results:
+                        volume_map[vr.keyword.lower().strip()] = {
+                            "volume": vr.volume,
+                            "cpc": vr.cpc,
+                            "competition": vr.competition,
+                        }
                 except Exception as e:
-                    logger.warning(f"DataForSEO volume error for chunk {i}: {e}")
+                    logger.warning(f"Volume enrichment error for chunk {i}: {e}")
 
-                if i + 20 < len(keywords):
-                    await asyncio.sleep(1.0)
+                if i + batch_size < len(keywords):
+                    await asyncio.sleep(1.5)
 
             # Merge volumes into kw_data
             for item in kw_data:
@@ -293,8 +285,11 @@ class ClusterPlanner:
                 item["cpc"] = metrics.get("cpc", 0)
                 item["competition"] = metrics.get("competition", 0)
 
+            source = self.volume_provider.source_name
+            logger.info(f"Volume enrichment via {source}: {len(volume_map)} keywords processed")
+
         except Exception as e:
-            logger.error(f"DataForSEO enrichment failed: {e}")
+            logger.error(f"Volume enrichment failed: {e}")
 
         return kw_data
 
