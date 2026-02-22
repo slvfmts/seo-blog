@@ -1224,6 +1224,20 @@ async def list_articles(
     })
 
 
+ALL_STAGE_DEFS = [
+    ("intent", "Intent Analysis", "Определение интента и тональности"),
+    ("research", "Research", "Сбор фактов и источников"),
+    ("structure", "Structure", "Построение структуры статьи"),
+    ("drafting", "Drafting", "Написание черновика"),
+    ("editing", "Editing", "Редактирование и полировка"),
+    ("linking", "Linking", "Внутренняя перелинковка"),
+    ("seo_polish", "SEO Polish", "SEO-оптимизация"),
+    ("quality_gate", "Quality Gate", "Проверка качества"),
+    ("meta", "Meta", "Meta-теги и slug"),
+    ("formatting", "Formatting", "Обложка и форматирование"),
+]
+
+
 @router.get("/articles/{draft_id}", response_class=HTMLResponse)
 async def article_detail(request: Request, draft_id: UUID, db: Session = Depends(get_db)):
     """Show article (draft) details."""
@@ -1239,20 +1253,6 @@ async def article_detail(request: Request, draft_id: UUID, db: Session = Depends
         if brief and brief.cluster_id:
             cluster = db.query(models.Cluster).filter(models.Cluster.id == brief.cluster_id).first()
 
-    # Pipeline stages definition (all 10)
-    all_stages = [
-        ("intent", "Intent Analysis", "Определение интента и тональности"),
-        ("research", "Research", "Сбор фактов и источников"),
-        ("structure", "Structure", "Построение структуры статьи"),
-        ("drafting", "Drafting", "Написание черновика"),
-        ("editing", "Editing", "Редактирование и полировка"),
-        ("linking", "Linking", "Внутренняя перелинковка"),
-        ("seo_polish", "SEO Polish", "SEO-оптимизация"),
-        ("quality_gate", "Quality Gate", "Проверка качества"),
-        ("meta", "Meta", "Meta-теги и slug"),
-        ("formatting", "Formatting", "Обложка и форматирование"),
-    ]
-
     # Determine if pipeline is active (for auto-refresh)
     is_paused = draft.pipeline_status and draft.pipeline_status.startswith("paused")
     is_running = (
@@ -1264,10 +1264,81 @@ async def article_detail(request: Request, draft_id: UUID, db: Session = Depends
         "draft": draft,
         "brief": brief,
         "cluster": cluster,
-        "all_stages": all_stages,
+        "all_stages": ALL_STAGE_DEFS,
         "is_running": is_running,
         "is_paused": is_paused,
     })
+
+
+@router.get("/articles/{draft_id}/status-fragment", response_class=HTMLResponse)
+async def article_status_fragment(draft_id: UUID, db: Session = Depends(get_db)):
+    """
+    HTMX fragment: returns pipeline progress HTML.
+    When pipeline finishes/pauses, returns HX-Redirect header to force full page reload.
+    """
+    draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
+    if not draft:
+        return HTMLResponse("")
+
+    is_paused = draft.pipeline_status and draft.pipeline_status.startswith("paused")
+    is_running = (
+        draft.pipeline_status == "running" or draft.status in ("generating", "pipeline_running")
+    ) and not is_paused
+
+    # If no longer running — tell HTMX to do a full page reload
+    if not is_running:
+        response = HTMLResponse("")
+        response.headers["HX-Redirect"] = f"/ui/articles/{draft_id}"
+        return response
+
+    # Build stage progress HTML
+    stages_html = []
+    for key, name, desc in ALL_STAGE_DEFS:
+        stage_status = (draft.pipeline_stages or {}).get(key, "pending")
+        if stage_status == "completed":
+            icon = '<span class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-green-100"><svg class="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg></span>'
+            label = f'<span class="text-sm text-gray-600">{name}</span>'
+        elif stage_status == "running":
+            icon = '<span class="flex-shrink-0 w-5 h-5 flex items-center justify-center"><svg class="animate-spin w-4 h-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg></span>'
+            label = f'<span class="text-sm font-medium text-blue-600">{name} — {desc}</span>'
+        elif stage_status == "failed":
+            icon = '<span class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-red-100"><svg class="w-3 h-3 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></span>'
+            label = f'<span class="text-sm text-red-600">{name}</span>'
+        else:
+            icon = '<span class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-gray-100"><span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span></span>'
+            label = f'<span class="text-sm text-gray-400">{name}</span>'
+        stages_html.append(f'<div class="flex items-center space-x-3">{icon}{label}</div>')
+
+    # Pipeline progress bar
+    bar_items = []
+    for key, name, desc in ALL_STAGE_DEFS:
+        stage_status = (draft.pipeline_stages or {}).get(key, "pending")
+        if stage_status == "completed":
+            css = "bg-green-500"
+        elif stage_status == "running":
+            css = "bg-blue-500 animate-pulse"
+        elif stage_status == "failed":
+            css = "bg-red-500"
+        else:
+            css = "bg-gray-200"
+        bar_items.append(f'<div class="flex-1 group relative"><div class="h-2 rounded-full {css}"></div>'
+                        f'<div class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block z-10">'
+                        f'<div class="bg-gray-900 text-white text-xs rounded py-1 px-2 whitespace-nowrap">{name}: {stage_status}</div></div></div>')
+
+    progress_bar = f'''<div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+        <h3 class="text-xs font-medium text-gray-500 uppercase mb-3">Pipeline</h3>
+        <div class="flex items-center space-x-1">{"".join(bar_items)}</div>
+        <div class="flex justify-between mt-1"><span class="text-xs text-gray-400">Intent</span><span class="text-xs text-gray-400">Formatting</span></div>
+    </div>'''
+
+    html = f'''<div id="pipeline-status" hx-get="/ui/articles/{draft_id}/status-fragment" hx-trigger="every 5s" hx-swap="outerHTML">
+    {progress_bar}
+    <div class="px-6 py-8">
+        <div class="space-y-2 mb-6">{"".join(stages_html)}</div>
+        <div class="text-center text-sm text-gray-500">Обновление каждые 5 сек...</div>
+    </div>
+</div>'''
+    return HTMLResponse(html)
 
 
 # Legacy redirects

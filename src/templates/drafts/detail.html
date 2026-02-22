@@ -58,8 +58,73 @@
                 </div>
             </div>
 
-            <!-- Pipeline Progress (10 stages) -->
-            {% if draft.pipeline_stages %}
+            <!-- Pipeline Progress + Generating State (HTMX polling) -->
+            {% if is_running %}
+            <div id="pipeline-status" hx-get="/ui/articles/{{ draft.id }}/status-fragment" hx-trigger="every 5s" hx-swap="outerHTML">
+                {% if draft.pipeline_stages %}
+                <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                    <h3 class="text-xs font-medium text-gray-500 uppercase mb-3">Pipeline</h3>
+                    <div class="flex items-center space-x-1">
+                        {% for key, name, desc in all_stages %}
+                        {% set stage_status = draft.pipeline_stages.get(key, 'pending') if draft.pipeline_stages else 'pending' %}
+                        <div class="flex-1 group relative">
+                            <div class="h-2 rounded-full {% if stage_status == 'completed' %}bg-green-500{% elif stage_status == 'running' %}bg-blue-500 animate-pulse{% elif stage_status == 'failed' %}bg-red-500{% elif stage_status == 'paused' %}bg-amber-500{% else %}bg-gray-200{% endif %}"></div>
+                            <div class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block z-10">
+                                <div class="bg-gray-900 text-white text-xs rounded py-1 px-2 whitespace-nowrap">
+                                    {{ name }}: {{ stage_status }}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="flex justify-between mt-1">
+                        <span class="text-xs text-gray-400">Intent</span>
+                        <span class="text-xs text-gray-400">Formatting</span>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="px-6 py-8">
+                    <div class="space-y-2 mb-6">
+                        {% for key, name, desc in all_stages %}
+                        {% set stage_status = draft.pipeline_stages.get(key, 'pending') if draft.pipeline_stages else 'pending' %}
+                        <div class="flex items-center space-x-3">
+                            {% if stage_status == 'completed' %}
+                            <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-green-100">
+                                <svg class="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                                </svg>
+                            </span>
+                            <span class="text-sm text-gray-600">{{ name }}</span>
+                            {% elif stage_status == 'running' %}
+                            <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+                                <svg class="animate-spin w-4 h-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                </svg>
+                            </span>
+                            <span class="text-sm font-medium text-blue-600">{{ name }} — {{ desc }}</span>
+                            {% elif stage_status == 'failed' %}
+                            <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-red-100">
+                                <svg class="w-3 h-3 text-red-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                                </svg>
+                            </span>
+                            <span class="text-sm text-red-600">{{ name }}</span>
+                            {% else %}
+                            <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-gray-100">
+                                <span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
+                            </span>
+                            <span class="text-sm text-gray-400">{{ name }}</span>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="text-center text-sm text-gray-500">
+                        Обновление каждые 5 сек...
+                    </div>
+                </div>
+            </div>
+            {% elif draft.pipeline_stages and not is_paused %}
             <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
                 <h3 class="text-xs font-medium text-gray-500 uppercase mb-3">Pipeline</h3>
                 <div class="flex items-center space-x-1">
@@ -82,50 +147,7 @@
             </div>
             {% endif %}
 
-            <!-- Content or Generating State -->
-            {% if is_running %}
-            <div class="px-6 py-8">
-                <!-- Detailed stage list -->
-                <div class="space-y-2 mb-6">
-                    {% for key, name, desc in all_stages %}
-                    {% set stage_status = draft.pipeline_stages.get(key, 'pending') if draft.pipeline_stages else 'pending' %}
-                    <div class="flex items-center space-x-3">
-                        {% if stage_status == 'completed' %}
-                        <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-green-100">
-                            <svg class="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                            </svg>
-                        </span>
-                        <span class="text-sm text-gray-600">{{ name }}</span>
-                        {% elif stage_status == 'running' %}
-                        <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center">
-                            <svg class="animate-spin w-4 h-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                            </svg>
-                        </span>
-                        <span class="text-sm font-medium text-blue-600">{{ name }} — {{ desc }}</span>
-                        {% elif stage_status == 'failed' %}
-                        <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-red-100">
-                            <svg class="w-3 h-3 text-red-600" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
-                            </svg>
-                        </span>
-                        <span class="text-sm text-red-600">{{ name }}</span>
-                        {% else %}
-                        <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-gray-100">
-                            <span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
-                        </span>
-                        <span class="text-sm text-gray-400">{{ name }}</span>
-                        {% endif %}
-                    </div>
-                    {% endfor %}
-                </div>
-                <div class="text-center text-sm text-gray-500">
-                    Страница обновится автоматически...
-                </div>
-            </div>
-            {% elif draft.content_md %}
+            {% if draft.content_md %}
             <div class="px-6 py-4">
                 <div class="prose max-w-none">
                     {{ draft.content_md | markdown | safe }}
@@ -572,11 +594,6 @@
 
 {% block scripts %}
 <script>
-    {% if is_running %}
-    // Auto-refresh while generating (stops when paused/completed)
-    setTimeout(function() { location.reload(); }, 6000);
-    {% endif %}
-
     {% if draft.status in ['generated', 'validated', 'validation_failed', 'pipeline_completed'] %}
     const validateForm = document.getElementById('validate-form');
     if (validateForm) {
