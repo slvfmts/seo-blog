@@ -2012,7 +2012,7 @@ async def article_enrich_from_kb(
 
 # ============ Pipeline Pages ============
 
-def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, knowledge_base_docs: list = None):
+def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, knowledge_base_docs: list = None, factual_mode: str = "default"):
     """
     Run writing pipeline synchronously.
     Called from background task.
@@ -2080,6 +2080,8 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
             config = {}
             if knowledge_base_docs:
                 config["knowledge_base_docs"] = knowledge_base_docs
+            if factual_mode and factual_mode != "default":
+                config["factual_mode"] = factual_mode
             result = await runner.run(
                 topic=topic,
                 region=region,
@@ -2158,10 +2160,12 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
 
 
 @router.get("/pipeline/new", response_class=HTMLResponse)
-async def new_pipeline_form(request: Request):
+async def new_pipeline_form(request: Request, db: Session = Depends(get_db)):
     """Show form to start new article via pipeline."""
+    folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
     return templates.TemplateResponse("pipeline/new.html", {
         "request": request,
+        "folders": folders,
     })
 
 
@@ -2172,21 +2176,44 @@ async def create_pipeline(
     topic: str = Form(...),
     region: str = Form("ru"),
     depth: str = Form("standard"),
+    factual_mode: str = Form("default"),
     db: Session = Depends(get_db),
 ):
     """Start a new article generation via Writing Pipeline."""
     settings = get_settings()
 
+    # Extract folder_ids from form (checkboxes send multiple values)
+    form = await request.form()
+    folder_ids = form.getlist("folder_ids")
+
     if not settings.anthropic_api_key:
+        folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
         return templates.TemplateResponse("pipeline/new.html", {
             "request": request,
             "error": "ANTHROPIC_API_KEY not configured",
             "topic": topic,
             "region": region,
             "depth": depth,
+            "folders": folders,
         })
 
     try:
+        # Load KB docs from selected folders
+        kb_docs = []
+        if folder_ids:
+            selected_folders = db.query(models.KnowledgeFolder).filter(
+                models.KnowledgeFolder.id.in_(folder_ids),
+            ).all()
+            for folder in selected_folders:
+                for doc in folder.documents:
+                    if doc.content_text:
+                        kb_docs.append({
+                            "id": str(doc.id),
+                            "title": doc.original_filename,
+                            "content_text": doc.content_text,
+                            "word_count": doc.word_count or 0,
+                        })
+
         # Generate output directory
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_topic = "".join(c if c.isalnum() else "_" for c in topic[:30])
@@ -2224,6 +2251,8 @@ async def create_pipeline(
             topic,
             region,
             output_dir,
+            knowledge_base_docs=kb_docs if kb_docs else None,
+            factual_mode=factual_mode,
         )
 
         return RedirectResponse(
@@ -2232,12 +2261,14 @@ async def create_pipeline(
         )
 
     except Exception as e:
+        folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
         return templates.TemplateResponse("pipeline/new.html", {
             "request": request,
             "error": str(e),
             "topic": topic,
             "region": region,
             "depth": depth,
+            "folders": folders,
         })
 
 
@@ -2515,9 +2546,11 @@ async def cluster_list(request: Request, db: Session = Depends(get_db)):
 async def cluster_plan_form(request: Request, db: Session = Depends(get_db)):
     """Show cluster planning form."""
     sites = db.query(models.Site).order_by(models.Site.name).all()
+    folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
     return templates.TemplateResponse("clusters/plan.html", {
         "request": request,
         "sites": sites,
+        "folders": folders,
     })
 
 
@@ -2533,6 +2566,10 @@ async def cluster_plan_submit(
 ):
     """Generate a cluster plan and save to DB. site_id is optional."""
     settings = get_settings()
+
+    # Extract folder_ids from form (checkboxes send multiple values)
+    form = await request.form()
+    folder_ids = form.getlist("folder_ids")
 
     if not settings.anthropic_api_key:
         return RedirectResponse(
@@ -2568,9 +2605,23 @@ async def cluster_plan_submit(
             volume_provider=volume_provider,
         )
 
-        # Load KB docs from site's knowledge folders (if site_id provided)
+        # Load KB docs: from selected folders first, fallback to site's folders
         kb_docs = []
-        if resolved_site_id:
+        selected_folders = []
+        if folder_ids:
+            selected_folders = db.query(models.KnowledgeFolder).filter(
+                models.KnowledgeFolder.id.in_(folder_ids),
+            ).all()
+            for folder in selected_folders:
+                for doc in folder.documents:
+                    if doc.content_text:
+                        kb_docs.append({
+                            "id": str(doc.id),
+                            "title": doc.original_filename,
+                            "content_text": doc.content_text,
+                            "word_count": doc.word_count or 0,
+                        })
+        elif resolved_site_id:
             site = db.query(models.Site).filter(models.Site.id == resolved_site_id).first()
             if site:
                 for folder in site.knowledge_folders:
@@ -2592,6 +2643,13 @@ async def cluster_plan_submit(
 
         # Save to DB (site_id can be None)
         cluster_id = await planner.save_to_db(plan, resolved_site_id, db, factual_mode=factual_mode, region=region)
+
+        # Attach selected KB folders to cluster
+        if selected_folders:
+            cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
+            if cluster:
+                cluster.knowledge_folders = selected_folders
+                db.commit()
 
         return RedirectResponse(
             url=f"/ui/clusters/{cluster_id}?success=Кластер создан: 1 pillar + {len(plan.cluster_articles)} cluster статей",

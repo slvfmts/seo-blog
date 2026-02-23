@@ -55,6 +55,25 @@
         </div>
 
         <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Папки фактуры (KB)</label>
+            <p class="text-xs text-gray-500 mb-2">Выберите папки с документами для использования при генерации. Если ничего не выбрано — берутся папки привязанные к теме.</p>
+            {% if folders and folders|length > 0 %}
+            <div class="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded-md p-3">
+                {% for folder in folders %}
+                <label class="flex items-center space-x-2">
+                    <input type="checkbox" name="folder_ids" value="{{ folder.id }}"
+                        class="h-4 w-4 text-indigo-600 border-gray-300 rounded">
+                    <span class="text-sm text-gray-700">{{ folder.name }}</span>
+                    <span class="text-xs text-gray-400">({{ folder.documents|length }} док.)</span>
+                </label>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-xs text-gray-400 italic">Нет папок в базе знаний</p>
+            {% endif %}
+        </div>
+
+        <div>
             <label class="block text-sm font-medium text-gray-700 mb-2">Режим фактуры</label>
             <div class="space-y-2">
                 <label class="flex items-center space-x-3">
