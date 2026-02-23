@@ -48,9 +48,9 @@
                         </div>
                     </div>
                     {% elif current_blog %}
-                    <span class="ml-3 px-3 py-1.5 text-sm font-medium text-gray-500 bg-gray-50 rounded-md">
+                    <a href="/ui/blogs" class="ml-3 px-3 py-1.5 text-sm font-medium text-gray-500 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors">
                         {{ current_blog.name }}
-                    </span>
+                    </a>
                     {% endif %}
                     <div class="ml-10 flex items-baseline space-x-4">
                         <a href="/ui/topics" class="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium">
