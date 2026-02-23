@@ -2421,10 +2421,29 @@ async def create_pipeline(
         safe_topic = "".join(c if c.isalnum() else "_" for c in topic[:30])
         output_dir = f"/tmp/pipeline_output/{timestamp}_{safe_topic}"
 
+        # Resolve site for draft — use first site of current blog, create default if needed
+        site_id_for_draft = None
+        if current_blog:
+            first_site = db.query(models.Site).filter(
+                models.Site.blog_id == current_blog.id
+            ).first()
+            if not first_site:
+                first_site = models.Site(
+                    blog_id=current_blog.id,
+                    name=current_blog.name,
+                    domain=current_blog.domain,
+                    status="active",
+                )
+                db.add(first_site)
+                db.commit()
+                db.refresh(first_site)
+            site_id_for_draft = first_site.id
+
         # Create draft
         draft = models.Draft(
             title=topic,  # Will be updated after pipeline
             topic=topic,
+            site_id=site_id_for_draft,
             status="generating",
             pipeline_status="pending",
             pipeline_started_at=datetime.utcnow(),
