@@ -44,17 +44,16 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     print(f"Starting SEO Blog API (debug={settings.debug})")
 
-    # Start monitoring scheduler if DataForSEO credentials are configured
+    # Start monitoring scheduler if Serper API key is configured
     scheduler = None
-    if settings.dataforseo_login and settings.dataforseo_password:
+    if settings.serper_api_key:
         from src.db.session import SessionLocal
         from src.services.monitoring.position_tracker import PositionTracker
         from src.services.monitoring.scheduler import MonitoringScheduler
 
         tracker = PositionTracker(
             db_session_factory=SessionLocal,
-            dataforseo_login=settings.dataforseo_login,
-            dataforseo_password=settings.dataforseo_password,
+            serper_api_key=settings.serper_api_key,
         )
         scheduler = MonitoringScheduler(
             position_tracker=tracker,
@@ -64,7 +63,7 @@ async def lifespan(app: FastAPI):
         await scheduler.start()
         print("Monitoring scheduler started (daily at 06:00 UTC)")
     else:
-        print("Monitoring scheduler skipped (DataForSEO credentials not configured)")
+        print("Monitoring scheduler skipped (SERPER_API_KEY not configured)")
 
     yield
 

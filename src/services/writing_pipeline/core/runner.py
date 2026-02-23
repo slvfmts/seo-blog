@@ -47,8 +47,6 @@ class PipelineRunner:
         anthropic_api_key: str,
         serper_api_key: Optional[str] = None,
         jina_api_key: Optional[str] = None,
-        dataforseo_login: Optional[str] = None,
-        dataforseo_password: Optional[str] = None,
         model: str = "claude-sonnet-4-20250514",
         proxy_url: Optional[str] = None,
         proxy_secret: Optional[str] = None,
@@ -66,8 +64,6 @@ class PipelineRunner:
             anthropic_api_key: Anthropic API key
             serper_api_key: Optional Serper.dev API key for search
             jina_api_key: Optional Jina Reader API key for higher limits
-            dataforseo_login: Optional DataForSEO API login for keyword metrics
-            dataforseo_password: Optional DataForSEO API password
             model: Claude model to use
             proxy_url: Optional proxy URL for API calls
             proxy_secret: Optional proxy secret
@@ -88,8 +84,6 @@ class PipelineRunner:
         self.model = model
         self.serper_api_key = serper_api_key
         self.jina_api_key = jina_api_key
-        self.dataforseo_login = dataforseo_login
-        self.dataforseo_password = dataforseo_password
         self.ghost_url = ghost_url
         self.ghost_admin_key = ghost_admin_key
         self.database_url = database_url
@@ -115,8 +109,6 @@ class PipelineRunner:
                 model=self.model,
                 serper_api_key=self.serper_api_key,
                 jina_api_key=self.jina_api_key,
-                dataforseo_login=self.dataforseo_login,
-                dataforseo_password=self.dataforseo_password,
                 volume_provider=self._init_volume_provider(),
                 residential_proxy_url=self.residential_proxy_url,
             ),
@@ -140,17 +132,17 @@ class PipelineRunner:
                 pass
 
             s = _ProviderSettings()
-            s.dataforseo_login = self.dataforseo_login or ""
-            s.dataforseo_password = self.dataforseo_password or ""
 
-            # Try to load from real settings (for Yandex/Rush keys)
+            # Load Yandex/Rush keys from real settings
             try:
                 from ....config.settings import get_settings
                 real = get_settings()
                 s.yandex_wordstat_api_key = real.yandex_wordstat_api_key
+                s.yandex_cloud_folder_id = real.yandex_cloud_folder_id
                 s.rush_analytics_api_key = real.rush_analytics_api_key
             except Exception:
                 s.yandex_wordstat_api_key = ""
+                s.yandex_cloud_folder_id = ""
                 s.rush_analytics_api_key = ""
 
             # Default to "ru" — actual region is applied per-run in research stage

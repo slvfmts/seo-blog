@@ -6,7 +6,7 @@ This is a multi-step stage:
 2. Search Runner: Executes searches (Serper.dev)
 3. Content Fetcher: Fetches full page content for top results (Jina Reader)
 4. PAA Expansion: Generates additional queries from PAA questions
-5. Keyword Metrics: Fetches search volume and difficulty (DataForSEO)
+5. Keyword Metrics: Fetches search volume and difficulty (Wordstat / Rush)
 6. Fact Packer: Processes results into structured research pack
 """
 
@@ -30,7 +30,7 @@ class ResearchStage(WritingStage):
     Enhanced with:
     - Full page content fetching via Jina Reader
     - PAA (People Also Ask) query expansion
-    - Keyword metrics via pluggable VolumeProvider (Wordstat / Rush / DataForSEO)
+    - Keyword metrics via pluggable VolumeProvider (Wordstat / Rush)
     - Trafilatura fallback for content extraction
     """
 
@@ -39,8 +39,6 @@ class ResearchStage(WritingStage):
         *args,
         serper_api_key: Optional[str] = None,
         jina_api_key: Optional[str] = None,
-        dataforseo_login: Optional[str] = None,
-        dataforseo_password: Optional[str] = None,
         volume_provider=None,
         use_playwright: bool = True,
         residential_proxy_url: Optional[str] = None,
@@ -49,8 +47,6 @@ class ResearchStage(WritingStage):
         super().__init__(*args, **kwargs)
         self.serper_api_key = serper_api_key
         self.jina_api_key = jina_api_key
-        self.dataforseo_login = dataforseo_login
-        self.dataforseo_password = dataforseo_password
         self.volume_provider = volume_provider  # VolumeProvider instance (optional)
         self.use_playwright = use_playwright
         self.residential_proxy_url = residential_proxy_url or ""
@@ -58,7 +54,6 @@ class ResearchStage(WritingStage):
         # Lazy-loaded clients
         self._jina_reader = None
         self._trafilatura = None
-        self._dataforseo = None
         self._playwright_browser = None
         self._serper_scraper = None
         self._trafilatura_proxied = None
@@ -84,16 +79,6 @@ class ResearchStage(WritingStage):
             except Exception as e:
                 logger.warning(f"Trafilatura not available: {e}")
         return self._trafilatura
-
-    def _get_dataforseo(self):
-        """Lazy-load DataForSEO client."""
-        if self._dataforseo is None and self.dataforseo_login and self.dataforseo_password:
-            from ..data_sources.dataforseo import DataForSEO
-            self._dataforseo = DataForSEO(
-                login=self.dataforseo_login,
-                password=self.dataforseo_password,
-            )
-        return self._dataforseo
 
     def _get_playwright_browser(self, proxy_url: str = None):
         """Lazy-load Playwright browser."""
@@ -231,8 +216,8 @@ class ResearchStage(WritingStage):
                 with open(output_path, "w", encoding="utf-8") as f:
                     json.dump(competitor_pages, f, ensure_ascii=False, indent=2)
 
-            # Step 5: Fetch keyword metrics (if DataForSEO configured)
-            if self._get_dataforseo():
+            # Step 5: Fetch keyword metrics (if VolumeProvider configured)
+            if self.volume_provider:
                 keyword_metrics = await self._fetch_keyword_metrics(context)
                 context.keyword_metrics = keyword_metrics
 
@@ -617,9 +602,7 @@ class ResearchStage(WritingStage):
 
     async def _fetch_keyword_metrics(self, context: WritingContext) -> KeywordMetricsResult:
         """
-        Fetch keyword metrics via VolumeProvider (Wordstat/Rush/DataForSEO).
-
-        Uses pluggable provider if set, otherwise falls back to direct DataForSEO.
+        Fetch keyword metrics via VolumeProvider (Wordstat / Rush / Composite).
 
         Args:
             context: Pipeline context with queries
@@ -642,57 +625,26 @@ class ResearchStage(WritingStage):
         location_name = context.region.lower()
         lang = "ru" if location_name in ["ru", "russia", "kz"] else "en"
 
-        # Try pluggable VolumeProvider first
-        if self.volume_provider:
-            try:
-                from ..data_sources.volume_provider import VolumeResult
-                results = await self.volume_provider.get_volumes(keywords, language_code=lang)
-                source = self.volume_provider.source_name
-                metrics = {}
-                for vr in results:
-                    metrics[vr.keyword.lower()] = KeywordMetricsData(
-                        keyword=vr.keyword,
-                        search_volume=vr.volume,
-                        difficulty=vr.difficulty,
-                        cpc=vr.cpc,
-                        competition=vr.competition,
-                        competition_level=vr.competition_level,
-                    )
-                logger.info(f"Fetched {len(metrics)} keyword metrics via {source}")
-                return KeywordMetricsResult(metrics=metrics, source=source)
-            except Exception as e:
-                logger.warning(f"VolumeProvider ({self.volume_provider.source_name}) error: {e}, falling back to DataForSEO")
-
-        # Fallback: direct DataForSEO
-        dataforseo = self._get_dataforseo()
-        if not dataforseo:
+        if not self.volume_provider:
             return KeywordMetricsResult(metrics={}, source="none")
 
         try:
-            result = await dataforseo.get_keyword_metrics(
-                keywords=keywords,
-                location_name=location_name,
-                language_code=lang,
-            )
-
-            if result.success:
-                metrics = {}
-                for kw in result.keywords:
-                    metrics[kw.keyword.lower()] = KeywordMetricsData(
-                        keyword=kw.keyword,
-                        search_volume=kw.search_volume,
-                        difficulty=kw.difficulty,
-                        cpc=kw.cpc,
-                        competition=kw.competition,
-                        competition_level=kw.competition_level,
-                    )
-                return KeywordMetricsResult(metrics=metrics, source="dataforseo")
-            else:
-                logger.warning(f"DataForSEO error: {result.error}")
-                return KeywordMetricsResult(metrics={}, source="error")
-
+            results = await self.volume_provider.get_volumes(keywords, language_code=lang)
+            source = self.volume_provider.source_name
+            metrics = {}
+            for vr in results:
+                metrics[vr.keyword.lower()] = KeywordMetricsData(
+                    keyword=vr.keyword,
+                    search_volume=vr.volume,
+                    difficulty=vr.difficulty,
+                    cpc=vr.cpc,
+                    competition=vr.competition,
+                    competition_level=vr.competition_level,
+                )
+            logger.info(f"Fetched {len(metrics)} keyword metrics via {source}")
+            return KeywordMetricsResult(metrics=metrics, source=source)
         except Exception as e:
-            logger.error(f"Failed to fetch keyword metrics: {e}")
+            logger.error(f"VolumeProvider ({self.volume_provider.source_name}) error: {e}")
             return KeywordMetricsResult(metrics={}, source="error")
 
     def _create_minimal_search_results(self, context: WritingContext) -> List[Dict[str, Any]]:

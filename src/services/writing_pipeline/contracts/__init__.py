@@ -15,7 +15,7 @@ from datetime import datetime
 
 @dataclass
 class KeywordMetricsData:
-    """Keyword metrics from DataForSEO or similar service."""
+    """Keyword metrics from VolumeProvider (Wordstat, Rush, etc.)."""
     keyword: str
     search_volume: int
     difficulty: float  # 0-100
@@ -28,7 +28,7 @@ class KeywordMetricsData:
 class KeywordMetricsResult:
     """Result of keyword metrics fetch for research stage."""
     metrics: Dict[str, KeywordMetricsData]  # keyword -> metrics
-    source: str  # "dataforseo", "estimated", etc.
+    source: str  # "wordstat", "rush", "wordstat+rush", "none", etc.
 
     def get_volume(self, keyword: str) -> int:
         """Get search volume for keyword."""

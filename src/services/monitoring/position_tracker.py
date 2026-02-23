@@ -1,7 +1,7 @@
 """
 Position Tracker — orchestrates SERP checks, saves rankings, runs decay detection.
 
-Connects DataForSEOSerpClient + DB + DecayDetector into a single workflow.
+Connects SerperSerpClient + DB + DecayDetector into a single workflow.
 """
 
 import logging
@@ -10,7 +10,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from src.db import models
-from src.services.monitoring.dataforseo_serp import DataForSEOSerpClient, LOCATIONS
+from src.services.monitoring.serper_serp import SerperSerpClient, REGION_MAP
 from src.services.monitoring.decay_detector import DecayDetector, DecaySignal
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ class PositionTracker:
     Orchestrates daily position checks and decay detection.
 
     Usage:
-        tracker = PositionTracker(db_session_factory, "login", "password")
+        tracker = PositionTracker(db_session_factory, "serper-api-key")
         summary = await tracker.run_daily_check(site_id)
         signals = await tracker.detect_decay(site_id)
     """
@@ -29,14 +29,10 @@ class PositionTracker:
     def __init__(
         self,
         db_session_factory,
-        dataforseo_login: str,
-        dataforseo_password: str,
+        serper_api_key: str,
     ):
         self.db_session_factory = db_session_factory
-        self.serp_client = DataForSEOSerpClient(
-            login=dataforseo_login,
-            password=dataforseo_password,
-        )
+        self.serp_client = SerperSerpClient(api_key=serper_api_key)
         self.decay_detector = DecayDetector()
 
     async def run_daily_check(self, site_id) -> dict:
@@ -54,8 +50,7 @@ class PositionTracker:
                 return {"error": "Site not found or no domain configured"}
 
             domain = site.domain
-            location_code = LOCATIONS.get(site.country.lower(), 2398) if site.country else 2398
-            language_code = site.language or "ru"
+            region = (site.country or "ru").lower()
 
             # 2. Get keywords to check (targeted or achieved)
             keywords = db.query(models.Keyword).filter(
@@ -84,8 +79,7 @@ class PositionTracker:
             results = await self.serp_client.check_positions_batch(
                 keywords=keyword_texts,
                 domain=domain,
-                location_code=location_code,
-                language_code=language_code,
+                region=region,
                 depth=30,
             )
 
@@ -114,7 +108,7 @@ class PositionTracker:
                     position=result.position,
                     url=result.url,
                     serp_features=result.serp_features,
-                    source="dataforseo",
+                    source="serper",
                 )
                 db.add(ranking)
 

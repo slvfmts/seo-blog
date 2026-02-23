@@ -2,9 +2,9 @@
 VolumeProvider — abstract interface for keyword volume data sources.
 
 Implementations:
-- DataForSEOProvider: wraps existing DataForSEO client (non-RU fallback)
 - YandexWordstatProvider: Yandex Cloud Search API (primary RU source)
 - RushAnalyticsProvider: Rush Analytics API (alternative RU source)
+- CompositeVolumeProvider: Yandex + Rush in parallel (preferred)
 
 Usage:
     provider = get_volume_provider(region="ru", settings=settings)
@@ -23,13 +23,15 @@ logger = logging.getLogger(__name__)
 class VolumeResult:
     """Volume data for a single keyword."""
     keyword: str
-    volume: int           # monthly search volume
-    source: str           # "wordstat" | "rush" | "dataforseo"
+    volume: int           # monthly search volume (max of available sources)
+    source: str           # "wordstat" | "rush" | "wordstat+rush" | "none"
     difficulty: float = 0.0
     cpc: float = 0.0
     competition: float = 0.0
     competition_level: str = "LOW"
     trend: Optional[List[int]] = None  # monthly volumes, last 12 months
+    yandex_volume: Optional[int] = None  # Yandex Wordstat broad-match
+    google_volume: Optional[int] = None  # Rush Analytics / Google volume
 
 
 class VolumeProvider(ABC):
@@ -53,39 +55,45 @@ def get_volume_provider(region: str, settings) -> VolumeProvider:
     """
     Pick the right volume provider based on region and available credentials.
 
-    Priority for RU/KZ:
-      1. Yandex Wordstat (if YANDEX_WORDSTAT_API_KEY set)
-      2. Rush Analytics (if RUSH_ANALYTICS_API_KEY set)
-      3. DataForSEO (fallback with KZ location)
+    RU/KZ: CompositeVolumeProvider(Wordstat + Rush) if both available,
+           single provider if only one, NullProvider if none.
 
-    For all other regions:
-      1. DataForSEO
+    Non-RU: NullProvider (no volume source configured for non-RU).
     """
     is_ru = region.lower() in ("ru", "russia", "kz", "kazakhstan")
 
     if is_ru:
-        # Try Yandex Wordstat first
         yandex_key = getattr(settings, "yandex_wordstat_api_key", "")
+        rush_key = getattr(settings, "rush_analytics_api_key", "")
+        folder_id = getattr(settings, "yandex_cloud_folder_id", "")
+
+        wordstat_provider = None
+        rush_provider = None
+
         if yandex_key:
             from .wordstat import YandexWordstatProvider
-            folder_id = getattr(settings, "yandex_cloud_folder_id", "")
-            logger.info("Using YandexWordstatProvider for RU region")
-            return YandexWordstatProvider(api_key=yandex_key, folder_id=folder_id)
+            wordstat_provider = YandexWordstatProvider(api_key=yandex_key, folder_id=folder_id)
 
-        # Try Rush Analytics
-        rush_key = getattr(settings, "rush_analytics_api_key", "")
         if rush_key:
             from .rush_provider import RushAnalyticsProvider
-            logger.info("Using RushAnalyticsProvider for RU region")
-            return RushAnalyticsProvider(api_key=rush_key)
+            rush_provider = RushAnalyticsProvider(api_key=rush_key)
 
-    # Default: DataForSEO
-    login = getattr(settings, "dataforseo_login", "")
-    password = getattr(settings, "dataforseo_password", "")
-    if login and password:
-        from .dataforseo import DataForSEOProvider
-        logger.info(f"Using DataForSEOProvider for region={region}")
-        return DataForSEOProvider(login=login, password=password, region=region)
+        # Both available → composite
+        if wordstat_provider and rush_provider:
+            from .composite_provider import CompositeVolumeProvider
+            logger.info("Using CompositeVolumeProvider (wordstat+rush) for RU region")
+            return CompositeVolumeProvider(
+                wordstat_provider=wordstat_provider,
+                rush_provider=rush_provider,
+            )
+
+        # Only one available → use it directly
+        if wordstat_provider:
+            logger.info("Using YandexWordstatProvider for RU region")
+            return wordstat_provider
+        if rush_provider:
+            logger.info("Using RushAnalyticsProvider for RU region")
+            return rush_provider
 
     # No provider available
     logger.warning("No volume provider available — returning NullProvider")

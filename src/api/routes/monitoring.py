@@ -81,20 +81,18 @@ async def trigger_check(
     """Manually trigger position check for a site."""
     settings = get_settings()
 
-    if not settings.dataforseo_login or not settings.dataforseo_password:
-        raise HTTPException(status_code=400, detail="DataForSEO credentials not configured")
+    if not settings.serper_api_key:
+        raise HTTPException(status_code=400, detail="SERPER_API_KEY not configured")
 
     site = db.query(models.Site).filter(models.Site.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
 
     from src.services.monitoring.position_tracker import PositionTracker
-    import asyncio
 
     tracker = PositionTracker(
         db_session_factory=SessionLocal,
-        dataforseo_login=settings.dataforseo_login,
-        dataforseo_password=settings.dataforseo_password,
+        serper_api_key=settings.serper_api_key,
     )
 
     summary = await tracker.run_daily_check(site_id)

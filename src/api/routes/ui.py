@@ -356,7 +356,7 @@ async def fetch_keyword_volume(
     topic_id: UUID,
     db: Session = Depends(get_db),
 ):
-    """Fetch search volume via best available provider (Wordstat → Rush → DataForSEO)."""
+    """Fetch search volume via best available provider (Wordstat + Rush)."""
     settings = get_settings()
 
     topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
@@ -381,7 +381,7 @@ async def fetch_keyword_volume(
 
         if provider.source_name == "none":
             return RedirectResponse(
-                url=f"/ui/topics/{topic_id}?error=No volume provider configured (set YANDEX_WORDSTAT_API_KEY, RUSH_ANALYTICS_API_KEY, or DATAFORSEO_LOGIN)",
+                url=f"/ui/topics/{topic_id}?error=No volume provider configured (set YANDEX_WORDSTAT_API_KEY or RUSH_ANALYTICS_API_KEY)",
                 status_code=303,
             )
 
@@ -422,14 +422,8 @@ async def expand_keywords(
     topic_id: UUID,
     db: Session = Depends(get_db),
 ):
-    """Expand seed keywords using DataForSEO suggestions + related keywords."""
+    """Expand seed keywords using Serper + VolumeProvider suggestions."""
     settings = get_settings()
-
-    if not settings.dataforseo_login or not settings.dataforseo_password:
-        return RedirectResponse(
-            url=f"/ui/topics/{topic_id}?error=DataForSEO credentials not configured (DATAFORSEO_LOGIN, DATAFORSEO_PASSWORD)",
-            status_code=303,
-        )
 
     topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
     if not topic:
@@ -452,7 +446,6 @@ async def expand_keywords(
         )
 
     try:
-        from src.services.writing_pipeline.data_sources.dataforseo import DataForSEO
         from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
 
         language_code = topic.language or "ru"
@@ -2048,8 +2041,6 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
             anthropic_api_key=settings.anthropic_api_key,
             serper_api_key=settings.serper_api_key or None,
             jina_api_key=getattr(settings, 'jina_api_key', None),
-            dataforseo_login=getattr(settings, 'dataforseo_login', None),
-            dataforseo_password=getattr(settings, 'dataforseo_password', None),
             proxy_url=settings.anthropic_proxy_url or None,
             proxy_secret=settings.anthropic_proxy_secret or None,
             ghost_url=settings.ghost_url or None,
@@ -2384,9 +2375,9 @@ async def trigger_monitoring_check(
     if not site_id:
         return RedirectResponse(url="/ui/monitoring?error=No site selected", status_code=303)
 
-    if not settings.dataforseo_login or not settings.dataforseo_password:
+    if not settings.serper_api_key:
         return RedirectResponse(
-            url=f"/ui/monitoring?site_id={site_id}&error=DataForSEO credentials not configured",
+            url=f"/ui/monitoring?site_id={site_id}&error=SERPER_API_KEY not configured",
             status_code=303,
         )
 
@@ -2400,8 +2391,7 @@ async def trigger_monitoring_check(
     try:
         tracker = PositionTracker(
             db_session_factory=SessionLocal,
-            dataforseo_login=settings.dataforseo_login,
-            dataforseo_password=settings.dataforseo_password,
+            serper_api_key=settings.serper_api_key,
         )
 
         summary = await tracker.run_daily_check(site_id)
@@ -3007,8 +2997,6 @@ def _create_runner(settings):
         anthropic_api_key=settings.anthropic_api_key,
         serper_api_key=settings.serper_api_key,
         jina_api_key=settings.jina_api_key,
-        dataforseo_login=settings.dataforseo_login,
-        dataforseo_password=settings.dataforseo_password,
         proxy_url=settings.anthropic_proxy_url,
         proxy_secret=settings.anthropic_proxy_secret,
         ghost_url=settings.ghost_url,

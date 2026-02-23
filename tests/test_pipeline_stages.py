@@ -59,8 +59,6 @@ class TestStageRegistration:
             if cls == ResearchStage:
                 kwargs["serper_api_key"] = ""
                 kwargs["jina_api_key"] = ""
-                kwargs["dataforseo_login"] = ""
-                kwargs["dataforseo_password"] = ""
             elif cls == LinkingStage:
                 kwargs["linker"] = None
             elif cls == FormattingStage:
@@ -81,8 +79,7 @@ class TestStageRegistration:
         for cls in STAGE_CLASSES:
             kwargs = {"client": client, "model": "test-model"}
             if cls == ResearchStage:
-                kwargs.update(serper_api_key="", jina_api_key="",
-                              dataforseo_login="", dataforseo_password="")
+                kwargs.update(serper_api_key="", jina_api_key="")
             elif cls == LinkingStage:
                 kwargs["linker"] = None
             elif cls == FormattingStage:

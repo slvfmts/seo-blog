@@ -362,7 +362,7 @@ class KeywordRanking(Base):
     url = Column(Text, nullable=True)  # какой URL ранжируется
     serp_features = Column(JSON)  # ["featured_snippet", "paa", ...]
     checked_at = Column(DateTime, default=datetime.utcnow)
-    source = Column(String(50), default="dataforseo")  # dataforseo | manual
+    source = Column(String(50), default="serper")  # serper | manual
 
     # Relationships
     keyword = relationship("Keyword", back_populates="rankings")

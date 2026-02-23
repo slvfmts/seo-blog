@@ -39,8 +39,6 @@ def client():
         "DATABASE_URL": "sqlite://",
         "REDIS_URL": "redis://localhost:6379/0",
         "SECRET_KEY": "test-secret-key-for-session",
-        "DATAFORSEO_LOGIN": "",
-        "DATAFORSEO_PASSWORD": "",
         "GHOST_URL": "http://ghost:2368",
         "GHOST_ADMIN_KEY": "",
         "ANTHROPIC_API_KEY": "",

@@ -4,7 +4,7 @@ ClusterPlanner — generates a cluster plan from a broad topic.
 Search-first approach:
 1. Serper Search — discover real keywords from search (related, PAA, autocomplete)
 2. Competitor Analysis — scrape top pages, extract H2/H3 headings
-3. Volume Enrichment — Yandex Wordstat (RU) / DataForSEO (non-RU) via VolumeProvider
+3. Volume Enrichment — Yandex Wordstat + Rush Analytics (RU) via VolumeProvider
 4. LLM Clustering — organize REAL data into briefs (LLM only groups, doesn't invent)
 5. Save to DB
 
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 class ClusterPlanner:
     """
     Generates a cluster plan: pillar article + N cluster articles from a broad topic.
-    Search-first: real data from Serper + VolumeProvider (Wordstat/Rush/DataForSEO), LLM only organizes.
+    Search-first: real data from Serper + VolumeProvider (Wordstat/Rush), LLM only organizes.
     """
 
     def __init__(
@@ -53,7 +53,7 @@ class ClusterPlanner:
         self.client = anthropic_client
         self.model = model
         self.serper_api_key = serper_api_key
-        self.volume_provider = volume_provider  # VolumeProvider instance (Wordstat/Rush/DataForSEO)
+        self.volume_provider = volume_provider  # VolumeProvider instance (Wordstat/Rush)
 
     async def plan(
         self,
@@ -106,7 +106,7 @@ class ClusterPlanner:
 
             logger.info(f"Step 2c: {len(all_keywords)} keywords after suggestions")
 
-        # Step 3: Volume enrichment via VolumeProvider (Wordstat for RU, DataForSEO for non-RU)
+        # Step 3: Volume enrichment via VolumeProvider (Wordstat + Rush for RU)
         kw_with_volumes = await self._enrich_volumes(
             list(all_keywords), region,
         )
@@ -293,7 +293,7 @@ class ClusterPlanner:
         self, keywords: list[str], region: str,
     ) -> list[dict]:
         """
-        Step 3: Get volumes via VolumeProvider (Wordstat for RU, DataForSEO for non-RU).
+        Step 3: Get volumes via VolumeProvider (Wordstat + Rush for RU).
         Batches of 10 with 1.5s pause to respect Wordstat rate limits (10 req/sec).
         """
         kw_data = [{"keyword": kw, "volume": 0, "cpc": 0, "competition": 0} for kw in keywords]

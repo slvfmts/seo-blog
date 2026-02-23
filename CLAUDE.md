@@ -36,7 +36,7 @@
 
 **Pipeline (реализован, 10 stages):**
 ```
-topic → Intent → Research (Serper + Jina/Trafilatura + DataForSEO) →
+topic → Intent → Research (Serper + Jina/Trafilatura + Wordstat/Rush) →
 Structure → Drafting → Editing → Linking → SEO Polish → Quality Gate →
 Meta → Formatting (DALL-E cover + Mermaid diagrams via kroki.io) → article.md
 ```
@@ -47,11 +47,11 @@ Meta → Formatting (DALL-E cover + Mermaid diagrams via kroki.io) → article.m
 - Brief Generator (Serper.dev + Claude)
 - Validators: SEO Lint, Plagiarism (similarity-based)
 - Ghost Publisher (с extract scripts → codeinjection_foot, image upload, feature_image)
-- Keyword Expansion (Serper.dev discovery + DataForSEO volume)
+- Keyword Expansion (Serper.dev discovery + Yandex Wordstat/Rush Analytics volume)
 - Knowledge Base (фактура / reference materials)
 - Internal Linker (forward + backward cross-linking при публикации)
 - Formatting: DALL-E 3 covers (через OpenAI proxy) + Mermaid diagrams (через kroki.io)
-- Position Monitoring (DataForSEO SERP tracking + decay detection)
+- Position Monitoring (Serper.dev SERP tracking + decay detection)
 - Web UI: Jinja2 + Tailwind + HTMX
 - Session-based login (bcrypt)
 - LLM retry with backoff (overloaded, 429, 5xx)
@@ -69,7 +69,10 @@ Meta → Formatting (DALL-E cover + Mermaid diagrams via kroki.io) → article.m
 | `src/services/writing_pipeline/stages/` | Все stages (intent, research, structure, drafting, editing, linking, seo_polish, quality_gate, meta, formatting) |
 | `src/services/writing_pipeline/prompts/` | Промпты (v1, v2, v3) |
 | `src/services/writing_pipeline/contracts/__init__.py` | Контракты между stages |
-| `src/services/writing_pipeline/data_sources/dataforseo.py` | DataForSEO client |
+| `src/services/writing_pipeline/data_sources/volume_provider.py` | VolumeProvider interface + routing |
+| `src/services/writing_pipeline/data_sources/composite_provider.py` | CompositeVolumeProvider (Wordstat + Rush) |
+| `src/services/writing_pipeline/data_sources/wordstat.py` | Yandex Wordstat provider |
+| `src/services/writing_pipeline/data_sources/rush_provider.py` | Rush Analytics provider |
 | `src/services/writing_pipeline/data_sources/serper.py` | Serper.dev client |
 | `src/services/publisher.py` | Ghost CMS publisher |
 | `src/services/generator.py` | Legacy article generator (deprecated) |
@@ -77,18 +80,18 @@ Meta → Formatting (DALL-E cover + Mermaid diagrams via kroki.io) → article.m
 | `src/templates/` | Jinja2 templates |
 | `src/config/settings.py` | Settings from env |
 | `src/services/internal_linker.py` | Internal cross-linking engine |
-| `src/services/monitoring/position_tracker.py` | SERP position monitoring |
+| `src/services/monitoring/position_tracker.py` | SERP position monitoring (Serper.dev) |
+| `src/services/monitoring/serper_serp.py` | Serper SERP client for position checks |
 
 ---
 
 ## Известные gotchas
 
-**DataForSEO:**
-- Россия (2643) не поддерживается → fallback на Казахстан (2398), `LOCATION_FALLBACK` в dataforseo.py
-- `competition` может быть строкой ("MEDIUM") → используй `competition_index` (0-100)
-- Аккаунт имеет ТОЛЬКО `search_volume/live` — Labs endpoints возвращают 402
-- Keyword expansion: Serper.dev для discovery, DataForSEO для метрик
-- При нулевом балансе keywords сохраняются с vol=0; кнопка "Fetch Volume" позже
+**Keyword Volumes:**
+- RU: Yandex Wordstat (broad match) + Rush Analytics (exact match) через CompositeVolumeProvider
+- Non-RU: NullProvider (нет источника volume для EN/DE/etc.)
+- Keyword expansion: Serper.dev для discovery, Wordstat+Rush для метрик
+- При отсутствии ключей keywords сохраняются с vol=0; кнопка "Fetch Volume" позже
 
 **Ghost CMS:**
 - `<script>` в markdown рендерится как видимый блок → `_extract_script_tags()` перемещает в `codeinjection_foot`
@@ -111,10 +114,11 @@ ANTHROPIC_PROXY_URL=<url>          # Cloudflare Worker proxy (optional)
 ANTHROPIC_PROXY_SECRET=<secret>    # Proxy auth token (optional)
 OPENAI_API_KEY=<key>               # For DALL-E cover generation
 OPENAI_PROXY_URL=<url>             # OpenAI proxy for geo-blocked regions (optional)
-SERPER_API_KEY=<key>
+SERPER_API_KEY=<key>               # Search + SERP position tracking
 JINA_API_KEY=<key>                 # For web page extraction (optional, fallback to trafilatura)
-DATAFORSEO_LOGIN=<login>
-DATAFORSEO_PASSWORD=<password>
+YANDEX_WORDSTAT_API_KEY=<key>      # Yandex Wordstat (RU keyword volumes)
+YANDEX_CLOUD_FOLDER_ID=<id>       # Yandex Cloud folder ID
+RUSH_ANALYTICS_API_KEY=<key>       # Rush Analytics (RU keyword volumes, exact match)
 AUTH_EMAIL=<email>                 # Login email
 AUTH_PASSWORD_HASH=<bcrypt_hash>   # bcrypt password hash
 SECRET_KEY=<key>                   # Session secret

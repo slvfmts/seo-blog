@@ -30,10 +30,6 @@ class Settings(BaseSettings):
     # Jina Reader (content extraction)
     jina_api_key: str = ""  # Optional - free tier available without key
 
-    # DataForSEO (keyword metrics)
-    dataforseo_login: str = ""
-    dataforseo_password: str = ""
-
     # Yandex Wordstat (RU volumes via Yandex Cloud Search API)
     yandex_wordstat_api_key: str = ""
     yandex_cloud_folder_id: str = ""

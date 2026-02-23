@@ -5,7 +5,7 @@ All external APIs are mocked:
 - Anthropic (LLM) — mocked, no real API calls
 - Serper (search, autocomplete, scrape) — mocked
 - Yandex Wordstat (volumes) — mocked
-- DataForSEO — mocked
+- Rush Analytics (volumes) — mocked
 - Ghost CMS — mocked
 
 Tests verify that the code paths work correctly without spending money.
@@ -310,8 +310,6 @@ class TestVolumeProviderFactory:
         settings.yandex_wordstat_api_key = "fake-yandex-key"
         settings.yandex_cloud_folder_id = "fake-folder"
         settings.rush_analytics_api_key = ""
-        settings.dataforseo_login = ""
-        settings.dataforseo_password = ""
 
         provider = get_volume_provider("ru", settings)
         assert provider.source_name == "wordstat"
@@ -321,30 +319,24 @@ class TestVolumeProviderFactory:
         settings.yandex_wordstat_api_key = ""
         settings.yandex_cloud_folder_id = ""
         settings.rush_analytics_api_key = "fake-rush-key"
-        settings.dataforseo_login = ""
-        settings.dataforseo_password = ""
 
         provider = get_volume_provider("ru", settings)
         assert provider.source_name == "rush"
 
-    def test_dataforseo_for_en(self):
+    def test_en_returns_null_provider(self):
         settings = MagicMock()
         settings.yandex_wordstat_api_key = "key"
         settings.yandex_cloud_folder_id = "folder"
         settings.rush_analytics_api_key = ""
-        settings.dataforseo_login = "login"
-        settings.dataforseo_password = "pass"
 
         provider = get_volume_provider("en", settings)
-        assert provider.source_name == "dataforseo"
+        assert provider.source_name == "none"
 
     def test_null_provider_no_keys(self):
         settings = MagicMock()
         settings.yandex_wordstat_api_key = ""
         settings.yandex_cloud_folder_id = ""
         settings.rush_analytics_api_key = ""
-        settings.dataforseo_login = ""
-        settings.dataforseo_password = ""
 
         provider = get_volume_provider("ru", settings)
         assert provider.source_name == "none"

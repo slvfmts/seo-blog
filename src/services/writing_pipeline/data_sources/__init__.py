@@ -5,7 +5,7 @@ Available sources:
 - SerperDataSource: Serper.dev API for SERP data
 - JinaReader: Jina Reader API for extracting clean markdown from URLs
 - TrafilaturaExtractor: Local fallback for content extraction
-- DataForSEO: DataForSEO API for keyword metrics
+- VolumeProvider: Keyword metrics (Yandex Wordstat + Rush Analytics)
 """
 
 from .serper import SerperDataSource
@@ -19,7 +19,6 @@ __all__ = [
     "SerperScraper",
     "get_jina_reader",
     "get_trafilatura_extractor",
-    "get_dataforseo_client",
     "is_trafilatura_available",
 ]
 
@@ -61,18 +60,3 @@ def is_trafilatura_available():
         return check()
     except ImportError:
         return False
-
-
-def get_dataforseo_client(login, password, **kwargs):
-    """
-    Get a DataForSEO client instance.
-
-    Args:
-        login: DataForSEO API login
-        password: DataForSEO API password
-
-    Returns:
-        DataForSEO instance
-    """
-    from .dataforseo import DataForSEO
-    return DataForSEO(login=login, password=password, **kwargs)
