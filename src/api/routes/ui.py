@@ -122,6 +122,14 @@ def get_blog_site_ids(db: Session, blog_id) -> list:
     return [s.id for s in db.query(models.Site.id).filter(models.Site.blog_id == blog_id).all()]
 
 
+def get_blog_kb_folders(db: Session, current_blog):
+    """Get KB folders scoped by blog."""
+    query = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name)
+    if current_blog:
+        query = query.filter(models.KnowledgeFolder.blog_id == current_blog.id)
+    return query.all()
+
+
 def _render(request: Request, db: Session, template: str, ctx: dict):
     """Render template with blog context injected."""
     blog_id = request.session.get("blog_id")
@@ -430,7 +438,8 @@ async def topic_detail(
     total_traffic = sum(c.estimated_traffic or 0 for c in clusters)
 
     # Knowledge Base folders
-    all_folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
+    current_blog = get_current_blog(request, db)
+    all_folders = get_blog_kb_folders(db, current_blog)
     attached_folder_ids = {str(f.id) for f in topic.knowledge_folders}
 
     return _render(request, db, "topics/detail.html", {
@@ -848,8 +857,12 @@ async def generate_articles_for_topic(
 
 @router.get("/kb", response_class=HTMLResponse)
 async def kb_list(request: Request, db: Session = Depends(get_db)):
-    """List all KB folders."""
-    folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.created_at.desc()).all()
+    """List KB folders scoped by blog."""
+    current_blog = get_current_blog(request, db)
+    query = db.query(models.KnowledgeFolder)
+    if current_blog:
+        query = query.filter(models.KnowledgeFolder.blog_id == current_blog.id)
+    folders = query.order_by(models.KnowledgeFolder.created_at.desc()).all()
 
     folder_data = []
     for folder in folders:
@@ -883,7 +896,9 @@ async def kb_create(
     db: Session = Depends(get_db),
 ):
     """Create a new KB folder."""
+    current_blog = get_current_blog(request, db)
     folder = models.KnowledgeFolder(
+        blog_id=current_blog.id if current_blog else None,
         name=name.strip(),
         description=description.strip() or None,
     )
@@ -2349,7 +2364,8 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
 @router.get("/pipeline/new", response_class=HTMLResponse)
 async def new_pipeline_form(request: Request, db: Session = Depends(get_db)):
     """Show form to start new article via pipeline."""
-    folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
+    current_blog = get_current_blog(request, db)
+    folders = get_blog_kb_folders(db, current_blog)
     return _render(request, db, "pipeline/new.html", {
         "folders": folders,
     })
@@ -2372,8 +2388,9 @@ async def create_pipeline(
     form = await request.form()
     folder_ids = form.getlist("folder_ids")
 
+    current_blog = get_current_blog(request, db)
     if not settings.anthropic_api_key:
-        folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
+        folders = get_blog_kb_folders(db, current_blog)
         return _render(request, db, "pipeline/new.html", {
             "error": "ANTHROPIC_API_KEY not configured",
             "topic": topic,
@@ -2453,7 +2470,7 @@ async def create_pipeline(
         )
 
     except Exception as e:
-        folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
+        folders = get_blog_kb_folders(db, current_blog)
         return _render(request, db, "pipeline/new.html", {
             "error": str(e),
             "topic": topic,
@@ -2764,7 +2781,7 @@ async def cluster_plan_form(request: Request, db: Session = Depends(get_db)):
     if current_blog:
         sites_q = sites_q.filter(models.Site.blog_id == current_blog.id)
     sites = sites_q.all()
-    folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
+    folders = get_blog_kb_folders(db, current_blog)
     return _render(request, db, "clusters/plan.html", {
         "sites": sites,
         "folders": folders,
@@ -2952,7 +2969,8 @@ async def cluster_detail(
     ).order_by(models.Keyword.search_volume.desc().nullslast()).all() if cluster.site_id else []
 
     # Knowledge Base folders
-    all_folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
+    current_blog = get_current_blog(request, db)
+    all_folders = get_blog_kb_folders(db, current_blog)
     attached_folder_ids = {str(f.id) for f in cluster.knowledge_folders} if hasattr(cluster, 'knowledge_folders') and cluster.knowledge_folders else set()
 
     return _render(request, db, "clusters/detail.html", {

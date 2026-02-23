@@ -444,6 +444,7 @@ class KnowledgeFolder(Base):
     __tablename__ = "knowledge_folders"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    blog_id = Column(UUID(as_uuid=True), ForeignKey("blogs.id"), nullable=True)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
 
@@ -451,6 +452,7 @@ class KnowledgeFolder(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
+    blog = relationship("Blog")
     documents = relationship("KnowledgeDocument", back_populates="folder", cascade="all, delete-orphan")
     sites = relationship("Site", secondary=site_knowledge_folders, back_populates="knowledge_folders")
     clusters = relationship("Cluster", secondary=cluster_knowledge_folders, back_populates="knowledge_folders")

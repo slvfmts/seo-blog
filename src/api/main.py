@@ -33,8 +33,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 if (path.startswith("/ui/") and
                     not path.startswith("/ui/blogs") and
                     not path.startswith("/ui/login") and
-                    not path.startswith("/ui/logout") and
-                    not path.startswith("/ui/kb")):
+                    not path.startswith("/ui/logout")):
                     if not request.session.get("blog_id"):
                         return StarletteRedirect(url="/ui/blogs", status_code=302)
         # Root redirect also needs auth check
