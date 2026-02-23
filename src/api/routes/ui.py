@@ -1597,7 +1597,7 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
 
 # ============ Step-by-Step Pipeline Controls ============
 
-def _resume_pipeline_for_draft(draft_id: str, settings):
+def _resume_pipeline_for_draft(draft_id: str, settings, paused_at: str):
     """Background task: resume pipeline from paused state."""
     import asyncio
 
@@ -1608,10 +1608,8 @@ def _resume_pipeline_for_draft(draft_id: str, settings):
         db = SessionLocal()
         try:
             draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
-            if not draft or not draft.pipeline_status or not draft.pipeline_status.startswith("paused"):
+            if not draft:
                 return
-
-            paused_at = draft.pipeline_status.replace("paused_at_", "")
             brief = db.query(models.Brief).filter(models.Brief.id == draft.brief_id).first() if draft.brief_id else None
 
             runner = _create_runner(settings)
@@ -1731,10 +1729,6 @@ def _resume_pipeline_for_draft(draft_id: str, settings):
             if sr.get("editing") and sr["editing"].get("content_md"):
                 context.edited_md = sr["editing"]["content_md"]
 
-            # Mark draft as running again
-            draft.pipeline_status = "running"
-            db.commit()
-
             # Determine which stages still need to run
             completed = set()
             pipeline_stages = draft.pipeline_stages or {}
@@ -1833,10 +1827,18 @@ async def article_next_step(
             status_code=303,
         )
 
+    # Capture paused stage before changing status
+    paused_at_stage = draft.pipeline_status.replace("paused_at_", "")
+
+    # Set running NOW so the redirected page shows HTMX polling
+    draft.pipeline_status = "running"
+    db.commit()
+
     background_tasks.add_task(
         _resume_pipeline_for_draft,
         str(draft_id),
         settings,
+        paused_at_stage,
     )
 
     return RedirectResponse(
