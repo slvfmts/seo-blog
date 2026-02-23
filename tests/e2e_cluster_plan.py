@@ -32,7 +32,7 @@ async def main():
         client_kwargs["base_url"] = settings.anthropic_proxy_url
         if settings.anthropic_proxy_secret:
             client_kwargs["default_headers"] = {
-                "X-Proxy-Secret": settings.anthropic_proxy_secret,
+                "x-proxy-token": settings.anthropic_proxy_secret,
             }
     anthropic_client = anthropic.Anthropic(
         api_key=settings.anthropic_api_key,

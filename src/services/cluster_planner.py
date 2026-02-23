@@ -80,11 +80,11 @@ class ClusterPlanner:
         competitor_headings = await self._analyze_competitors(search_data["top_urls"], region)
         logger.info(f"Step 2: extracted headings from {len(competitor_headings)} pages")
 
-        # Step 2b: Add competitor headings as keywords (short headings < 80 chars)
+        # Step 2b: Add competitor headings as keywords (validated only)
         all_keywords = search_data["keywords"]
         for page in competitor_headings:
             for heading in page.get("headings", []):
-                if len(heading) < 80:
+                if _is_valid_keyword(heading):
                     all_keywords.add(heading.lower())
         logger.info(f"Step 2b: {len(all_keywords)} keywords after adding headings")
 
@@ -296,7 +296,13 @@ class ClusterPlanner:
         Step 3: Get volumes via VolumeProvider (Wordstat + Rush for RU).
         Batches of 10 with 1.5s pause to respect Wordstat rate limits (10 req/sec).
         """
-        kw_data = [{"keyword": kw, "volume": 0, "cpc": 0, "competition": 0} for kw in keywords]
+        # Filter out invalid keywords before sending to volume APIs
+        valid_keywords = [kw for kw in keywords if _is_valid_keyword(kw)]
+        skipped = len(keywords) - len(valid_keywords)
+        if skipped:
+            logger.info(f"Volume enrichment: skipped {skipped} invalid keywords")
+
+        kw_data = [{"keyword": kw, "volume": 0, "cpc": 0, "competition": 0} for kw in valid_keywords]
 
         if not self.volume_provider:
             logger.warning("No volume_provider configured — returning zero volumes")
@@ -824,6 +830,25 @@ class ClusterPlanner:
         return str(cluster.id)
 
 
+def _is_valid_keyword(text: str) -> bool:
+    """Check if a string looks like a valid search keyword (not page noise)."""
+    if not text or len(text) < 3 or len(text) > 80:
+        return False
+    # Skip lines starting with bullet markers
+    if text.startswith(("*", "•", "-", "–", "—")):
+        return False
+    # Skip lines with special chars typical of page content, not keywords
+    if any(c in text for c in [";", "(", ")", "—", "–", "→", "←", "\\", "|"]):
+        return False
+    # Skip separator lines
+    if len(set(text)) <= 3:
+        return False
+    # Skip very long phrases (> 6 words) — not real search queries
+    if len(text.split()) > 6:
+        return False
+    return True
+
+
 def _extract_headings_from_text(text: str) -> list[str]:
     """Extract likely headings from scraped page text."""
     if not text:
@@ -834,9 +859,9 @@ def _extract_headings_from_text(text: str) -> list[str]:
     for line in lines:
         line = line.strip()
         # Skip very short or very long lines
-        if len(line) < 5 or len(line) > 200:
+        if len(line) < 5 or len(line) > 80:
             continue
-        # Lines that look like headings: short, no punctuation at end, Title Case, etc.
+        # Lines that look like headings: short, no punctuation at end
         if (
             line.endswith(":")
             or (len(line) < 80 and not line.endswith(".") and not line.endswith(","))
@@ -844,7 +869,7 @@ def _extract_headings_from_text(text: str) -> list[str]:
         ):
             # Remove markdown heading markers
             clean = re.sub(r"^#+\s*", "", line).rstrip(":")
-            if clean and len(clean) > 3:
+            if _is_valid_keyword(clean):
                 headings.append(clean)
 
     # Deduplicate while preserving order
