@@ -1249,8 +1249,11 @@ async def list_briefs(request: Request, db: Session = Depends(get_db)):
     current_blog = get_current_blog(request, db)
     blog_site_ids = get_blog_site_ids(db, current_blog.id) if current_blog else []
     query = db.query(models.Brief)
-    if current_blog and blog_site_ids:
-        query = query.filter(models.Brief.site_id.in_(blog_site_ids))
+    if current_blog:
+        if blog_site_ids:
+            query = query.filter(models.Brief.site_id.in_(blog_site_ids))
+        else:
+            query = query.filter(False)
     briefs = query.order_by(models.Brief.created_at.desc()).all()
     return _render(request, db, "briefs/list.html", {
         "briefs": briefs,
@@ -1422,8 +1425,11 @@ async def list_articles(
     query = db.query(models.Draft)
 
     # Scope by blog
-    if current_blog and blog_site_ids:
-        query = query.filter(models.Draft.site_id.in_(blog_site_ids))
+    if current_blog:
+        if blog_site_ids:
+            query = query.filter(models.Draft.site_id.in_(blog_site_ids))
+        else:
+            query = query.filter(False)
 
     if site_id:
         query = query.filter(models.Draft.site_id == site_id)
@@ -2670,14 +2676,17 @@ async def iterations_list(
     blog_site_ids = get_blog_site_ids(db, current_blog.id) if current_blog else []
 
     query = db.query(models.IterationTask)
-    if current_blog and blog_site_ids:
-        blog_post_ids = [p.id for p in db.query(models.Post.id).filter(
-            models.Post.site_id.in_(blog_site_ids)
-        ).all()]
-        if blog_post_ids:
-            query = query.filter(models.IterationTask.post_id.in_(blog_post_ids))
+    if current_blog:
+        if blog_site_ids:
+            blog_post_ids = [p.id for p in db.query(models.Post.id).filter(
+                models.Post.site_id.in_(blog_site_ids)
+            ).all()]
+            if blog_post_ids:
+                query = query.filter(models.IterationTask.post_id.in_(blog_post_ids))
+            else:
+                query = query.filter(False)
         else:
-            query = query.filter(False)  # No posts = no tasks
+            query = query.filter(False)
     tasks = query.order_by(
         models.IterationTask.priority.asc(),
         models.IterationTask.created_at.desc(),
@@ -2728,10 +2737,13 @@ async def cluster_list(request: Request, db: Session = Depends(get_db)):
     query = db.query(models.Cluster).filter(
         models.Cluster.parent_cluster_id.is_(None),
     )
-    if current_blog and blog_site_ids:
-        query = query.filter(
-            (models.Cluster.site_id.in_(blog_site_ids)) | (models.Cluster.site_id.is_(None))
-        )
+    if current_blog:
+        if blog_site_ids:
+            query = query.filter(
+                (models.Cluster.site_id.in_(blog_site_ids)) | (models.Cluster.site_id.is_(None))
+            )
+        else:
+            query = query.filter(models.Cluster.site_id.is_(None))
     clusters = query.order_by(models.Cluster.created_at.desc()).all()
 
     # Enrich with brief count (flat model)
