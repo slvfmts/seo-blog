@@ -71,6 +71,7 @@ services:
       UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
     volumes:
       - ./src:/app/src
+      - ./tests:/app/tests
       - uploads-data:/data/uploads
     depends_on:
       - postgres
