@@ -135,11 +135,12 @@ def _render(request: Request, db: Session, template: str, ctx: dict):
 
 @router.get("/blogs", response_class=HTMLResponse)
 async def list_blogs(request: Request, db: Session = Depends(get_db)):
-    """List all blogs. If only 1 active blog and already selected, redirect."""
+    """List all blogs. Auto-select on first visit if only 1 blog."""
     active_blogs = db.query(models.Blog).filter(models.Blog.status == "active").all()
 
-    # Auto-select if only one blog AND already selected (don't block access to page)
-    if len(active_blogs) == 1 and request.session.get("blog_id") == str(active_blogs[0].id):
+    # Auto-select only on first visit (no blog selected yet)
+    if len(active_blogs) == 1 and not request.session.get("blog_id"):
+        request.session["blog_id"] = str(active_blogs[0].id)
         return RedirectResponse(url="/ui/articles", status_code=302)
 
     blogs = []
