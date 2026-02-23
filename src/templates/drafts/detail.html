@@ -251,7 +251,7 @@
                 {% for key, name, desc in all_stages %}
                 {% set stage_data = draft.stage_results.get(key) if draft.stage_results else None %}
                 {% if stage_data %}
-                <details class="group">
+                <details class="group" {% if key == 'research' %}open{% endif %}>
                     <summary class="px-6 py-3 cursor-pointer hover:bg-gray-50 flex items-center justify-between">
                         <div class="flex items-center space-x-2">
                             <span class="w-5 h-5 flex items-center justify-center rounded-full bg-green-100">
@@ -267,63 +267,368 @@
                         </svg>
                     </summary>
                     <div class="px-6 py-4 bg-gray-50 text-sm">
-                        {% if key == 'research' and stage_data is mapping %}
-                            {% if stage_data.sources %}
-                            <h4 class="font-medium text-gray-700 mb-2">Источники ({{ stage_data.sources|length }})</h4>
-                            <div class="space-y-2 mb-4">
-                                {% for src in stage_data.sources[:10] %}
-                                <div class="flex items-start space-x-2">
-                                    {% if src.origin == 'kb' %}
-                                    <span class="px-1.5 py-0.5 text-xs bg-amber-100 text-amber-700 rounded">KB</span>
-                                    {% else %}
-                                    <span class="px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded">Web</span>
-                                    {% endif %}
+
+                        {# ============= INTENT ============= #}
+                        {% if key == 'intent' and stage_data is mapping %}
+                            <div class="space-y-3">
+                                <div class="grid grid-cols-2 gap-3">
                                     <div>
-                                        <div class="text-gray-900">{{ src.title or src.url or 'Source' }}</div>
-                                        {% if src.url %}
-                                        <a href="{{ src.url }}" target="_blank" class="text-xs text-blue-600 break-all">{{ src.url[:80] }}</a>
-                                        {% endif %}
+                                        <span class="text-xs text-gray-500 uppercase">Интент</span>
+                                        <div class="font-medium text-gray-900">{{ stage_data.primary_intent }}</div>
+                                    </div>
+                                    <div>
+                                        <span class="text-xs text-gray-500 uppercase">Тип контента</span>
+                                        <div class="font-medium text-gray-900">{{ stage_data.content_type }}</div>
+                                    </div>
+                                    <div>
+                                        <span class="text-xs text-gray-500 uppercase">Глубина</span>
+                                        <div class="font-medium text-gray-900">{{ stage_data.depth }}</div>
+                                    </div>
+                                    <div>
+                                        <span class="text-xs text-gray-500 uppercase">Слов</span>
+                                        <div class="font-medium text-gray-900">
+                                            {% if stage_data.word_count_range %}{{ stage_data.word_count_range.min }}–{{ stage_data.word_count_range.max }}{% endif %}
+                                        </div>
                                     </div>
                                 </div>
-                                {% endfor %}
+                                {% if stage_data.user_goal %}
+                                <div>
+                                    <span class="text-xs text-gray-500 uppercase">Цель пользователя</span>
+                                    <div class="text-gray-700">{{ stage_data.user_goal }}</div>
+                                </div>
+                                {% endif %}
+                                {% if stage_data.article_goal %}
+                                <div>
+                                    <span class="text-xs text-gray-500 uppercase">Цель статьи</span>
+                                    <div class="text-gray-700">{{ stage_data.article_goal }}</div>
+                                </div>
+                                {% endif %}
+                                {% if stage_data.audience %}
+                                <div>
+                                    <span class="text-xs text-gray-500 uppercase">Аудитория</span>
+                                    <div class="text-gray-700">{{ stage_data.audience.role }} ({{ stage_data.audience.knowledge_level }})</div>
+                                </div>
+                                {% endif %}
+                                {% if stage_data.must_answer_questions %}
+                                <div>
+                                    <span class="text-xs text-gray-500 uppercase">Обязательные вопросы ({{ stage_data.must_answer_questions|length }})</span>
+                                    <ul class="mt-1 list-disc list-inside text-gray-700">
+                                        {% for q in stage_data.must_answer_questions %}
+                                        <li>{{ q }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                                {% endif %}
+                                {% if stage_data.topic_boundaries %}
+                                <div class="grid grid-cols-2 gap-3">
+                                    {% if stage_data.topic_boundaries.in_scope %}
+                                    <div>
+                                        <span class="text-xs text-gray-500 uppercase">В рамках темы</span>
+                                        <ul class="mt-1 list-disc list-inside text-gray-700">
+                                            {% for item in stage_data.topic_boundaries.in_scope %}
+                                            <li>{{ item }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                    {% endif %}
+                                    {% if stage_data.topic_boundaries.out_of_scope %}
+                                    <div>
+                                        <span class="text-xs text-gray-500 uppercase">За рамками</span>
+                                        <ul class="mt-1 list-disc list-inside text-gray-700">
+                                            {% for item in stage_data.topic_boundaries.out_of_scope %}
+                                            <li>{{ item }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
                             </div>
-                            {% endif %}
-                            {% if stage_data.facts %}
-                            <h4 class="font-medium text-gray-700 mb-2">Факты ({{ stage_data.facts|length }})</h4>
-                            <ul class="list-disc list-inside space-y-1 text-gray-700">
-                                {% for fact in stage_data.facts[:20] %}
-                                <li>{{ fact if fact is string else fact.text|default('') }}</li>
-                                {% endfor %}
-                            </ul>
-                            {% endif %}
-                        {% elif key == 'structure' and stage_data is mapping %}
-                            {% if stage_data.sections %}
-                            <div class="space-y-1">
-                                {% for section in stage_data.sections %}
-                                <div class="text-gray-900 font-medium">{{ section.heading|default(section.title|default('Section')) }}</div>
-                                {% if section.subsections %}
-                                <div class="ml-4 space-y-0.5">
-                                    {% for sub in section.subsections %}
-                                    <div class="text-gray-600">— {{ sub.heading|default(sub) }}</div>
+
+                        {# ============= RESEARCH ============= #}
+                        {% elif key == 'research' and stage_data is mapping %}
+                            <div class="space-y-4">
+                                {# Sources #}
+                                {% if stage_data.sources %}
+                                <div>
+                                    <h4 class="font-medium text-gray-700 mb-2">Источники ({{ stage_data.sources|length }})</h4>
+                                    <div class="space-y-2">
+                                        {% for src in stage_data.sources %}
+                                        <div class="flex items-start space-x-2 bg-white p-2 rounded border border-gray-200">
+                                            <span class="px-1.5 py-0.5 text-xs rounded flex-shrink-0
+                                                {% if src.source_type == 'official' %}bg-green-100 text-green-700
+                                                {% elif src.source_type == 'documentation' %}bg-blue-100 text-blue-700
+                                                {% elif src.source_type == 'expert' %}bg-purple-100 text-purple-700
+                                                {% elif src.source_type == 'media' %}bg-yellow-100 text-yellow-700
+                                                {% elif src.source_type == 'community' %}bg-orange-100 text-orange-700
+                                                {% else %}bg-gray-100 text-gray-600{% endif %}">{{ src.source_type }}</span>
+                                            <div class="min-w-0">
+                                                <div class="text-gray-900 font-medium">{{ src.title }}</div>
+                                                <div class="text-xs text-gray-500">{{ src.publisher }}{% if src.published_date %} &middot; {{ src.published_date }}{% endif %}</div>
+                                                {% if src.url %}
+                                                <a href="{{ src.url }}" target="_blank" class="text-xs text-blue-600 break-all hover:underline">{{ src.url[:100] }}</a>
+                                                {% endif %}
+                                                {% if src.relevance_notes %}
+                                                <div class="text-xs text-gray-500 mt-0.5 italic">{{ src.relevance_notes }}</div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
+
+                                {# Definitions #}
+                                {% if stage_data.definitions %}
+                                <div>
+                                    <h4 class="font-medium text-gray-700 mb-2">Определения ({{ stage_data.definitions|length }})</h4>
+                                    <div class="space-y-2">
+                                        {% for defn in stage_data.definitions %}
+                                        <div class="bg-white p-2 rounded border border-gray-200">
+                                            <span class="font-medium text-gray-900">{{ defn.term }}</span>
+                                            <span class="ml-1 px-1 py-0.5 text-xs rounded {% if defn.confidence == 'high' %}bg-green-100 text-green-700{% elif defn.confidence == 'medium' %}bg-yellow-100 text-yellow-700{% else %}bg-gray-100 text-gray-600{% endif %}">{{ defn.confidence }}</span>
+                                            <div class="text-gray-700 mt-0.5">{{ defn.definition }}</div>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
+
+                                {# Facts #}
+                                {% if stage_data.facts %}
+                                <div>
+                                    <h4 class="font-medium text-gray-700 mb-2">Факты ({{ stage_data.facts|length }})</h4>
+                                    <div class="space-y-2">
+                                        {% for fact in stage_data.facts %}
+                                        <div class="bg-white p-2 rounded border border-gray-200">
+                                            <div class="flex items-center space-x-2 mb-0.5">
+                                                <span class="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">{{ fact.category }}</span>
+                                                <span class="px-1 py-0.5 text-xs rounded {% if fact.confidence == 'high' %}bg-green-100 text-green-700{% elif fact.confidence == 'medium' %}bg-yellow-100 text-yellow-700{% else %}bg-gray-100 text-gray-600{% endif %}">{{ fact.confidence }}</span>
+                                            </div>
+                                            <div class="text-gray-900">{{ fact.claim }}</div>
+                                            {% if fact.evidence %}
+                                            <div class="text-xs text-gray-500 mt-0.5 italic">{{ fact.evidence[:200] }}</div>
+                                            {% endif %}
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
+
+                                {# Numbers #}
+                                {% if stage_data.numbers %}
+                                <div>
+                                    <h4 class="font-medium text-gray-700 mb-2">Числа и метрики ({{ stage_data.numbers|length }})</h4>
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {% for num in stage_data.numbers %}
+                                        <div class="bg-white p-2 rounded border border-gray-200">
+                                            <div class="text-xs text-gray-500">{{ num.metric }}</div>
+                                            <div class="text-lg font-semibold text-gray-900">{{ num.value }}</div>
+                                            <div class="text-xs text-gray-600">{{ num.context }}</div>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
+
+                                {# Examples #}
+                                {% if stage_data.examples %}
+                                <div>
+                                    <h4 class="font-medium text-gray-700 mb-2">Примеры ({{ stage_data.examples|length }})</h4>
+                                    <div class="space-y-2">
+                                        {% for ex in stage_data.examples %}
+                                        <div class="bg-white p-2 rounded border border-gray-200">
+                                            <div class="text-gray-900">{{ ex.example }}</div>
+                                            {% if ex.why_it_matters %}
+                                            <div class="text-xs text-gray-500 mt-0.5">{{ ex.why_it_matters }}</div>
+                                            {% endif %}
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
+
+                                {# Edge Cases #}
+                                {% if stage_data.edge_cases %}
+                                <div>
+                                    <h4 class="font-medium text-gray-700 mb-2">Крайние случаи ({{ stage_data.edge_cases|length }})</h4>
+                                    <ul class="space-y-1">
+                                        {% for ec in stage_data.edge_cases %}
+                                        <li class="bg-white p-2 rounded border border-gray-200">
+                                            <span class="text-gray-900">{{ ec.case }}</span>
+                                            {% if ec.impact %}<span class="text-xs text-gray-500 ml-1">&mdash; {{ ec.impact }}</span>{% endif %}
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                                {% endif %}
+
+                                {# Pitfalls #}
+                                {% if stage_data.pitfalls_and_myths %}
+                                <div>
+                                    <h4 class="font-medium text-gray-700 mb-2">Ошибки и мифы ({{ stage_data.pitfalls_and_myths|length }})</h4>
+                                    <ul class="space-y-1">
+                                        {% for p in stage_data.pitfalls_and_myths %}
+                                        <li class="bg-white p-2 rounded border border-red-100">
+                                            <span class="text-gray-900">{{ p.item }}</span>
+                                            {% if p.why_wrong_or_risky %}<div class="text-xs text-red-600 mt-0.5">{{ p.why_wrong_or_risky }}</div>{% endif %}
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                                {% endif %}
+
+                                {# Contradictions #}
+                                {% if stage_data.contradictions %}
+                                <div>
+                                    <h4 class="font-medium text-gray-700 mb-2">Противоречия ({{ stage_data.contradictions|length }})</h4>
+                                    {% for c in stage_data.contradictions %}
+                                    <div class="bg-white p-2 rounded border border-yellow-200 mb-2">
+                                        <div class="font-medium text-gray-900">{{ c.topic }}</div>
+                                        <div class="text-xs text-gray-600 mt-1">A: {{ c.position_a }}</div>
+                                        <div class="text-xs text-gray-600">B: {{ c.position_b }}</div>
+                                        {% if c.notes %}<div class="text-xs text-gray-500 mt-0.5 italic">{{ c.notes }}</div>{% endif %}
+                                    </div>
                                     {% endfor %}
                                 </div>
                                 {% endif %}
-                                {% endfor %}
+
+                                {# Keyword Clusters #}
+                                {% if stage_data.keyword_clusters %}
+                                <details>
+                                    <summary class="font-medium text-gray-700 cursor-pointer hover:text-gray-900">Кластеры ключевых слов</summary>
+                                    <pre class="mt-2 whitespace-pre-wrap text-gray-700 text-xs bg-white p-2 rounded border border-gray-200 overflow-x-auto">{{ stage_data.keyword_clusters | tojson(indent=2) }}</pre>
+                                </details>
+                                {% endif %}
+
+                                {# Claim Bank #}
+                                {% if stage_data.claim_bank and stage_data.claim_bank.allowed_claims %}
+                                <details>
+                                    <summary class="font-medium text-gray-700 cursor-pointer hover:text-gray-900">Банк утверждений ({{ stage_data.claim_bank.allowed_claims|length }})</summary>
+                                    <div class="mt-2 space-y-2">
+                                        {% for claim in stage_data.claim_bank.allowed_claims %}
+                                        <div class="bg-white p-2 rounded border border-gray-200">
+                                            <span class="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">{{ claim.claim_type }}</span>
+                                            <div class="text-gray-900 mt-0.5">{{ claim.claim_text }}</div>
+                                            {% if claim.use_rules %}<div class="text-xs text-gray-500 mt-0.5">{{ claim.use_rules }}</div>{% endif %}
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </details>
+                                {% endif %}
+
+                                {# Coverage Map #}
+                                {% if stage_data.coverage_map %}
+                                <details>
+                                    <summary class="font-medium text-gray-700 cursor-pointer hover:text-gray-900">Покрытие вопросов ({{ stage_data.coverage_map|length }})</summary>
+                                    <div class="mt-2 space-y-1">
+                                        {% for cm in stage_data.coverage_map %}
+                                        <div class="flex items-center space-x-2 text-xs bg-white p-1.5 rounded border border-gray-200">
+                                            <span class="{% if cm.coverage_confidence == 'high' %}text-green-600{% elif cm.coverage_confidence == 'medium' %}text-yellow-600{% else %}text-red-600{% endif %}">●</span>
+                                            <span class="text-gray-700">{{ cm.must_answer_question }}</span>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </details>
+                                {% endif %}
                             </div>
-                            {% else %}
-                            <pre class="whitespace-pre-wrap text-gray-700 text-xs">{{ stage_data | tojson(indent=2) }}</pre>
-                            {% endif %}
+
+                        {# ============= STRUCTURE ============= #}
+                        {% elif key == 'structure' and stage_data is mapping %}
+                            <div class="space-y-3">
+                                {% if stage_data.title %}
+                                <div>
+                                    <span class="text-xs text-gray-500 uppercase">Заголовок</span>
+                                    <div class="font-medium text-gray-900">{{ stage_data.title }}</div>
+                                    {% if stage_data.subtitle %}
+                                    <div class="text-gray-600">{{ stage_data.subtitle }}</div>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                                {% if stage_data.target_total_words %}
+                                <div class="text-xs text-gray-500">Целевой объём: {{ stage_data.target_total_words }} слов</div>
+                                {% endif %}
+                                {% if stage_data.sections %}
+                                <div class="space-y-2">
+                                    {% for section in stage_data.sections %}
+                                    <div class="bg-white p-2 rounded border border-gray-200">
+                                        <div class="font-medium text-gray-900">{{ section.h2 }}</div>
+                                        <div class="text-xs text-gray-500">{{ section.purpose }}{% if section.word_count_target %} &middot; ~{{ section.word_count_target }} слов{% endif %}</div>
+                                        {% if section.subsections %}
+                                        <div class="ml-4 mt-1 space-y-0.5">
+                                            {% for sub in section.subsections %}
+                                            <div class="text-gray-600 text-sm">— {{ sub.h3 }}
+                                                {% if sub.word_count_target %}<span class="text-xs text-gray-400">(~{{ sub.word_count_target }})</span>{% endif %}
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                                {% if stage_data.coverage_check %}
+                                <div class="text-xs">
+                                    {% if stage_data.coverage_check.all_must_answer_covered %}
+                                    <span class="text-green-600">Все обязательные вопросы покрыты</span>
+                                    {% else %}
+                                    <span class="text-red-600">Не покрыты: {{ stage_data.coverage_check.uncovered_questions | join(', ') }}</span>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                            </div>
+
+                        {# ============= DRAFTING / EDITING ============= #}
+                        {% elif key in ('drafting', 'editing') and stage_data is mapping and stage_data.content_md %}
+                            <div>
+                                <div class="text-xs text-gray-500 mb-2">{{ stage_data.content_md | length }} символов</div>
+                                <details>
+                                    <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Показать текст</summary>
+                                    <div class="mt-2 prose prose-sm max-w-none bg-white p-3 rounded border border-gray-200 max-h-96 overflow-y-auto">
+                                        {{ stage_data.content_md | markdown | safe }}
+                                    </div>
+                                </details>
+                            </div>
+
+                        {# ============= QUALITY GATE ============= #}
+                        {% elif key == 'quality_gate' and stage_data is mapping %}
+                            <div class="space-y-2">
+                                {% if stage_data.quality_score is defined %}
+                                <div class="text-sm">
+                                    Качество: <span class="font-semibold {% if stage_data.quality_score >= 80 %}text-green-600{% elif stage_data.quality_score >= 60 %}text-yellow-600{% else %}text-red-600{% endif %}">{{ stage_data.quality_score }}/100</span>
+                                </div>
+                                {% endif %}
+                                <div class="grid grid-cols-2 gap-2 text-xs">
+                                    {% if stage_data.claims_kept is defined %}
+                                    <div class="bg-white p-2 rounded border border-gray-200">Утверждения оставлены: {{ stage_data.claims_kept }}</div>
+                                    {% endif %}
+                                    {% if stage_data.claims_removed is defined %}
+                                    <div class="bg-white p-2 rounded border border-gray-200">Утверждения удалены: {{ stage_data.claims_removed }}</div>
+                                    {% endif %}
+                                    {% if stage_data.redundancy_fixes is defined %}
+                                    <div class="bg-white p-2 rounded border border-gray-200">Исправлено повторов: {{ stage_data.redundancy_fixes }}</div>
+                                    {% endif %}
+                                    {% if stage_data.terminology_fixes is defined %}
+                                    <div class="bg-white p-2 rounded border border-gray-200">Терминология: {{ stage_data.terminology_fixes }}</div>
+                                    {% endif %}
+                                    {% if stage_data.total_links is defined %}
+                                    <div class="bg-white p-2 rounded border border-gray-200">Ссылок: {{ stage_data.total_links }}</div>
+                                    {% endif %}
+                                </div>
+                            </div>
+
+                        {# ============= META ============= #}
                         {% elif key == 'meta' and stage_data is mapping %}
                             <dl class="space-y-2">
                                 {% if stage_data.meta_title %}
                                 <div>
-                                    <dt class="text-xs text-gray-500 uppercase">Meta Title</dt>
+                                    <dt class="text-xs text-gray-500 uppercase">Meta Title ({{ stage_data.meta_title|length }}/70)</dt>
                                     <dd class="text-gray-900">{{ stage_data.meta_title }}</dd>
                                 </div>
                                 {% endif %}
                                 {% if stage_data.meta_description %}
                                 <div>
-                                    <dt class="text-xs text-gray-500 uppercase">Meta Description</dt>
+                                    <dt class="text-xs text-gray-500 uppercase">Meta Description ({{ stage_data.meta_description|length }}/160)</dt>
                                     <dd class="text-gray-900">{{ stage_data.meta_description }}</dd>
                                 </div>
                                 {% endif %}
@@ -334,6 +639,24 @@
                                 </div>
                                 {% endif %}
                             </dl>
+
+                        {# ============= FORMATTING ============= #}
+                        {% elif key == 'formatting' and stage_data is mapping %}
+                            <div class="space-y-2">
+                                {% if stage_data.cover_url %}
+                                <div>
+                                    <span class="text-xs text-gray-500 uppercase">Обложка</span>
+                                    <div class="mt-1">
+                                        <img src="{{ stage_data.cover_url }}" alt="{{ stage_data.cover_alt or 'Cover' }}" class="max-w-xs rounded border border-gray-200">
+                                    </div>
+                                </div>
+                                {% endif %}
+                                {% if stage_data.cover_alt %}
+                                <div class="text-xs text-gray-500">Alt: {{ stage_data.cover_alt }}</div>
+                                {% endif %}
+                            </div>
+
+                        {# ============= FALLBACK ============= #}
                         {% else %}
                             <pre class="whitespace-pre-wrap text-gray-700 text-xs overflow-x-auto">{{ stage_data | tojson(indent=2) if stage_data is mapping else stage_data }}</pre>
                         {% endif %}
