@@ -1125,51 +1125,56 @@ class OutlineResult:
 
         def parse_content_block(cb: dict) -> ContentBlock:
             return ContentBlock(
-                type=cb["type"],
-                goal=cb["goal"],
+                type=cb.get("type", "paragraph"),
+                goal=cb.get("goal", ""),
                 source_refs=parse_source_refs(cb.get("source_refs", {})),
             )
 
         def parse_subsection(ss: dict) -> Subsection:
             return Subsection(
-                id=ss["id"],
-                h3=ss["h3"],
-                purpose=ss["purpose"],
-                word_count_target=ss["word_count_target"],
+                id=ss.get("id", ""),
+                h3=ss.get("h3", ""),
+                purpose=ss.get("purpose", ""),
+                word_count_target=ss.get("word_count_target", 300),
                 must_answer_questions=ss.get("must_answer_questions", []),
                 content_blocks=[parse_content_block(cb) for cb in ss.get("content_blocks", [])],
             )
 
         def parse_section(s: dict) -> Section:
             return Section(
-                id=s["id"],
-                h2=s["h2"],
-                purpose=s["purpose"],
-                word_count_target=s["word_count_target"],
+                id=s.get("id", ""),
+                h2=s.get("h2", ""),
+                purpose=s.get("purpose", ""),
+                word_count_target=s.get("word_count_target", 500),
                 must_answer_questions=s.get("must_answer_questions", []),
                 content_blocks=[parse_content_block(cb) for cb in s.get("content_blocks", [])],
                 subsections=[parse_subsection(ss) for ss in s.get("subsections", [])],
             )
 
+        # Defensive parsing — LLM may omit optional sections
+        intro_data = data.get("introduction", {})
+        conclusion_data = data.get("conclusion", {})
+        coverage_data = data.get("coverage_check", {})
+
         return cls(
-            title=data["title"],
-            subtitle=data["subtitle"],
-            target_total_words=data["target_total_words"],
+            title=data.get("title", "Untitled"),
+            subtitle=data.get("subtitle", ""),
+            target_total_words=data.get("target_total_words", 2000),
             introduction=Introduction(
-                purpose=data["introduction"]["purpose"],
-                key_points=data["introduction"]["key_points"],
-                word_count_target=data["introduction"]["word_count_target"],
+                purpose=intro_data.get("purpose", "Introduce the topic"),
+                key_points=intro_data.get("key_points", []),
+                word_count_target=intro_data.get("word_count_target", 200),
             ),
-            sections=[parse_section(s) for s in data["sections"]],
+            sections=[parse_section(s) for s in data.get("sections", [])],
             conclusion=Conclusion(
-                purpose=data["conclusion"]["purpose"],
-                takeaways=data["conclusion"]["takeaways"],
-                word_count_target=data["conclusion"]["word_count_target"],
+                purpose=conclusion_data.get("purpose", "Summarize key takeaways"),
+                takeaways=conclusion_data.get("takeaways", []),
+                word_count_target=conclusion_data.get("word_count_target", 200),
             ),
             coverage_check=CoverageCheck(
-                all_must_answer_covered=data["coverage_check"]["all_must_answer_covered"],
-                uncovered_questions=data["coverage_check"].get("uncovered_questions", []),
-                missing_notes=data["coverage_check"].get("missing_notes"),
+                all_must_answer_covered=coverage_data.get("all_must_answer_covered", True),
+                uncovered_questions=coverage_data.get("uncovered_questions", []),
+                missing_notes=coverage_data.get("missing_notes"),
             ),
             eeat_plan=data.get("eeat_plan"),
         )
