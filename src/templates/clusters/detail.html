@@ -119,6 +119,20 @@
                 <span class="px-2 py-1 text-xs rounded bg-{{ brief_status_color.get(pillar_brief.status, 'gray') }}-100 text-{{ brief_status_color.get(pillar_brief.status, 'gray') }}-600">{{ pillar_brief.status }}</span>
             </div>
         </div>
+        {% if pillar_brief.secondary_keywords %}
+        <div class="mt-3">
+            <p class="text-xs font-medium text-gray-500 uppercase">Ключевые слова ({{ 1 + pillar_brief.secondary_keywords|length }}):</p>
+            <div class="mt-1 flex flex-wrap gap-1">
+                <span class="px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">{{ pillar_brief.target_keyword }}</span>
+                {% for kw in pillar_brief.secondary_keywords[:10] %}
+                <span class="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">{{ kw }}</span>
+                {% endfor %}
+                {% if pillar_brief.secondary_keywords|length > 10 %}
+                <span class="text-xs text-gray-400">+{{ pillar_brief.secondary_keywords|length - 10 }}</span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
         {% if pillar_brief.structure and pillar_brief.structure.must_answer_questions %}
         <div class="mt-3">
             <p class="text-xs font-medium text-gray-500 uppercase">Вопросы для ответа:</p>
@@ -266,21 +280,44 @@
 
 <!-- Keywords (B3) -->
 {% if cluster_keywords %}
+{% set clustered_kws = cluster_keywords|selectattr("status", "equalto", "clustered")|list %}
+{% set discovered_kws = cluster_keywords|rejectattr("status", "equalto", "clustered")|list %}
 <details class="mb-6">
     <summary class="bg-white shadow sm:rounded-lg p-4 cursor-pointer hover:bg-gray-50">
         <span class="text-base font-medium text-gray-900">Ключевые слова ({{ cluster_keywords|length }})</span>
+        <span class="ml-2 text-sm text-gray-500">
+            {{ clustered_kws|length }} в брифах / {{ discovered_kws|length }} обнаружено
+        </span>
     </summary>
     <div class="bg-white shadow sm:rounded-lg mt-1 p-4">
+        {% if clustered_kws %}
+        <p class="text-xs font-medium text-gray-500 uppercase mb-2">В брифах ({{ clustered_kws|length }})</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-4">
+            {% for kw in clustered_kws[:60] %}
+            <div class="flex justify-between text-sm py-1 px-2 bg-blue-50 rounded">
+                <span class="text-gray-800 truncate">{{ kw.keyword }}</span>
+                <span class="text-gray-500 ml-2 flex-shrink-0">{{ kw.search_volume or '-' }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% if clustered_kws|length > 60 %}
+        <p class="mb-4 text-xs text-gray-400">... и ещё {{ clustered_kws|length - 60 }} в брифах</p>
+        {% endif %}
+        {% endif %}
+
+        {% if discovered_kws %}
+        <p class="text-xs font-medium text-gray-500 uppercase mb-2">Обнаружено ({{ discovered_kws|length }})</p>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {% for kw in cluster_keywords[:60] %}
+            {% for kw in discovered_kws[:90] %}
             <div class="flex justify-between text-sm py-1 px-2 bg-gray-50 rounded">
                 <span class="text-gray-800 truncate">{{ kw.keyword }}</span>
                 <span class="text-gray-500 ml-2 flex-shrink-0">{{ kw.search_volume or '-' }}</span>
             </div>
             {% endfor %}
         </div>
-        {% if cluster_keywords|length > 60 %}
-        <p class="mt-2 text-xs text-gray-400">... и ещё {{ cluster_keywords|length - 60 }}</p>
+        {% if discovered_kws|length > 90 %}
+        <p class="mt-2 text-xs text-gray-400">... и ещё {{ discovered_kws|length - 90 }}</p>
+        {% endif %}
         {% endif %}
     </div>
 </details>

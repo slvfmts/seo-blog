@@ -998,6 +998,7 @@ class ClusterPlan:
     pillar: ArticleBrief
     cluster_articles: List[ArticleBrief]
     generated_at: str  # ISO-8601
+    discovered_keywords: List[Dict[str, Any]] = field(default_factory=list)  # [{keyword, volume, cpc, competition}]
 
     def to_dict(self) -> dict:
         return {
@@ -1006,6 +1007,7 @@ class ClusterPlan:
             "pillar": self.pillar.to_dict(),
             "cluster_articles": [a.to_dict() for a in self.cluster_articles],
             "generated_at": self.generated_at,
+            "discovered_keywords": self.discovered_keywords,
         }
 
     @classmethod
@@ -1016,6 +1018,7 @@ class ClusterPlan:
             pillar=ArticleBrief.from_dict(data["pillar"]),
             cluster_articles=[ArticleBrief.from_dict(a) for a in data.get("cluster_articles", [])],
             generated_at=data.get("generated_at", ""),
+            discovered_keywords=data.get("discovered_keywords", []),
         )
 
     @property

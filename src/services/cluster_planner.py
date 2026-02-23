@@ -80,9 +80,35 @@ class ClusterPlanner:
         competitor_headings = await self._analyze_competitors(search_data["top_urls"], region)
         logger.info(f"Step 2: extracted headings from {len(competitor_headings)} pages")
 
+        # Step 2b: Add competitor headings as keywords (short headings < 80 chars)
+        all_keywords = search_data["keywords"]
+        for page in competitor_headings:
+            for heading in page.get("headings", []):
+                if len(heading) < 80:
+                    all_keywords.add(heading.lower())
+        logger.info(f"Step 2b: {len(all_keywords)} keywords after adding headings")
+
+        # Step 2c: VolumeProvider suggestions (Wordstat/Rush associations)
+        if self.volume_provider:
+            # Pick 3 seed keywords: the topic + 2 related queries
+            suggestion_seeds = [big_topic]
+            search_queries_list = list(search_data["keywords"] - {big_topic})[:2]
+            suggestion_seeds.extend(search_queries_list)
+
+            for seed in suggestion_seeds[:3]:
+                try:
+                    suggestions = await self.volume_provider.get_suggestions(seed)
+                    for s in suggestions:
+                        all_keywords.add(s.lower().strip())
+                    logger.info(f"VolumeProvider suggestions for '{seed}': +{len(suggestions)} keywords")
+                except Exception as e:
+                    logger.warning(f"VolumeProvider suggestions error for '{seed}': {e}")
+
+            logger.info(f"Step 2c: {len(all_keywords)} keywords after suggestions")
+
         # Step 3: Volume enrichment via VolumeProvider (Wordstat for RU, DataForSEO for non-RU)
         kw_with_volumes = await self._enrich_volumes(
-            list(search_data["keywords"]), region,
+            list(all_keywords), region,
         )
         logger.info(f"Step 3: got volumes for {sum(1 for v in kw_with_volumes if v['volume'] > 0)} keywords")
 
@@ -91,8 +117,13 @@ class ClusterPlanner:
             big_topic, region, kw_with_volumes, competitor_headings,
             search_data["paa_questions"], target_count, knowledge_base_docs,
         )
+
+        # Attach all discovered keywords with volumes to plan
+        plan.discovered_keywords = kw_with_volumes
+
         logger.info(
-            f"Step 4: cluster plan ready — 1 pillar + {len(plan.cluster_articles)} cluster articles"
+            f"Step 4: cluster plan ready — 1 pillar + {len(plan.cluster_articles)} cluster articles, "
+            f"{len(kw_with_volumes)} discovered keywords"
         )
 
         return plan
@@ -114,14 +145,29 @@ class ClusterPlanner:
         if not self.serper_api_key:
             return {"keywords": all_keywords, "paa_questions": paa_questions, "top_urls": top_urls}
 
-        # Generate search queries around the topic
-        search_queries = [
-            big_topic,
-            f"{big_topic} для начинающих",
-            f"как {big_topic}",
-            f"{big_topic} советы",
-            f"лучший {big_topic}" if hl == "ru" else f"best {big_topic}",
-        ]
+        # Generate search queries around the topic (8-10 patterns for more coverage)
+        if hl == "ru":
+            search_queries = [
+                big_topic,
+                f"{big_topic} для начинающих",
+                f"как {big_topic}",
+                f"{big_topic} советы",
+                f"лучший {big_topic}",
+                f"{big_topic} примеры",
+                f"{big_topic} что это",
+                f"{big_topic} пошаговая инструкция",
+            ]
+        else:
+            search_queries = [
+                big_topic,
+                f"{big_topic} for beginners",
+                f"how to {big_topic}",
+                f"{big_topic} tips",
+                f"best {big_topic}",
+                f"{big_topic} examples",
+                f"what is {big_topic}",
+                f"{big_topic} step by step",
+            ]
 
         semaphore = asyncio.Semaphore(5)
 
@@ -305,9 +351,12 @@ class ClusterPlanner:
     ) -> ClusterPlan:
         """Step 4: LLM clusters REAL keywords and generates briefs."""
 
-        # Sort by volume, take top 200
+        # Sort by volume, take top 300 (increased from 200)
         kw_with_volumes.sort(key=lambda x: x["volume"], reverse=True)
-        top_keywords = kw_with_volumes[:200]
+        top_keywords = kw_with_volumes[:300]
+
+        # Build keyword lookup for post-processing
+        kw_volume_map = {kw["keyword"].lower().strip(): kw for kw in kw_with_volumes}
 
         # Format competitor headings for prompt
         competitor_section = ""
@@ -348,8 +397,8 @@ class ClusterPlanner:
 
 Сегодня: {today}
 
-## Реальные ключевые слова с объёмами из поиска:
-{json.dumps(top_keywords[:150], ensure_ascii=False, indent=2)}
+## Реальные ключевые слова с объёмами из поиска ({len(top_keywords)} шт.):
+{json.dumps(top_keywords[:200], ensure_ascii=False, indent=2)}
 {competitor_section}{paa_section}{kb_section}
 ## Задача:
 1. Выбери 1 pillar-статью (самая широкая тема, наибольший объём)
@@ -393,7 +442,10 @@ class ClusterPlanner:
 Правила:
 - У каждой статьи уникальный topic_boundaries (не пересекаются)
 - must_answer_questions: 5-10 конкретных вопросов (используй PAA если есть)
-- target_terms: 10-30 ключевых слов ИЗ СПИСКА ВЫШЕ (с реальными volumes)
+- target_terms для pillar: 30-50 ключевых слов ИЗ СПИСКА ВЫШЕ
+- target_terms для cluster: 15-25 ключевых слов ИЗ СПИСКА ВЫШЕ
+- ОБЯЗАТЕЛЬНО: минимум 15 target_terms на каждую статью, pillar — минимум 30
+- Каждое ключевое слово может попасть в НЕСКОЛЬКО статей если релевантно
 - estimated_volume: сумма volumes по target_terms
 - internal_links_plan: каждый cluster → pillar, pillar → все clusters
 - Приоритет по объёму: больше объём → выше приоритет (меньше число)
@@ -415,6 +467,40 @@ class ClusterPlanner:
             cluster_articles = [
                 ArticleBrief.from_dict(a) for a in data.get("cluster_articles", [])
             ]
+
+            # Post-processing: pad briefs with too few target_terms
+            all_briefs = [pillar] + cluster_articles
+            used_terms = set()
+            for brief in all_briefs:
+                used_terms.update(t.lower().strip() for t in brief.target_terms)
+
+            for brief in all_briefs:
+                min_terms = 30 if brief.role == "pillar" else 15
+                if len(brief.target_terms) < min_terms:
+                    # Find related keywords by matching words from title
+                    title_words = set(brief.title_candidate.lower().split())
+                    title_words -= {"в", "на", "для", "и", "с", "по", "от", "к", "из", "о",
+                                    "the", "a", "an", "in", "on", "for", "and", "with", "to", "of"}
+                    candidates = []
+                    for kw_data in kw_with_volumes:
+                        kw_lower = kw_data["keyword"].lower().strip()
+                        if kw_lower in {t.lower().strip() for t in brief.target_terms}:
+                            continue
+                        kw_words = set(kw_lower.split())
+                        overlap = title_words & kw_words
+                        if overlap:
+                            candidates.append((len(overlap), kw_data["volume"], kw_data["keyword"]))
+                    # Sort by overlap then volume
+                    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                    for _, _, kw_text in candidates:
+                        if len(brief.target_terms) >= min_terms:
+                            break
+                        brief.target_terms.append(kw_text)
+                    if len(brief.target_terms) < min_terms:
+                        logger.warning(
+                            f"Brief '{brief.title_candidate}' has only {len(brief.target_terms)} "
+                            f"target_terms (min {min_terms})"
+                        )
 
             return ClusterPlan(
                 big_topic=big_topic,
@@ -485,7 +571,7 @@ class ClusterPlanner:
             cluster_id=cluster.id,
             title=plan.pillar.title_candidate,
             target_keyword=plan.pillar.target_terms[0] if plan.pillar.target_terms else plan.big_topic,
-            secondary_keywords=plan.pillar.target_terms[1:30] if len(plan.pillar.target_terms) > 1 else [],
+            secondary_keywords=plan.pillar.target_terms[1:50] if len(plan.pillar.target_terms) > 1 else [],
             factual_mode=factual_mode,
             structure={
                 "role": plan.pillar.role,
@@ -527,23 +613,58 @@ class ClusterPlanner:
             )
             db_session.add(brief)
 
-        # Save all target keywords to the single cluster
+        # Save ALL discovered keywords to the cluster (not just target_terms)
         if site_id:
             seen_keywords = set()
+
+            # Build set of clustered keywords (assigned to briefs)
+            clustered_kws = set()
             all_articles = [plan.pillar] + plan.cluster_articles
             for article in all_articles:
-                for kw_text in article.target_terms[:30]:
+                for kw_text in article.target_terms:
+                    clustered_kws.add(kw_text.lower().strip())
+
+            # Save all discovered keywords with volumes
+            discovered_kw_map = {kw["keyword"].lower().strip(): kw for kw in plan.discovered_keywords}
+
+            # First: save clustered keywords (from briefs)
+            for article in all_articles:
+                for kw_text in article.target_terms:
                     kw_lower = kw_text.lower().strip()
                     if kw_lower not in seen_keywords:
                         seen_keywords.add(kw_lower)
+                        metrics = discovered_kw_map.get(kw_lower, {})
                         kw = Keyword(
                             id=uuid4(),
                             site_id=site_id,
                             keyword=kw_text,
                             cluster_id=cluster.id,
+                            search_volume=metrics.get("volume", 0),
+                            cpc=metrics.get("cpc", 0),
                             status="clustered",
                         )
                         db_session.add(kw)
+
+            # Then: save remaining discovered keywords (not assigned to any brief)
+            for kw_data in plan.discovered_keywords:
+                kw_lower = kw_data["keyword"].lower().strip()
+                if kw_lower not in seen_keywords:
+                    seen_keywords.add(kw_lower)
+                    kw = Keyword(
+                        id=uuid4(),
+                        site_id=site_id,
+                        keyword=kw_data["keyword"],
+                        cluster_id=cluster.id,
+                        search_volume=kw_data.get("volume", 0),
+                        cpc=kw_data.get("cpc", 0),
+                        status="discovered",
+                    )
+                    db_session.add(kw)
+
+            logger.info(
+                f"Saved keywords: {len(clustered_kws & seen_keywords)} clustered + "
+                f"{len(seen_keywords) - len(clustered_kws & seen_keywords)} discovered = {len(seen_keywords)} total"
+            )
 
         db_session.commit()
         logger.info(f"Saved cluster plan: {cluster.id} with 1 pillar + {len(plan.cluster_articles)} cluster briefs")
