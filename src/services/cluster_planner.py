@@ -98,9 +98,13 @@ class ClusterPlanner:
             for seed in suggestion_seeds[:3]:
                 try:
                     suggestions = await self.volume_provider.get_suggestions(seed)
+                    added = 0
                     for s in suggestions:
-                        all_keywords.add(s.lower().strip())
-                    logger.info(f"VolumeProvider suggestions for '{seed}': +{len(suggestions)} keywords")
+                        s_clean = s.lower().strip()
+                        if _is_valid_keyword(s_clean):
+                            all_keywords.add(s_clean)
+                            added += 1
+                    logger.info(f"VolumeProvider suggestions for '{seed}': +{added} valid keywords (of {len(suggestions)})")
                 except Exception as e:
                     logger.warning(f"VolumeProvider suggestions error for '{seed}': {e}")
 
@@ -327,8 +331,8 @@ class ClusterPlanner:
                 except Exception as e:
                     logger.warning(f"Volume enrichment error for chunk {i}: {e}")
 
-                if i + batch_size < len(keywords):
-                    await asyncio.sleep(1.5)
+                if i + batch_size < len(valid_keywords):
+                    await asyncio.sleep(3.0)  # Wordstat rate limit: ~10 req/sec
 
             # Merge volumes into kw_data
             for item in kw_data:
@@ -832,16 +836,22 @@ class ClusterPlanner:
 
 def _is_valid_keyword(text: str) -> bool:
     """Check if a string looks like a valid search keyword (not page noise)."""
-    if not text or len(text) < 3 or len(text) > 80:
+    if not text or len(text) < 3 or len(text) > 60:
         return False
-    # Skip lines starting with bullet markers
-    if text.startswith(("*", "•", "-", "–", "—")):
+    # Skip lines starting with bullet markers or numbering
+    if text[0] in "*•-–—" or (text[0].isdigit() and ". " in text[:5]):
         return False
-    # Skip lines with special chars typical of page content, not keywords
-    if any(c in text for c in [";", "(", ")", "—", "–", "→", "←", "\\", "|"]):
+    # Skip lines with special chars typical of page content, not search queries
+    if any(c in text for c in [";", "(", ")", "—", "–", "→", "←", "\\", "|", ":", "?", "!"]):
+        return False
+    # Skip lines with multiple consecutive spaces (table-like content)
+    if "  " in text:
         return False
     # Skip separator lines
     if len(set(text)) <= 3:
+        return False
+    # Skip single generic words (too broad for keyword targeting)
+    if len(text.split()) == 1 and len(text) < 15:
         return False
     # Skip very long phrases (> 6 words) — not real search queries
     if len(text.split()) > 6:
