@@ -314,7 +314,7 @@ class TestVolumeProviderFactory:
         settings.dataforseo_password = ""
 
         provider = get_volume_provider("ru", settings)
-        assert provider.source_name == "yandex_wordstat"
+        assert provider.source_name == "wordstat"
 
     def test_rush_fallback_for_ru(self):
         settings = MagicMock()
@@ -325,7 +325,7 @@ class TestVolumeProviderFactory:
         settings.dataforseo_password = ""
 
         provider = get_volume_provider("ru", settings)
-        assert provider.source_name == "rush_analytics"
+        assert provider.source_name == "rush"
 
     def test_dataforseo_for_en(self):
         settings = MagicMock()
@@ -484,32 +484,50 @@ class TestHeadingExtraction:
 class TestSequentialGenerationGuard:
     """Test that _run_cluster_pipeline_sequential checks cluster cancellation."""
 
+    def _make_mock_db(self, cluster_status="in_progress", brief_status="cancelled"):
+        """Create a mock DB that returns cluster/brief with given statuses."""
+        mock_cluster = MagicMock()
+        mock_cluster.status = cluster_status
+
+        mock_brief = MagicMock()
+        mock_brief.status = brief_status
+
+        mock_db = MagicMock()
+
+        def mock_query(model):
+            result = MagicMock()
+            def mock_filter(*args, **kwargs):
+                inner = MagicMock()
+                # Determine which model is being queried
+                from src.db.models import Cluster, Brief
+                if model is Cluster:
+                    inner.first.return_value = mock_cluster
+                else:
+                    inner.first.return_value = mock_brief
+                return inner
+            result.filter = mock_filter
+            return result
+
+        mock_db.query = mock_query
+        mock_db.commit = MagicMock()
+        mock_db.close = MagicMock()
+        return mock_db
+
     def test_skips_cancelled_brief(self):
         """Cancelled briefs are skipped in the queue."""
         from src.api.routes.ui import _run_cluster_pipeline_sequential
-        from unittest.mock import patch as mock_patch
 
-        mock_brief = MagicMock()
-        mock_brief.status = "cancelled"
+        mock_db = self._make_mock_db(cluster_status="in_progress", brief_status="cancelled")
 
-        mock_cluster = MagicMock()
-        mock_cluster.status = "in_progress"
-
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.side_effect = [
-            mock_cluster,  # cluster query
-            mock_brief,    # brief query
-        ]
-
-        with mock_patch("src.api.routes.ui.SessionLocal", return_value=mock_db):
-            with mock_patch("src.api.routes.ui._run_pipeline_for_brief") as mock_run:
+        with patch("src.db.session.SessionLocal", return_value=mock_db):
+            with patch("src.api.routes.ui._run_pipeline_for_brief") as mock_run:
                 _run_cluster_pipeline_sequential(
-                    brief_queue=[("brief-1", "Test Topic", {})],
-                    site_id="site-1",
+                    brief_queue=[(str(uuid4()), "Test Topic", {})],
+                    site_id=str(uuid4()),
                     region="ru",
                     settings=MagicMock(),
                     knowledge_base_docs=[],
-                    cluster_id="cluster-1",
+                    cluster_id=str(uuid4()),
                     step_by_step=False,
                     factual_mode="default",
                 )
@@ -518,26 +536,21 @@ class TestSequentialGenerationGuard:
     def test_stops_on_cancelled_cluster(self):
         """If cluster is cancelled, entire queue stops."""
         from src.api.routes.ui import _run_cluster_pipeline_sequential
-        from unittest.mock import patch as mock_patch
 
-        mock_cluster = MagicMock()
-        mock_cluster.status = "cancelled"
+        mock_db = self._make_mock_db(cluster_status="cancelled", brief_status="queued")
 
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.return_value = mock_cluster
-
-        with mock_patch("src.api.routes.ui.SessionLocal", return_value=mock_db):
-            with mock_patch("src.api.routes.ui._run_pipeline_for_brief") as mock_run:
+        with patch("src.db.session.SessionLocal", return_value=mock_db):
+            with patch("src.api.routes.ui._run_pipeline_for_brief") as mock_run:
                 _run_cluster_pipeline_sequential(
                     brief_queue=[
-                        ("brief-1", "Topic 1", {}),
-                        ("brief-2", "Topic 2", {}),
+                        (str(uuid4()), "Topic 1", {}),
+                        (str(uuid4()), "Topic 2", {}),
                     ],
-                    site_id="site-1",
+                    site_id=str(uuid4()),
                     region="ru",
                     settings=MagicMock(),
                     knowledge_base_docs=[],
-                    cluster_id="cluster-1",
+                    cluster_id=str(uuid4()),
                     step_by_step=False,
                     factual_mode="default",
                 )
