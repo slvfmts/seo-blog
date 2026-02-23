@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import traceback
 import uuid as uuid_lib
 from uuid import UUID
@@ -39,8 +40,16 @@ def md_to_html(text: str) -> str:
     return markdown.markdown(text, extensions=['tables', 'fenced_code'])
 
 
-# Register custom filter
+def strip_first_h1(text: str) -> str:
+    """Remove first H1 heading from markdown (template already shows title)."""
+    if not text:
+        return ""
+    return re.sub(r'^#\s+.+\n?', '', text, count=1)
+
+
+# Register custom filters
 templates.env.filters['markdown'] = md_to_html
+templates.env.filters['strip_first_h1'] = strip_first_h1
 
 
 # ============ Auth Pages ============
@@ -1483,11 +1492,12 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
     settings = get_settings()
 
     draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
-    if not draft:
-        raise HTTPException(status_code=404, detail="Draft not found")
-
-    if draft.status != "approved":
+    if not draft or draft.status != "approved":
         return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=303)
+
+    # Atomically mark as publishing to prevent double-submit
+    draft.status = "publishing"
+    db.commit()
 
     try:
         publisher = GhostPublisher(settings.ghost_url, settings.ghost_admin_key)
@@ -1583,7 +1593,9 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
                 pass  # Graceful degradation — publish succeeds even if linking fails
 
     except Exception:
-        pass  # Handle error silently for now
+        # Rollback to approved so user can retry
+        draft.status = "approved"
+        db.commit()
 
     return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=303)
 

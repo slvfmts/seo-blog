@@ -137,8 +137,17 @@ class SEOLintValidator:
                 expected="30-60",
             )
 
+    @staticmethod
+    def _stem_match(word_a: str, word_b: str, min_stem: int = 4) -> bool:
+        """Check if two words share a common stem prefix (for Russian morphology)."""
+        stem_len = min(min_stem, len(word_a), len(word_b))
+        if stem_len < 3:
+            # Short words: require exact match
+            return word_a == word_b
+        return word_a[:stem_len] == word_b[:stem_len]
+
     def _check_title_keyword(self, title: str, keyword: str) -> Issue:
-        """Check if title contains keyword."""
+        """Check if title contains keyword (with stem-based matching for Russian)."""
         if not title or not keyword:
             return Issue(
                 check="title_keyword",
@@ -149,6 +158,7 @@ class SEOLintValidator:
         title_lower = title.lower()
         keyword_lower = keyword.lower()
 
+        # Exact substring match
         if keyword_lower in title_lower:
             return Issue(
                 check="title_keyword",
@@ -156,15 +166,34 @@ class SEOLintValidator:
                 message="Title contains target keyword",
             )
 
-        # Check partial match (any word from keyword)
-        keyword_words = keyword_lower.split()
-        matches = sum(1 for word in keyword_words if word in title_lower)
+        # Stem-based word matching (handles Russian morphology)
+        keyword_words = [w for w in keyword_lower.split() if len(w) >= 2]
+        title_words = [w for w in re.findall(r'[a-zа-яё]+', title_lower) if len(w) >= 2]
 
-        if matches >= len(keyword_words) / 2:
+        if not keyword_words:
+            return Issue(
+                check="title_keyword",
+                severity=Severity.FAIL,
+                message="Missing title or keyword",
+            )
+
+        stem_matches = 0
+        for kw_word in keyword_words:
+            if any(self._stem_match(kw_word, tw) for tw in title_words):
+                stem_matches += 1
+
+        if stem_matches == len(keyword_words):
+            return Issue(
+                check="title_keyword",
+                severity=Severity.PASS,
+                message="Title contains target keyword (morphological match)",
+            )
+
+        if stem_matches >= len(keyword_words) / 2:
             return Issue(
                 check="title_keyword",
                 severity=Severity.WARNING,
-                message=f"Title partially contains keyword ({matches}/{len(keyword_words)} words)",
+                message=f"Title partially contains keyword ({stem_matches}/{len(keyword_words)} words)",
             )
 
         return Issue(

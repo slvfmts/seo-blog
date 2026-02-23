@@ -43,11 +43,14 @@ class MetaStage(WritingStage):
             # Step 1: LLM-generated meta (title, description, slug)
             prompt_template = self._load_prompt("meta_v1")
 
+            target_keyword = context.intent.topic
+
             prompt = prompt_template.replace("{{topic}}", context.intent.topic)
             prompt = prompt.replace("{{primary_intent}}", context.intent.primary_intent)
             prompt = prompt.replace("{{audience_role}}", context.intent.audience.role)
             prompt = prompt.replace("{{article_title}}", context.outline.title)
             prompt = prompt.replace("{{article_md}}", context.edited_md)
+            prompt = prompt.replace("{{target_keyword}}", target_keyword)
 
             response_text, tokens = self._call_llm(
                 prompt,

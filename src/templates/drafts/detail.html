@@ -47,6 +47,14 @@
                         <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-green-100 text-green-800">Готово</span>
                         {% elif draft.status == 'approved' %}
                         <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">Одобрено</span>
+                        {% elif draft.status == 'publishing' %}
+                        <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                            <svg class="animate-spin h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            Публикация...
+                        </span>
                         {% elif draft.status == 'published' %}
                         <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">Опубликовано</span>
                         {% elif draft.status in ('failed', 'pipeline_failed') %}
@@ -150,7 +158,7 @@
             {% if draft.content_md %}
             <div class="px-6 py-4">
                 <div class="prose max-w-none">
-                    {{ draft.content_md | markdown | safe }}
+                    {{ draft.content_md | strip_first_h1 | markdown | safe }}
                 </div>
             </div>
             {% elif is_paused %}
@@ -1004,8 +1012,10 @@
     {% if draft.status == 'approved' %}
     const publishForm = document.getElementById('publish-form');
     if (publishForm) {
-        publishForm.addEventListener('submit', function() {
-            document.getElementById('publish-btn').disabled = true;
+        publishForm.addEventListener('submit', function(e) {
+            const btn = document.getElementById('publish-btn');
+            if (btn.disabled) { e.preventDefault(); return; }
+            btn.disabled = true;
             document.getElementById('pub-btn-text').classList.add('hidden');
             document.getElementById('pub-btn-loading').classList.remove('hidden');
         });
