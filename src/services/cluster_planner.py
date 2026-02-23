@@ -462,12 +462,30 @@ class ClusterPlanner:
 - Ответь ТОЛЬКО JSON, без markdown-обёртки"""
 
         try:
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=8192,
-                temperature=0.5,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            # Retry on transient proxy errors (401/429/5xx)
+            import time as _time
+            last_error = None
+            for attempt in range(3):
+                try:
+                    response = self.client.messages.create(
+                        model=self.model,
+                        max_tokens=8192,
+                        temperature=0.5,
+                        messages=[{"role": "user", "content": prompt}],
+                    )
+                    break
+                except Exception as api_err:
+                    last_error = api_err
+                    err_str = str(api_err)
+                    if "401" in err_str or "429" in err_str or "529" in err_str or "500" in err_str:
+                        wait = 5 * (attempt + 1)
+                        logger.warning(f"Clustering LLM attempt {attempt+1}/3 failed ({err_str[:80]}), retrying in {wait}s")
+                        _time.sleep(wait)
+                    else:
+                        raise
+            else:
+                raise last_error
+
             text = response.content[0].text.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0]
