@@ -158,6 +158,7 @@ class ResearchStage(WritingStage):
                     json.dump(queries.to_dict(), f, ensure_ascii=False, indent=2)
 
             search_results = []
+            expand_paa = context.config.get("expand_paa", True)
 
             # In kb_only mode: skip web search entirely
             if factual_mode != "kb_only":
@@ -165,7 +166,6 @@ class ResearchStage(WritingStage):
                 search_results = await self._execute_searches(context)
 
                 # Step 3: PAA Expansion (if enabled)
-                expand_paa = context.config.get("expand_paa", True)
                 if expand_paa and self.serper_api_key:
                     paa_results = await self._expand_paa_queries(context, search_results)
                     search_results.extend(paa_results)
