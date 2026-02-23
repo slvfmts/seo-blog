@@ -222,7 +222,7 @@ class RushAnalyticsProvider(VolumeProvider):
                         "yandexRegionId": self.region_id,
                         "depth": 1,
                         "keywords": [keyword],
-                        "stopwords": [],
+                        "stopwords": ["xxx_placeholder"],
                     },
                     timeout=self.timeout,
                 )
@@ -265,5 +265,8 @@ class RushAnalyticsProvider(VolumeProvider):
                 timeout=10.0,
             )
             if resp.status_code == 200:
-                return resp.json()
+                data = resp.json()
+                if isinstance(data, dict):
+                    return data
+                return {"balance": data}
             return {"error": f"HTTP {resp.status_code}: {resp.text[:300]}"}
