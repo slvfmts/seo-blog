@@ -246,8 +246,12 @@ async def topic_detail(
         models.Cluster.parent_cluster_id.is_(None),
     ).order_by(models.Cluster.created_at.desc()).all()
 
-    # Enrich clusters with brief counts
-    for cluster in clusters:
+    # Split clusters into discovered / planned
+    discovered_clusters = [c for c in clusters if c.status == "discovered"]
+    planned_clusters = [c for c in clusters if c.status != "discovered"]
+
+    # Enrich planned clusters with brief counts
+    for cluster in planned_clusters:
         child_ids = [c.id for c in cluster.children] if cluster.children else []
         all_ids = [cluster.id] + child_ids
         cluster.brief_count = db.query(models.Brief).filter(
@@ -269,7 +273,8 @@ async def topic_detail(
     return templates.TemplateResponse("topics/detail.html", {
         "request": request,
         "topic": topic,
-        "clusters": clusters,
+        "clusters": planned_clusters,
+        "discovered_clusters": discovered_clusters,
         "article_count": article_count,
         "total_traffic": total_traffic,
         "all_folders": all_folders,
@@ -959,29 +964,113 @@ async def discover_clusters_for_topic(
             volume_provider=volume_provider,
         )
 
-        # Load KB docs
+        niche_boundaries = topic.niche_boundaries if topic.niche_boundaries else None
+
+        discoveries = await planner.discover_clusters(
+            big_topic=topic.name,
+            region=region,
+            target_clusters=5,
+            niche_boundaries=niche_boundaries,
+        )
+
+        if not discoveries:
+            return RedirectResponse(
+                url=f"/ui/topics/{topic_id}?error=Не удалось найти подкластеры",
+                status_code=303,
+            )
+
+        await planner.save_discovered_clusters(discoveries, str(topic.id), region, db)
+
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?success=Найдено {len(discoveries)} подкластеров",
+            status_code=303,
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error={str(e)[:200]}",
+            status_code=303,
+        )
+
+
+@router.post("/clusters/{cluster_id}/plan", response_class=HTMLResponse)
+async def plan_discovered_cluster(
+    request: Request,
+    cluster_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Run full planning (keywords + briefs) for a discovered cluster."""
+    settings = get_settings()
+
+    cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    topic_id = cluster.site_id
+    if cluster.status != "discovered":
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error=Кластер уже запланирован",
+            status_code=303,
+        )
+
+    if not settings.anthropic_api_key or not settings.serper_api_key:
+        return RedirectResponse(
+            url=f"/ui/topics/{topic_id}?error=ANTHROPIC_API_KEY and SERPER_API_KEY required",
+            status_code=303,
+        )
+
+    try:
+        import anthropic
+        from src.services.cluster_planner import ClusterPlanner
+
+        if settings.anthropic_proxy_url and settings.anthropic_proxy_secret:
+            client = anthropic.Anthropic(
+                api_key=settings.anthropic_api_key,
+                base_url=settings.anthropic_proxy_url,
+                default_headers={"x-proxy-token": settings.anthropic_proxy_secret},
+            )
+        else:
+            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+        region = cluster.region or "ru"
+
+        from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
+        volume_provider = get_volume_provider(region=region, settings=settings)
+
+        planner = ClusterPlanner(
+            anthropic_client=client,
+            serper_api_key=settings.serper_api_key,
+            volume_provider=volume_provider,
+        )
+
+        # Load KB docs from topic
         kb_docs = []
-        for folder in topic.knowledge_folders:
-            for doc in folder.documents:
-                if doc.content_text:
-                    kb_docs.append({
-                        "id": str(doc.id),
-                        "title": doc.original_filename,
-                        "content_text": doc.content_text,
-                        "word_count": doc.word_count or 0,
-                    })
+        if topic_id:
+            topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
+            if topic:
+                for folder in topic.knowledge_folders:
+                    for doc in folder.documents:
+                        if doc.content_text:
+                            kb_docs.append({
+                                "id": str(doc.id),
+                                "title": doc.original_filename,
+                                "content_text": doc.content_text,
+                                "word_count": doc.word_count or 0,
+                            })
 
         plan = await planner.plan(
-            big_topic=topic.name,
+            big_topic=cluster.name,
             region=region,
             target_count=10,
             knowledge_base_docs=kb_docs if kb_docs else None,
         )
 
-        cluster_id = await planner.save_to_db(plan, str(topic.id), db)
+        await planner.save_plan_to_existing_cluster(plan, cluster, db)
 
         return RedirectResponse(
-            url=f"/ui/topics/{topic_id}?success=Найдено {1 + len(plan.cluster_articles)} кластеров",
+            url=f"/ui/clusters/{cluster_id}",
             status_code=303,
         )
 

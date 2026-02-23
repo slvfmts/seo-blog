@@ -529,40 +529,136 @@ class ClusterPlanner:
                 generated_at=datetime.now(timezone.utc).isoformat(),
             )
 
-    async def save_to_db(self, plan: ClusterPlan, site_id: Optional[str], db_session, factual_mode: str = "default", region: str = "ru") -> str:
+    async def discover_clusters(
+        self,
+        big_topic: str,
+        region: str = "ru",
+        target_clusters: int = 5,
+        niche_boundaries: Optional[dict] = None,
+        seed_keywords: Optional[List[str]] = None,
+    ) -> list[dict]:
         """
-        Save cluster plan to database.
-
-        Creates ONE Cluster + N Brief records (flat model, no child clusters).
-
-        Args:
-            plan: The generated cluster plan
-            site_id: Site UUID (can be None for standalone clusters)
-            db_session: SQLAlchemy session
-            factual_mode: default | kb_priority | kb_only
-            region: Region code
-
-        Returns:
-            Cluster ID
+        Lightweight discovery: 3-4 Serper queries + 1 LLM call → 4-7 subclusters.
+        Returns list of dicts: [{name, description, estimated_articles, estimated_volume,
+                                  competition_level, sample_keywords}]
         """
-        from ..db.models import Cluster, Brief, Keyword
+        logger.info(f"discover_clusters: '{big_topic}' (region={region}, target={target_clusters})")
 
-        # Create single cluster for the whole plan
-        total_volume = (plan.pillar.estimated_volume or 0) + sum(
-            a.estimated_volume or 0 for a in plan.cluster_articles
-        )
-        cluster = Cluster(
-            id=uuid4(),
-            site_id=site_id,
-            name=plan.big_topic,
-            intent=plan.pillar.primary_intent,
-            topic_type="pillar",
-            estimated_traffic=total_volume,
-            factual_mode=factual_mode,
-            region=region,
-            status="planned",
-        )
-        db_session.add(cluster)
+        # Step 1: Serper search + autocomplete for big_topic + 2 variations
+        search_data = await self._discover_keywords(big_topic, region)
+        logger.info(f"discover_clusters: {len(search_data['keywords'])} keywords from Serper")
+
+        # Format keywords for prompt
+        kw_list = sorted(search_data["keywords"])[:100]
+        paa_list = search_data["paa_questions"][:20]
+
+        niche_section = ""
+        if niche_boundaries:
+            niche_section = f"""
+Границы ниши:
+- Включить: {', '.join(niche_boundaries.get('include', []))}
+- Исключить: {', '.join(niche_boundaries.get('exclude', []))}
+- Целевая аудитория: {niche_boundaries.get('target_audience', '')}
+"""
+
+        seed_section = ""
+        if seed_keywords:
+            seed_section = f"\nДополнительные ключевые слова от пользователя: {', '.join(seed_keywords)}\n"
+
+        prompt = f"""Ты SEO-стратег. Для темы "{big_topic}" (регион: {region}) предложи {target_clusters} тематических подкластеров.
+
+## Данные из поиска:
+Найденные ключевые слова ({len(kw_list)} шт.): {json.dumps(kw_list, ensure_ascii=False)}
+
+Вопросы «Люди также спрашивают» ({len(paa_list)} шт.): {json.dumps(paa_list, ensure_ascii=False)}
+{niche_section}{seed_section}
+## Задача:
+Предложи {target_clusters} тематических подкластеров для контент-стратегии.
+
+Правила:
+- Каждый кластер — отдельное направление контента с 3-15 статьями
+- Кластеры НЕ должны пересекаться по темам
+- Название кластера — короткое и понятное (2-5 слов)
+- Описание — 1-2 предложения о чём этот кластер
+- sample_keywords — 3-5 примеров ключевых слов ИЗ СПИСКА ВЫШЕ
+- estimated_articles — сколько статей можно написать (3-15)
+- competition_level — low / medium / high
+
+## Формат ответа (строго JSON, без markdown-обёртки):
+[
+  {{
+    "name": "Название подкластера",
+    "description": "Описание направления контента",
+    "estimated_articles": 8,
+    "estimated_volume": 5000,
+    "competition_level": "medium",
+    "sample_keywords": ["ключ1", "ключ2", "ключ3"]
+  }}
+]"""
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                temperature=0.5,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+            discoveries = json.loads(text)
+            logger.info(f"discover_clusters: LLM returned {len(discoveries)} subclusters")
+            return discoveries
+        except Exception as e:
+            logger.error(f"discover_clusters LLM failed: {e}")
+            return []
+
+    async def save_discovered_clusters(
+        self,
+        discoveries: list[dict],
+        site_id: Optional[str],
+        region: str,
+        db_session,
+    ) -> list[str]:
+        """
+        Save each discovered subcluster as Cluster(status='discovered').
+        Returns list of created cluster IDs.
+        """
+        from ..db.models import Cluster
+
+        cluster_ids = []
+        for d in discoveries:
+            cluster = Cluster(
+                id=uuid4(),
+                site_id=site_id,
+                name=d["name"],
+                description=d.get("description", ""),
+                topic_type="cluster",
+                estimated_traffic=d.get("estimated_volume", 0),
+                competition_level=d.get("competition_level"),
+                region=region,
+                status="discovered",
+            )
+            db_session.add(cluster)
+            cluster_ids.append(str(cluster.id))
+
+        db_session.commit()
+        logger.info(f"Saved {len(cluster_ids)} discovered clusters for site_id={site_id}")
+        return cluster_ids
+
+    def _save_briefs_and_keywords(
+        self,
+        plan: ClusterPlan,
+        cluster,
+        site_id: Optional[str],
+        db_session,
+        factual_mode: str = "default",
+    ):
+        """
+        Create Brief + Keyword records for a cluster plan.
+        Shared logic used by save_to_db() and save_plan_to_existing_cluster().
+        """
+        from ..db.models import Brief, Keyword
 
         # Create brief for pillar article
         pillar_brief = Brief(
@@ -588,8 +684,8 @@ class ClusterPlanner:
         )
         db_session.add(pillar_brief)
 
-        # Create briefs for cluster articles — ALL in the same cluster
-        for i, article in enumerate(plan.cluster_articles):
+        # Create briefs for cluster articles
+        for article in plan.cluster_articles:
             brief = Brief(
                 id=uuid4(),
                 site_id=site_id,
@@ -613,21 +709,17 @@ class ClusterPlanner:
             )
             db_session.add(brief)
 
-        # Save ALL discovered keywords to the cluster (not just target_terms)
+        # Save discovered keywords
         if site_id:
             seen_keywords = set()
-
-            # Build set of clustered keywords (assigned to briefs)
             clustered_kws = set()
             all_articles = [plan.pillar] + plan.cluster_articles
             for article in all_articles:
                 for kw_text in article.target_terms:
                     clustered_kws.add(kw_text.lower().strip())
 
-            # Save all discovered keywords with volumes
-            discovered_kw_map = {kw["keyword"].lower().strip(): kw for kw in plan.discovered_keywords}
+            discovered_kw_map = {kw["keyword"].lower().strip(): kw for kw in (plan.discovered_keywords or [])}
 
-            # First: save clustered keywords (from briefs)
             for article in all_articles:
                 for kw_text in article.target_terms:
                     kw_lower = kw_text.lower().strip()
@@ -645,8 +737,7 @@ class ClusterPlanner:
                         )
                         db_session.add(kw)
 
-            # Then: save remaining discovered keywords (not assigned to any brief)
-            for kw_data in plan.discovered_keywords:
+            for kw_data in (plan.discovered_keywords or []):
                 kw_lower = kw_data["keyword"].lower().strip()
                 if kw_lower not in seen_keywords:
                     seen_keywords.add(kw_lower)
@@ -665,6 +756,68 @@ class ClusterPlanner:
                 f"Saved keywords: {len(clustered_kws & seen_keywords)} clustered + "
                 f"{len(seen_keywords) - len(clustered_kws & seen_keywords)} discovered = {len(seen_keywords)} total"
             )
+
+    async def save_plan_to_existing_cluster(
+        self,
+        plan: ClusterPlan,
+        cluster,
+        db_session,
+        factual_mode: str = "default",
+    ) -> str:
+        """
+        Save briefs/keywords into an EXISTING cluster (e.g. discovered → planned).
+        """
+        site_id = str(cluster.site_id) if cluster.site_id else None
+        self._save_briefs_and_keywords(plan, cluster, site_id, db_session, factual_mode)
+
+        # Update cluster metadata
+        total_volume = (plan.pillar.estimated_volume or 0) + sum(
+            a.estimated_volume or 0 for a in plan.cluster_articles
+        )
+        cluster.estimated_traffic = total_volume
+        cluster.intent = plan.pillar.primary_intent
+        cluster.status = "planned"
+
+        db_session.commit()
+        logger.info(f"Saved plan to existing cluster {cluster.id}: 1 pillar + {len(plan.cluster_articles)} briefs")
+        return str(cluster.id)
+
+    async def save_to_db(self, plan: ClusterPlan, site_id: Optional[str], db_session, factual_mode: str = "default", region: str = "ru") -> str:
+        """
+        Save cluster plan to database.
+
+        Creates ONE Cluster + N Brief records (flat model, no child clusters).
+
+        Args:
+            plan: The generated cluster plan
+            site_id: Site UUID (can be None for standalone clusters)
+            db_session: SQLAlchemy session
+            factual_mode: default | kb_priority | kb_only
+            region: Region code
+
+        Returns:
+            Cluster ID
+        """
+        from ..db.models import Cluster
+
+        # Create single cluster for the whole plan
+        total_volume = (plan.pillar.estimated_volume or 0) + sum(
+            a.estimated_volume or 0 for a in plan.cluster_articles
+        )
+        cluster = Cluster(
+            id=uuid4(),
+            site_id=site_id,
+            name=plan.big_topic,
+            intent=plan.pillar.primary_intent,
+            topic_type="pillar",
+            estimated_traffic=total_volume,
+            factual_mode=factual_mode,
+            region=region,
+            status="planned",
+        )
+        db_session.add(cluster)
+
+        self._save_briefs_and_keywords(plan, cluster, site_id, db_session, factual_mode)
 
         db_session.commit()
         logger.info(f"Saved cluster plan: {cluster.id} with 1 pillar + {len(plan.cluster_articles)} cluster briefs")

@@ -264,6 +264,7 @@ class Cluster(Base):
     site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=True)  # nullable — cluster can exist without a topic
 
     name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
     primary_keyword_id = Column(UUID(as_uuid=True), nullable=True)  # FK добавим позже
 
     # Intent: informational | transactional | navigational | commercial
