@@ -2692,6 +2692,7 @@ async def generate_single_brief(
     cluster_id: UUID,
     brief_id: UUID,
     background_tasks: BackgroundTasks,
+    step_by_step: str = Form("false"),
     db: Session = Depends(get_db),
 ):
     """Generate article for a single brief."""
@@ -2753,7 +2754,7 @@ async def generate_single_brief(
         settings,
         kb_docs,
         str(cluster_id),
-        False,  # not step_by_step for single brief
+        step_by_step.lower() in ("true", "1", "yes"),
         cluster.factual_mode or "default",
     )
 
