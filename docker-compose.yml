@@ -2,13 +2,30 @@ version: "3.8"
 
 services:
   # ===================
-  # Ghost CMS
+  # Nginx Reverse Proxy
+  # ===================
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - certbot-webroot:/var/www/certbot:ro
+      - certbot-certs:/etc/letsencrypt:ro
+    depends_on:
+      - ghost
+      - ghost-2
+    networks:
+      - internal
+
+  # ===================
+  # Ghost CMS (sandbox)
   # ===================
   ghost:
     image: ghost:5-alpine
     restart: always
-    ports:
-      - "80:2368"
     environment:
       url: http://95.163.230.43
       database__client: mysql
@@ -19,6 +36,27 @@ services:
       mail__transport: Direct
     volumes:
       - ghost-content:/var/lib/ghost/content
+    depends_on:
+      - ghost-db
+    networks:
+      - internal
+
+  # ===================
+  # Ghost CMS 2 (notes.editors.one)
+  # ===================
+  ghost-2:
+    image: ghost:5-alpine
+    restart: always
+    environment:
+      url: http://notes.editors.one
+      database__client: mysql
+      database__connection__host: ghost-db
+      database__connection__user: ghost2
+      database__connection__password: ghost2dbpass
+      database__connection__database: ghost2
+      mail__transport: Direct
+    volumes:
+      - ghost-2-content:/var/lib/ghost/content
     depends_on:
       - ghost-db
     networks:
@@ -57,6 +95,8 @@ services:
       ANTHROPIC_PROXY_URL: ${ANTHROPIC_PROXY_URL}
       ANTHROPIC_PROXY_SECRET: ${ANTHROPIC_PROXY_SECRET}
       SERPER_API_KEY: ${SERPER_API_KEY}
+      DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN}
+      DATAFORSEO_PASSWORD: ${DATAFORSEO_PASSWORD}
       SECRET_KEY: ${SECRET_KEY}
       AUTH_EMAIL: ${AUTH_EMAIL}
       AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH}
@@ -69,7 +109,6 @@ services:
       UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
     volumes:
       - ./src:/app/src
-      - ./tests:/app/tests
       - uploads-data:/data/uploads
     depends_on:
       - postgres
@@ -124,7 +163,10 @@ networks:
 
 volumes:
   ghost-content:
+  ghost-2-content:
   ghost-db-data:
   postgres-data:
   redis-data:
   uploads-data:
+  certbot-webroot:
+  certbot-certs:
