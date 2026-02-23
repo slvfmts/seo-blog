@@ -185,43 +185,116 @@
                     </button>
                 </form>
                 {% elif paused_stage == 'research' and paused_data %}
-                <div class="text-sm text-gray-700">
+                <div class="text-sm text-gray-700 space-y-4">
                     {% if paused_data.sources %}
-                    <h4 class="font-medium mb-2">Источники ({{ paused_data.sources|length }})</h4>
-                    <div class="space-y-2 mb-4">
-                        {% for src in paused_data.sources[:15] %}
-                        <div class="flex items-start space-x-2 bg-gray-50 p-2 rounded">
-                            {% if src.origin == 'kb' %}
-                            <span class="px-1.5 py-0.5 text-xs bg-amber-100 text-amber-700 rounded flex-shrink-0">KB</span>
-                            {% else %}
-                            <span class="px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded flex-shrink-0">Web</span>
-                            {% endif %}
-                            <span>{{ src.title or src.url or 'Source' }}</span>
+                    <div>
+                        <h4 class="font-medium mb-2">Источники ({{ paused_data.sources|length }})</h4>
+                        <div class="space-y-2">
+                            {% for src in paused_data.sources %}
+                            <div class="flex items-start space-x-2 bg-white p-2 rounded border border-gray-200">
+                                <span class="px-1.5 py-0.5 text-xs rounded flex-shrink-0
+                                    {% if src.source_type == 'official' %}bg-green-100 text-green-700
+                                    {% elif src.source_type == 'documentation' %}bg-blue-100 text-blue-700
+                                    {% elif src.source_type == 'expert' %}bg-purple-100 text-purple-700
+                                    {% elif src.source_type == 'media' %}bg-yellow-100 text-yellow-700
+                                    {% else %}bg-gray-100 text-gray-600{% endif %}">{{ src.source_type }}</span>
+                                <div class="min-w-0">
+                                    <div class="text-gray-900 font-medium">{{ src.title }}</div>
+                                    <div class="text-xs text-gray-500">{{ src.publisher }}{% if src.published_date %} &middot; {{ src.published_date }}{% endif %}</div>
+                                    {% if src.url %}
+                                    <a href="{{ src.url }}" target="_blank" class="text-xs text-blue-600 break-all hover:underline">{{ src.url[:100] }}</a>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
                         </div>
-                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% if paused_data.definitions %}
+                    <div>
+                        <h4 class="font-medium mb-2">Определения ({{ paused_data.definitions|length }})</h4>
+                        <div class="space-y-2">
+                            {% for defn in paused_data.definitions %}
+                            <div class="bg-white p-2 rounded border border-gray-200">
+                                <span class="font-medium text-gray-900">{{ defn.term }}</span>
+                                <div class="text-gray-700 mt-0.5">{{ defn.definition }}</div>
+                            </div>
+                            {% endfor %}
+                        </div>
                     </div>
                     {% endif %}
                     {% if paused_data.facts %}
-                    <h4 class="font-medium mb-2">Факты ({{ paused_data.facts|length }})</h4>
-                    <ul class="list-disc list-inside space-y-1">
-                        {% for fact in paused_data.facts[:20] %}
-                        <li>{{ fact if fact is string else fact.text|default('') }}</li>
-                        {% endfor %}
-                    </ul>
+                    <div>
+                        <h4 class="font-medium mb-2">Факты ({{ paused_data.facts|length }})</h4>
+                        <div class="space-y-2">
+                            {% for fact in paused_data.facts %}
+                            <div class="bg-white p-2 rounded border border-gray-200">
+                                <div class="flex items-center space-x-2 mb-0.5">
+                                    <span class="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">{{ fact.category }}</span>
+                                    <span class="px-1 py-0.5 text-xs rounded {% if fact.confidence == 'high' %}bg-green-100 text-green-700{% elif fact.confidence == 'medium' %}bg-yellow-100 text-yellow-700{% else %}bg-gray-100 text-gray-600{% endif %}">{{ fact.confidence }}</span>
+                                </div>
+                                <div class="text-gray-900">{{ fact.claim }}</div>
+                                {% if fact.evidence %}
+                                <div class="text-xs text-gray-500 mt-0.5 italic">{{ fact.evidence[:200] }}</div>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if paused_data.numbers %}
+                    <div>
+                        <h4 class="font-medium mb-2">Числа и метрики ({{ paused_data.numbers|length }})</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {% for num in paused_data.numbers %}
+                            <div class="bg-white p-2 rounded border border-gray-200">
+                                <div class="text-xs text-gray-500">{{ num.metric }}</div>
+                                <div class="text-lg font-semibold text-gray-900">{{ num.value }}</div>
+                                <div class="text-xs text-gray-600">{{ num.context }}</div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if paused_data.examples %}
+                    <div>
+                        <h4 class="font-medium mb-2">Примеры ({{ paused_data.examples|length }})</h4>
+                        <div class="space-y-2">
+                            {% for ex in paused_data.examples %}
+                            <div class="bg-white p-2 rounded border border-gray-200">
+                                <div class="text-gray-900">{{ ex.example }}</div>
+                                {% if ex.why_it_matters %}
+                                <div class="text-xs text-gray-500 mt-0.5">{{ ex.why_it_matters }}</div>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
                     {% endif %}
                 </div>
                 {% elif paused_stage == 'structure' and paused_data %}
-                <div class="text-sm text-gray-700">
+                <div class="text-sm text-gray-700 space-y-3">
+                    {% if paused_data.title %}
+                    <div>
+                        <span class="text-xs text-gray-500 uppercase">Заголовок</span>
+                        <div class="font-medium text-gray-900">{{ paused_data.title }}</div>
+                        {% if paused_data.subtitle %}<div class="text-gray-600">{{ paused_data.subtitle }}</div>{% endif %}
+                    </div>
+                    {% endif %}
+                    {% if paused_data.target_total_words %}
+                    <div class="text-xs text-gray-500">Целевой объём: {{ paused_data.target_total_words }} слов</div>
+                    {% endif %}
                     {% if paused_data.sections %}
                     <h4 class="font-medium mb-2">Структура</h4>
                     <div class="space-y-2">
                         {% for section in paused_data.sections %}
-                        <div class="bg-gray-50 p-2 rounded">
-                            <div class="font-medium">{{ section.heading|default(section.title|default('Section')) }}</div>
+                        <div class="bg-white p-2 rounded border border-gray-200">
+                            <div class="font-medium text-gray-900">{{ section.h2 }}</div>
+                            <div class="text-xs text-gray-500">{{ section.purpose }}{% if section.word_count_target %} &middot; ~{{ section.word_count_target }} слов{% endif %}</div>
                             {% if section.subsections %}
-                            <div class="ml-4 mt-1 space-y-0.5 text-gray-600">
+                            <div class="ml-4 mt-1 space-y-0.5">
                                 {% for sub in section.subsections %}
-                                <div>— {{ sub.heading|default(sub) }}</div>
+                                <div class="text-gray-600">— {{ sub.h3 }}{% if sub.word_count_target %} <span class="text-xs text-gray-400">(~{{ sub.word_count_target }})</span>{% endif %}</div>
                                 {% endfor %}
                             </div>
                             {% endif %}
