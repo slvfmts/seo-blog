@@ -6,6 +6,7 @@
     <title>{% block title %}SEO Blog{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/alpinejs@3" defer></script>
     <style>
         [x-cloak] { display: none !important; }
         .htmx-indicator { display: none; }
@@ -18,9 +19,39 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">
                 <div class="flex items-center">
-                    <a href="/ui/topics" class="text-xl font-bold text-gray-900">
+                    <a href="/ui/articles" class="text-xl font-bold text-gray-900">
                         SEO Blog
                     </a>
+                    {% if current_blog and all_blogs|length > 1 %}
+                    <div class="ml-3 relative" x-data="{ open: false }">
+                        <button @click="open = !open" @click.outside="open = false"
+                                class="flex items-center space-x-1 px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors">
+                            <span>{{ current_blog.name }}</span>
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </button>
+                        <div x-show="open" x-cloak x-transition
+                             class="absolute left-0 mt-1 w-56 bg-white rounded-md shadow-lg border z-50">
+                            {% for blog in all_blogs %}
+                            <a href="/ui/blogs/{{ blog.id }}/select"
+                               class="block px-4 py-2 text-sm {% if current_blog and blog.id == current_blog.id %}text-blue-600 bg-blue-50 font-medium{% else %}text-gray-700 hover:bg-gray-50{% endif %}">
+                                {{ blog.name }}
+                                {% if blog.domain %}<span class="text-gray-400 text-xs ml-1">{{ blog.domain }}</span>{% endif %}
+                            </a>
+                            {% endfor %}
+                            <div class="border-t">
+                                <a href="/ui/blogs" class="block px-4 py-2 text-sm text-gray-500 hover:bg-gray-50">
+                                    Manage blogs...
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% elif current_blog %}
+                    <span class="ml-3 px-3 py-1.5 text-sm font-medium text-gray-500 bg-gray-50 rounded-md">
+                        {{ current_blog.name }}
+                    </span>
+                    {% endif %}
                     <div class="ml-10 flex items-baseline space-x-4">
                         <a href="/ui/topics" class="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium">
                             Темы

@@ -84,6 +84,7 @@ class InternalLinker:
         keywords: list[str],
         exclude_url: Optional[str] = None,
         limit: int = 10,
+        site_id: Optional[str] = None,
     ) -> list[dict]:
         """
         Find articles with keyword overlap.
@@ -106,6 +107,8 @@ class InternalLinker:
             )
             if exclude_url:
                 query = query.filter(ArticleKeyword.post_url != exclude_url)
+            if site_id:
+                query = query.filter(ArticleKeyword.site_id == site_id)
 
             matches = query.all()
 
@@ -202,6 +205,7 @@ class InternalLinker:
         model: str,
         ghost_publisher,
         max_articles: int = 5,
+        site_id: Optional[str] = None,
     ):
         """
         Update existing articles to include links to the new article.
@@ -209,7 +213,7 @@ class InternalLinker:
         1. Find related articles by keyword overlap
         2. For each: load markdown, LLM call to insert link, update Ghost
         """
-        related = self.find_related(new_keywords, exclude_url=new_url, limit=max_articles)
+        related = self.find_related(new_keywords, exclude_url=new_url, limit=max_articles, site_id=site_id)
         if not related:
             logger.info("No related articles found for backward linking")
             return

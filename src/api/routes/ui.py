@@ -87,7 +87,7 @@ async def login_submit(
 
     if email_ok and password_ok:
         request.session["user"] = email.lower().strip()
-        return RedirectResponse(url="/ui/topics", status_code=303)
+        return RedirectResponse(url="/ui/blogs", status_code=303)
 
     return templates.TemplateResponse("auth/login.html", {
         "request": request,
@@ -103,12 +103,179 @@ async def logout(request: Request):
     return RedirectResponse(url="/ui/login", status_code=302)
 
 
+# ============ Blog helpers ============
+
+def get_current_blog(request: Request, db: Session):
+    """Get the currently selected blog from session."""
+    blog_id = request.session.get("blog_id")
+    if not blog_id:
+        return None
+    blog = db.query(models.Blog).filter(
+        models.Blog.id == blog_id,
+        models.Blog.status == "active",
+    ).first()
+    return blog
+
+
+def get_blog_site_ids(db: Session, blog_id) -> list:
+    """Get all site IDs belonging to a blog."""
+    return [s.id for s in db.query(models.Site.id).filter(models.Site.blog_id == blog_id).all()]
+
+
+def _render(request: Request, db: Session, template: str, ctx: dict):
+    """Render template with blog context injected."""
+    blog_id = request.session.get("blog_id")
+    ctx["current_blog"] = db.query(models.Blog).get(blog_id) if blog_id else None
+    ctx["all_blogs"] = db.query(models.Blog).filter(models.Blog.status == "active").all()
+    ctx["request"] = request
+    return templates.TemplateResponse(template, ctx)
+
+
+# ============ Blog Pages ============
+
+@router.get("/blogs", response_class=HTMLResponse)
+async def list_blogs(request: Request, db: Session = Depends(get_db)):
+    """List all blogs. If only 1 active blog, auto-select and redirect."""
+    active_blogs = db.query(models.Blog).filter(models.Blog.status == "active").all()
+
+    # Auto-select if only one blog
+    if len(active_blogs) == 1:
+        request.session["blog_id"] = str(active_blogs[0].id)
+        return RedirectResponse(url="/ui/articles", status_code=302)
+
+    blogs = []
+    for blog in active_blogs:
+        site_ids = get_blog_site_ids(db, blog.id)
+        article_count = db.query(models.Draft).filter(
+            models.Draft.site_id.in_(site_ids)
+        ).count() if site_ids else 0
+
+        blogs.append({
+            "id": blog.id,
+            "name": blog.name,
+            "slug": blog.slug,
+            "domain": blog.domain,
+            "status": blog.status,
+            "site_count": len(site_ids),
+            "article_count": article_count,
+        })
+
+    return _render(request, db, "blogs/list.html", {
+        "blogs": blogs,
+        "error": request.query_params.get("error"),
+    })
+
+
+@router.get("/blogs/{blog_id}/select")
+async def select_blog(request: Request, blog_id: UUID, db: Session = Depends(get_db)):
+    """Set active blog in session."""
+    blog = db.query(models.Blog).filter(models.Blog.id == blog_id).first()
+    if not blog:
+        return RedirectResponse(url="/ui/blogs?error=Blog not found", status_code=302)
+    request.session["blog_id"] = str(blog.id)
+    return RedirectResponse(url="/ui/articles", status_code=302)
+
+
+@router.get("/blogs/new", response_class=HTMLResponse)
+async def new_blog_form(request: Request, db: Session = Depends(get_db)):
+    """Show form to create a new blog."""
+    return _render(request, db, "blogs/create.html", {})
+
+
+@router.post("/blogs/new", response_class=HTMLResponse)
+async def create_blog(
+    request: Request,
+    name: str = Form(...),
+    slug: str = Form(...),
+    domain: str = Form(""),
+    ghost_url: str = Form(...),
+    ghost_admin_key: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Create a new blog."""
+    # Validate slug uniqueness
+    existing = db.query(models.Blog).filter(models.Blog.slug == slug.strip().lower()).first()
+    if existing:
+        return _render(request, db, "blogs/create.html", {
+            "error": f"Slug '{slug}' already exists",
+            "name": name, "slug": slug, "domain": domain,
+            "ghost_url": ghost_url, "ghost_admin_key": ghost_admin_key,
+        })
+
+    blog = models.Blog(
+        name=name.strip(),
+        slug=slug.strip().lower(),
+        domain=domain.strip() or None,
+        ghost_url=ghost_url.strip(),
+        ghost_admin_key=ghost_admin_key.strip(),
+    )
+    db.add(blog)
+    db.commit()
+    db.refresh(blog)
+
+    # Auto-select the new blog
+    request.session["blog_id"] = str(blog.id)
+    return RedirectResponse(url="/ui/blogs", status_code=303)
+
+
+@router.get("/blogs/{blog_id}/edit", response_class=HTMLResponse)
+async def edit_blog_form(request: Request, blog_id: UUID, db: Session = Depends(get_db)):
+    """Show edit form for a blog."""
+    blog = db.query(models.Blog).filter(models.Blog.id == blog_id).first()
+    if not blog:
+        return RedirectResponse(url="/ui/blogs?error=Blog not found", status_code=302)
+    return _render(request, db, "blogs/edit.html", {"blog": blog})
+
+
+@router.post("/blogs/{blog_id}/edit", response_class=HTMLResponse)
+async def update_blog(
+    request: Request,
+    blog_id: UUID,
+    name: str = Form(...),
+    slug: str = Form(...),
+    domain: str = Form(""),
+    ghost_url: str = Form(...),
+    ghost_admin_key: str = Form(...),
+    status: str = Form("active"),
+    db: Session = Depends(get_db),
+):
+    """Update a blog."""
+    blog = db.query(models.Blog).filter(models.Blog.id == blog_id).first()
+    if not blog:
+        return RedirectResponse(url="/ui/blogs?error=Blog not found", status_code=302)
+
+    # Validate slug uniqueness (excluding current)
+    existing = db.query(models.Blog).filter(
+        models.Blog.slug == slug.strip().lower(),
+        models.Blog.id != blog_id,
+    ).first()
+    if existing:
+        return _render(request, db, "blogs/edit.html", {
+            "blog": blog,
+            "error": f"Slug '{slug}' already exists",
+        })
+
+    blog.name = name.strip()
+    blog.slug = slug.strip().lower()
+    blog.domain = domain.strip() or None
+    blog.ghost_url = ghost_url.strip()
+    blog.ghost_admin_key = ghost_admin_key.strip()
+    blog.status = status
+    db.commit()
+
+    return RedirectResponse(url="/ui/blogs", status_code=303)
+
+
 # ============ Topics Pages ============
 
 @router.get("/topics", response_class=HTMLResponse)
 async def list_topics(request: Request, db: Session = Depends(get_db)):
-    """List all topics (sites)."""
-    sites = db.query(models.Site).order_by(models.Site.created_at.desc()).all()
+    """List all topics (sites) for current blog."""
+    current_blog = get_current_blog(request, db)
+    query = db.query(models.Site).order_by(models.Site.created_at.desc())
+    if current_blog:
+        query = query.filter(models.Site.blog_id == current_blog.id)
+    sites = query.all()
 
     topics = []
     for site in sites:
@@ -127,18 +294,15 @@ async def list_topics(request: Request, db: Session = Depends(get_db)):
             "article_count": article_count,
         })
 
-    return templates.TemplateResponse("topics/list.html", {
-        "request": request,
+    return _render(request, db, "topics/list.html", {
         "topics": topics,
     })
 
 
 @router.get("/topics/new", response_class=HTMLResponse)
-async def new_topic_form(request: Request):
+async def new_topic_form(request: Request, db: Session = Depends(get_db)):
     """Show form to create a new topic."""
-    return templates.TemplateResponse("topics/create.html", {
-        "request": request,
-    })
+    return _render(request, db, "topics/create.html", {})
 
 
 @router.post("/topics/new", response_class=HTMLResponse)
@@ -154,23 +318,15 @@ async def create_topic(
     settings = get_settings()
 
     if not settings.serper_api_key:
-        return templates.TemplateResponse("topics/create.html", {
-            "request": request,
+        return _render(request, db, "topics/create.html", {
             "error": "SERPER_API_KEY not configured",
-            "niche": niche,
-            "domain": domain,
-            "country": country,
-            "language": language,
+            "niche": niche, "domain": domain, "country": country, "language": language,
         })
 
     if not settings.anthropic_api_key:
-        return templates.TemplateResponse("topics/create.html", {
-            "request": request,
+        return _render(request, db, "topics/create.html", {
             "error": "ANTHROPIC_API_KEY not configured",
-            "niche": niche,
-            "domain": domain,
-            "country": country,
-            "language": language,
+            "niche": niche, "domain": domain, "country": country, "language": language,
         })
 
     try:
@@ -189,7 +345,9 @@ async def create_topic(
         )
 
         # Create Site
+        current_blog = get_current_blog(request, db)
         site = models.Site(
+            blog_id=current_blog.id if current_blog else None,
             name=niche,
             domain=domain.strip() if domain.strip() else None,
             status="active",
@@ -228,13 +386,9 @@ async def create_topic(
         )
 
     except Exception as e:
-        return templates.TemplateResponse("topics/create.html", {
-            "request": request,
+        return _render(request, db, "topics/create.html", {
             "error": str(e),
-            "niche": niche,
-            "domain": domain,
-            "country": country,
-            "language": language,
+            "niche": niche, "domain": domain, "country": country, "language": language,
         })
 
 
@@ -279,8 +433,7 @@ async def topic_detail(
     all_folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
     attached_folder_ids = {str(f.id) for f in topic.knowledge_folders}
 
-    return templates.TemplateResponse("topics/detail.html", {
-        "request": request,
+    return _render(request, db, "topics/detail.html", {
         "topic": topic,
         "clusters": planned_clusters,
         "discovered_clusters": discovered_clusters,
@@ -612,6 +765,11 @@ async def generate_articles_for_topic(
         count = 0
         region = topic.language or "ru"
 
+        # Resolve Ghost creds from Blog
+        blog = topic.blog if topic.blog_id else get_current_blog(request, db)
+        blog_ghost_url = blog.ghost_url if blog else None
+        blog_ghost_admin_key = blog.ghost_admin_key if blog else None
+
         # Load KB docs from attached folders
         kb_docs = []
         for folder in topic.knowledge_folders:
@@ -666,6 +824,8 @@ async def generate_articles_for_topic(
                 region,
                 output_dir,
                 kb_docs,
+                ghost_url=blog_ghost_url,
+                ghost_admin_key=blog_ghost_admin_key,
             )
             count += 1
 
@@ -704,18 +864,15 @@ async def kb_list(request: Request, db: Session = Depends(get_db)):
             "created_at": folder.created_at,
         })
 
-    return templates.TemplateResponse("kb/list.html", {
-        "request": request,
+    return _render(request, db, "kb/list.html", {
         "folders": folder_data,
     })
 
 
 @router.get("/kb/new", response_class=HTMLResponse)
-async def kb_new_form(request: Request):
+async def kb_new_form(request: Request, db: Session = Depends(get_db)):
     """Show create folder form (reuse detail template with empty state)."""
-    return templates.TemplateResponse("kb/create.html", {
-        "request": request,
-    })
+    return _render(request, db, "kb/create.html", {})
 
 
 @router.post("/kb/new", response_class=HTMLResponse)
@@ -747,8 +904,7 @@ async def kb_detail(
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
 
-    return templates.TemplateResponse("kb/detail.html", {
-        "request": request,
+    return _render(request, db, "kb/detail.html", {
         "folder": folder,
         "documents": folder.documents,
         "error": request.query_params.get("error"),
@@ -1089,20 +1245,22 @@ async def plan_discovered_cluster(
 
 @router.get("/briefs", response_class=HTMLResponse)
 async def list_briefs(request: Request, db: Session = Depends(get_db)):
-    """List all briefs."""
-    briefs = db.query(models.Brief).order_by(models.Brief.created_at.desc()).all()
-    return templates.TemplateResponse("briefs/list.html", {
-        "request": request,
+    """List all briefs, scoped by blog."""
+    current_blog = get_current_blog(request, db)
+    blog_site_ids = get_blog_site_ids(db, current_blog.id) if current_blog else []
+    query = db.query(models.Brief)
+    if current_blog and blog_site_ids:
+        query = query.filter(models.Brief.site_id.in_(blog_site_ids))
+    briefs = query.order_by(models.Brief.created_at.desc()).all()
+    return _render(request, db, "briefs/list.html", {
         "briefs": briefs,
     })
 
 
 @router.get("/briefs/new", response_class=HTMLResponse)
-async def new_brief_form(request: Request):
+async def new_brief_form(request: Request, db: Session = Depends(get_db)):
     """Show form to create a new brief."""
-    return templates.TemplateResponse("briefs/create.html", {
-        "request": request,
-    })
+    return _render(request, db, "briefs/create.html", {})
 
 
 @router.post("/briefs/new", response_class=HTMLResponse)
@@ -1117,21 +1275,15 @@ async def create_brief(
     settings = get_settings()
 
     if not settings.serper_api_key:
-        return templates.TemplateResponse("briefs/create.html", {
-            "request": request,
+        return _render(request, db, "briefs/create.html", {
             "error": "SERPER_API_KEY not configured",
-            "topic": topic,
-            "country": country,
-            "language": language,
+            "topic": topic, "country": country, "language": language,
         })
 
     if not settings.anthropic_api_key:
-        return templates.TemplateResponse("briefs/create.html", {
-            "request": request,
+        return _render(request, db, "briefs/create.html", {
             "error": "ANTHROPIC_API_KEY not configured",
-            "topic": topic,
-            "country": country,
-            "language": language,
+            "topic": topic, "country": country, "language": language,
         })
 
     try:
@@ -1169,12 +1321,9 @@ async def create_brief(
         )
 
     except Exception as e:
-        return templates.TemplateResponse("briefs/create.html", {
-            "request": request,
+        return _render(request, db, "briefs/create.html", {
             "error": str(e),
-            "topic": topic,
-            "country": country,
-            "language": language,
+            "topic": topic, "country": country, "language": language,
         })
 
 
@@ -1188,8 +1337,7 @@ async def brief_detail(request: Request, brief_id: UUID, db: Session = Depends(g
     # Get associated draft if exists
     draft = db.query(models.Draft).filter(models.Draft.brief_id == brief_id).first()
 
-    return templates.TemplateResponse("briefs/detail.html", {
-        "request": request,
+    return _render(request, db, "briefs/detail.html", {
         "brief": brief,
         "draft": draft,
     })
@@ -1267,8 +1415,15 @@ async def list_articles(
     status: str = None,
     db: Session = Depends(get_db),
 ):
-    """List all articles (drafts) with filters."""
+    """List all articles (drafts) with filters, scoped by current blog."""
+    current_blog = get_current_blog(request, db)
+    blog_site_ids = get_blog_site_ids(db, current_blog.id) if current_blog else []
+
     query = db.query(models.Draft)
+
+    # Scope by blog
+    if current_blog and blog_site_ids:
+        query = query.filter(models.Draft.site_id.in_(blog_site_ids))
 
     if site_id:
         query = query.filter(models.Draft.site_id == site_id)
@@ -1300,11 +1455,13 @@ async def list_articles(
             if b.cluster_id:
                 brief_cluster_map[str(b.id)] = clusters.get(str(b.cluster_id))
 
-    # Get all sites for filter dropdown
-    sites = db.query(models.Site).order_by(models.Site.name).all()
+    # Get sites for filter dropdown (scoped by blog)
+    sites_query = db.query(models.Site).order_by(models.Site.name)
+    if current_blog:
+        sites_query = sites_query.filter(models.Site.blog_id == current_blog.id)
+    sites = sites_query.all()
 
-    return templates.TemplateResponse("drafts/list.html", {
-        "request": request,
+    return _render(request, db, "drafts/list.html", {
         "drafts": drafts,
         "sites": sites,
         "brief_cluster_map": brief_cluster_map,
@@ -1350,8 +1507,7 @@ async def article_detail(request: Request, draft_id: UUID, db: Session = Depends
         draft.pipeline_status == "running" or draft.status in ("generating", "pipeline_running")
     ) and not is_paused
 
-    return templates.TemplateResponse("drafts/detail.html", {
-        "request": request,
+    return _render(request, db, "drafts/detail.html", {
         "draft": draft,
         "brief": brief,
         "cluster": cluster,
@@ -1500,7 +1656,19 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
     db.commit()
 
     try:
-        publisher = GhostPublisher(settings.ghost_url, settings.ghost_admin_key)
+        # Resolve Ghost creds from Blog model, fallback to env vars
+        ghost_url = settings.ghost_url
+        ghost_admin_key = settings.ghost_admin_key
+        if draft.site and draft.site.blog:
+            ghost_url = draft.site.blog.ghost_url
+            ghost_admin_key = draft.site.blog.ghost_admin_key
+        elif not ghost_url:
+            blog = get_current_blog(request, db)
+            if blog:
+                ghost_url = blog.ghost_url
+                ghost_admin_key = blog.ghost_admin_key
+
+        publisher = GhostPublisher(ghost_url, ghost_admin_key)
         result = publisher.publish(
             title=draft.title,
             content=draft.content_md,
@@ -1570,6 +1738,7 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
                         cms_post_id=result["post"]["id"],
                         content_md=draft.content_md,
                         keywords=keywords,
+                        site_id=str(draft.site_id) if draft.site_id else None,
                     )
 
                     # Backward linking (update old articles)
@@ -1588,6 +1757,7 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
                             llm_client=client,
                             model="claude-sonnet-4-20250514",
                             ghost_publisher=publisher,
+                            site_id=str(draft.site_id) if draft.site_id else None,
                         )
             except Exception:
                 pass  # Graceful degradation — publish succeeds even if linking fails
@@ -1617,7 +1787,13 @@ def _resume_pipeline_for_draft(draft_id: str, settings, paused_at: str):
                 return
             brief = db.query(models.Brief).filter(models.Brief.id == draft.brief_id).first() if draft.brief_id else None
 
-            runner = _create_runner(settings)
+            # Resolve Ghost creds from Blog
+            _ghost_url = None
+            _ghost_admin_key = None
+            if draft.site and draft.site.blog:
+                _ghost_url = draft.site.blog.ghost_url
+                _ghost_admin_key = draft.site.blog.ghost_admin_key
+            runner = _create_runner(settings, ghost_url=_ghost_url, ghost_admin_key=_ghost_admin_key)
 
             # Rebuild config from brief
             config = {
@@ -1662,10 +1838,12 @@ def _resume_pipeline_for_draft(draft_id: str, settings, paused_at: str):
 
             # Rebuild context from stage_results
             existing_posts = []
-            if settings.ghost_url and settings.ghost_admin_key:
+            _gu = _ghost_url or settings.ghost_url
+            _gk = _ghost_admin_key or settings.ghost_admin_key
+            if _gu and _gk:
                 try:
                     from src.services.publisher import GhostPublisher
-                    publisher = GhostPublisher(ghost_url=settings.ghost_url, admin_key=settings.ghost_admin_key)
+                    publisher = GhostPublisher(ghost_url=_gu, admin_key=_gk)
                     existing_posts = publisher.get_posts()
                 except Exception:
                     pass
@@ -2017,7 +2195,7 @@ async def article_enrich_from_kb(
 
 # ============ Pipeline Pages ============
 
-def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, knowledge_base_docs: list = None, factual_mode: str = "default"):
+def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, knowledge_base_docs: list = None, factual_mode: str = "default", ghost_url: str = None, ghost_admin_key: str = None):
     """
     Run writing pipeline synchronously.
     Called from background task.
@@ -2048,15 +2226,15 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
         }
         db.commit()
 
-        # Initialize pipeline runner
+        # Initialize pipeline runner (use Blog ghost creds if provided)
         runner = PipelineRunner(
             anthropic_api_key=settings.anthropic_api_key,
             serper_api_key=settings.serper_api_key or None,
             jina_api_key=getattr(settings, 'jina_api_key', None),
             proxy_url=settings.anthropic_proxy_url or None,
             proxy_secret=settings.anthropic_proxy_secret or None,
-            ghost_url=settings.ghost_url or None,
-            ghost_admin_key=settings.ghost_admin_key or None,
+            ghost_url=ghost_url or settings.ghost_url or None,
+            ghost_admin_key=ghost_admin_key or settings.ghost_admin_key or None,
             database_url=settings.database_url or None,
             openai_api_key=getattr(settings, 'openai_api_key', None),
             openai_proxy_url=getattr(settings, 'openai_proxy_url', None),
@@ -2166,8 +2344,7 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
 async def new_pipeline_form(request: Request, db: Session = Depends(get_db)):
     """Show form to start new article via pipeline."""
     folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
-    return templates.TemplateResponse("pipeline/new.html", {
-        "request": request,
+    return _render(request, db, "pipeline/new.html", {
         "folders": folders,
     })
 
@@ -2191,8 +2368,7 @@ async def create_pipeline(
 
     if not settings.anthropic_api_key:
         folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
-        return templates.TemplateResponse("pipeline/new.html", {
-            "request": request,
+        return _render(request, db, "pipeline/new.html", {
             "error": "ANTHROPIC_API_KEY not configured",
             "topic": topic,
             "region": region,
@@ -2247,6 +2423,11 @@ async def create_pipeline(
         db.commit()
         db.refresh(draft)
 
+        # Resolve Ghost creds from current blog
+        blog = get_current_blog(request, db)
+        pipeline_ghost_url = blog.ghost_url if blog else None
+        pipeline_ghost_admin_key = blog.ghost_admin_key if blog else None
+
         # Start background task
         background_tasks.add_task(
             run_pipeline_sync,
@@ -2256,6 +2437,8 @@ async def create_pipeline(
             output_dir,
             knowledge_base_docs=kb_docs if kb_docs else None,
             factual_mode=factual_mode,
+            ghost_url=pipeline_ghost_url,
+            ghost_admin_key=pipeline_ghost_admin_key,
         )
 
         return RedirectResponse(
@@ -2265,8 +2448,7 @@ async def create_pipeline(
 
     except Exception as e:
         folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
-        return templates.TemplateResponse("pipeline/new.html", {
-            "request": request,
+        return _render(request, db, "pipeline/new.html", {
             "error": str(e),
             "topic": topic,
             "region": region,
@@ -2284,9 +2466,11 @@ async def monitoring_dashboard(
     db: Session = Depends(get_db),
 ):
     """Position monitoring dashboard."""
-    sites = db.query(models.Site).filter(
-        models.Site.status == "active",
-    ).order_by(models.Site.created_at.desc()).all()
+    current_blog = get_current_blog(request, db)
+    sites_q = db.query(models.Site).filter(models.Site.status == "active")
+    if current_blog:
+        sites_q = sites_q.filter(models.Site.blog_id == current_blog.id)
+    sites = sites_q.order_by(models.Site.created_at.desc()).all()
 
     site = None
     rankings = []
@@ -2364,8 +2548,7 @@ async def monitoring_dashboard(
             "alerts": alert_count,
         }
 
-    return templates.TemplateResponse("monitoring/dashboard.html", {
-        "request": request,
+    return _render(request, db, "monitoring/dashboard.html", {
         "sites": sites,
         "site": site,
         "rankings": rankings,
@@ -2465,8 +2648,7 @@ async def keyword_history_page(
         if post:
             post_title = post.title
 
-    return templates.TemplateResponse("monitoring/history.html", {
-        "request": request,
+    return _render(request, db, "monitoring/history.html", {
         "keyword": keyword.keyword,
         "keyword_id": str(keyword.id),
         "site_id": str(keyword.site_id),
@@ -2483,8 +2665,20 @@ async def iterations_list(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """List content iteration tasks."""
-    tasks = db.query(models.IterationTask).order_by(
+    """List content iteration tasks, scoped by blog."""
+    current_blog = get_current_blog(request, db)
+    blog_site_ids = get_blog_site_ids(db, current_blog.id) if current_blog else []
+
+    query = db.query(models.IterationTask)
+    if current_blog and blog_site_ids:
+        blog_post_ids = [p.id for p in db.query(models.Post.id).filter(
+            models.Post.site_id.in_(blog_site_ids)
+        ).all()]
+        if blog_post_ids:
+            query = query.filter(models.IterationTask.post_id.in_(blog_post_ids))
+        else:
+            query = query.filter(False)  # No posts = no tasks
+    tasks = query.order_by(
         models.IterationTask.priority.asc(),
         models.IterationTask.created_at.desc(),
     ).all()
@@ -2493,8 +2687,7 @@ async def iterations_list(
     for task in tasks:
         task.post = db.query(models.Post).filter(models.Post.id == task.post_id).first()
 
-    return templates.TemplateResponse("iterations/list.html", {
-        "request": request,
+    return _render(request, db, "iterations/list.html", {
         "tasks": tasks,
         "success": request.query_params.get("success"),
     })
@@ -2528,18 +2721,25 @@ async def skip_iteration_task(
 
 @router.get("/clusters", response_class=HTMLResponse)
 async def cluster_list(request: Request, db: Session = Depends(get_db)):
-    """List all clusters (top-level only — no parent)."""
-    clusters = db.query(models.Cluster).filter(
+    """List all clusters (top-level only — no parent), scoped by blog."""
+    current_blog = get_current_blog(request, db)
+    blog_site_ids = get_blog_site_ids(db, current_blog.id) if current_blog else []
+
+    query = db.query(models.Cluster).filter(
         models.Cluster.parent_cluster_id.is_(None),
-    ).order_by(models.Cluster.created_at.desc()).all()
+    )
+    if current_blog and blog_site_ids:
+        query = query.filter(
+            (models.Cluster.site_id.in_(blog_site_ids)) | (models.Cluster.site_id.is_(None))
+        )
+    clusters = query.order_by(models.Cluster.created_at.desc()).all()
 
     # Enrich with brief count (flat model)
     for cluster in clusters:
         cluster.brief_count = len(cluster.briefs)
         cluster.child_count = 0  # no more child clusters
 
-    return templates.TemplateResponse("clusters/list.html", {
-        "request": request,
+    return _render(request, db, "clusters/list.html", {
         "clusters": clusters,
     })
 
@@ -2547,10 +2747,13 @@ async def cluster_list(request: Request, db: Session = Depends(get_db)):
 @router.get("/clusters/plan", response_class=HTMLResponse)
 async def cluster_plan_form(request: Request, db: Session = Depends(get_db)):
     """Show cluster planning form."""
-    sites = db.query(models.Site).order_by(models.Site.name).all()
+    current_blog = get_current_blog(request, db)
+    sites_q = db.query(models.Site).order_by(models.Site.name)
+    if current_blog:
+        sites_q = sites_q.filter(models.Site.blog_id == current_blog.id)
+    sites = sites_q.all()
     folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
-    return templates.TemplateResponse("clusters/plan.html", {
-        "request": request,
+    return _render(request, db, "clusters/plan.html", {
         "sites": sites,
         "folders": folders,
     })
@@ -2740,8 +2943,7 @@ async def cluster_detail(
     all_folders = db.query(models.KnowledgeFolder).order_by(models.KnowledgeFolder.name).all()
     attached_folder_ids = {str(f.id) for f in cluster.knowledge_folders} if hasattr(cluster, 'knowledge_folders') and cluster.knowledge_folders else set()
 
-    return templates.TemplateResponse("clusters/detail.html", {
-        "request": request,
+    return _render(request, db, "clusters/detail.html", {
         "cluster": cluster,
         "pillar_brief": pillar_brief,
         "pillar_draft": pillar_draft,
@@ -2840,6 +3042,7 @@ async def delete_brief(
 
 @router.post("/clusters/{cluster_id}/briefs/{brief_id}/generate", response_class=HTMLResponse)
 async def generate_single_brief(
+    request: Request,
     cluster_id: UUID,
     brief_id: UUID,
     background_tasks: BackgroundTasks,
@@ -2895,6 +3098,17 @@ async def generate_single_brief(
     brief.status = "in_writing"
     db.commit()
 
+    # Resolve Ghost creds from Blog
+    blog = None
+    if cluster.site_id:
+        site = cluster.site
+        if site and site.blog:
+            blog = site.blog
+    if not blog:
+        blog = get_current_blog(request, db)
+    brief_ghost_url = blog.ghost_url if blog else None
+    brief_ghost_admin_key = blog.ghost_admin_key if blog else None
+
     background_tasks.add_task(
         _run_pipeline_for_brief,
         str(brief.id),
@@ -2907,6 +3121,8 @@ async def generate_single_brief(
         str(cluster_id),
         step_by_step.lower() in ("true", "1", "yes"),
         cluster.factual_mode or "default",
+        ghost_url=brief_ghost_url,
+        ghost_admin_key=brief_ghost_admin_key,
     )
 
     return RedirectResponse(
@@ -3002,8 +3218,8 @@ def _serialize_stage_result(context, stage_name: str) -> dict:
         return {}
 
 
-def _create_runner(settings):
-    """Create a PipelineRunner from settings."""
+def _create_runner(settings, ghost_url=None, ghost_admin_key=None):
+    """Create a PipelineRunner from settings. Optional ghost creds override env."""
     from src.services.writing_pipeline import PipelineRunner
     return PipelineRunner(
         anthropic_api_key=settings.anthropic_api_key,
@@ -3011,8 +3227,8 @@ def _create_runner(settings):
         jina_api_key=settings.jina_api_key,
         proxy_url=settings.anthropic_proxy_url,
         proxy_secret=settings.anthropic_proxy_secret,
-        ghost_url=settings.ghost_url,
-        ghost_admin_key=settings.ghost_admin_key,
+        ghost_url=ghost_url or settings.ghost_url,
+        ghost_admin_key=ghost_admin_key or settings.ghost_admin_key,
         database_url=settings.database_url,
         openai_api_key=settings.openai_api_key,
         openai_proxy_url=settings.openai_proxy_url,
@@ -3031,6 +3247,8 @@ def _run_pipeline_for_brief(
     cluster_id: str = None,
     step_by_step: bool = False,
     factual_mode: str = "default",
+    ghost_url: str = None,
+    ghost_admin_key: str = None,
 ):
     """Background task: run pipeline for a single brief."""
     import asyncio
@@ -3061,7 +3279,9 @@ def _run_pipeline_for_brief(
             db.commit()
             local_draft_id = str(draft.id)
 
-            runner = _create_runner(settings)
+            _ghost_url = ghost_url or settings.ghost_url
+            _ghost_admin_key = ghost_admin_key or settings.ghost_admin_key
+            runner = _create_runner(settings, ghost_url=_ghost_url, ghost_admin_key=_ghost_admin_key)
 
             config = {}
             if knowledge_base_docs:
@@ -3083,10 +3303,10 @@ def _run_pipeline_for_brief(
 
             # Fetch existing posts for overlap analysis
             existing_posts = []
-            if settings.ghost_url and settings.ghost_admin_key:
+            if _ghost_url and _ghost_admin_key:
                 try:
                     from src.services.publisher import GhostPublisher
-                    publisher = GhostPublisher(ghost_url=settings.ghost_url, admin_key=settings.ghost_admin_key)
+                    publisher = GhostPublisher(ghost_url=_ghost_url, admin_key=_ghost_admin_key)
                     existing_posts = publisher.get_posts()
                 except Exception:
                     pass
@@ -3197,6 +3417,8 @@ def _run_cluster_pipeline_sequential(
     cluster_id: str,
     step_by_step: bool,
     factual_mode: str,
+    ghost_url: str = None,
+    ghost_admin_key: str = None,
 ):
     """Background task: run pipeline for briefs SEQUENTIALLY, pillar first."""
     for brief_id, topic, brief_data in brief_queue:
@@ -3224,6 +3446,7 @@ def _run_cluster_pipeline_sequential(
             brief_id, site_id, topic, region, brief_data,
             settings, knowledge_base_docs, cluster_id,
             step_by_step, factual_mode,
+            ghost_url=ghost_url, ghost_admin_key=ghost_admin_key,
         )
 
         # If step_by_step, the first brief will pause — stop processing queue
@@ -3363,6 +3586,17 @@ async def generate_cluster_articles(
     cluster.status = "in_progress"
     db.commit()
 
+    # Resolve Ghost creds from Blog
+    blog = None
+    if cluster.site_id:
+        site = db.query(models.Site).filter(models.Site.id == cluster.site_id).first()
+        if site and site.blog:
+            blog = site.blog
+    if not blog:
+        blog = get_current_blog(request, db)
+    cluster_ghost_url = blog.ghost_url if blog else None
+    cluster_ghost_admin_key = blog.ghost_admin_key if blog else None
+
     # One background task processes ALL briefs sequentially
     background_tasks.add_task(
         _run_cluster_pipeline_sequential,
@@ -3374,6 +3608,8 @@ async def generate_cluster_articles(
         str(cluster_id),
         is_step_by_step,
         factual_mode,
+        ghost_url=cluster_ghost_url,
+        ghost_admin_key=cluster_ghost_admin_key,
     )
 
     return RedirectResponse(

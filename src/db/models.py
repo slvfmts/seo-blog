@@ -16,6 +16,24 @@ from sqlalchemy.orm import declarative_base, relationship
 Base = declarative_base()
 
 
+class Blog(Base):
+    """Блог (Ghost CMS instance)."""
+    __tablename__ = "blogs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False)
+    slug = Column(String(255), nullable=False, unique=True)
+    domain = Column(String(255))
+    ghost_url = Column(String(500), nullable=False)
+    ghost_admin_key = Column(String(500), nullable=False)
+    status = Column(String(50), default="active")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    sites = relationship("Site", back_populates="blog")
+
+
 # M2M association table: sites <-> knowledge_folders
 site_knowledge_folders = Table(
     'site_knowledge_folders',
@@ -76,10 +94,11 @@ class Brief(Base):
 
 
 class Site(Base):
-    """Сайт/проект."""
+    """Сайт/проект (тема внутри блога)."""
     __tablename__ = "sites"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    blog_id = Column(UUID(as_uuid=True), ForeignKey("blogs.id"), nullable=True)
     name = Column(String(255), nullable=False)
     domain = Column(String(255))
     status = Column(String(50), default="setup")  # setup | active | paused
@@ -89,7 +108,7 @@ class Site(Base):
     # Discovery
     niche_boundaries = Column(JSON, nullable=True)  # {include: [], exclude: [], target_audience: ""}
 
-    # Ghost integration
+    # Ghost integration (legacy — now read from Blog)
     ghost_url = Column(String(500))
     ghost_admin_key = Column(String(500))
 
@@ -97,6 +116,7 @@ class Site(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
+    blog = relationship("Blog", back_populates="sites")
     drafts = relationship("Draft", back_populates="site")
     posts = relationship("Post", back_populates="site")
     briefs = relationship("Brief", back_populates="site")

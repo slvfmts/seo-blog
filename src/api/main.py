@@ -19,7 +19,7 @@ _PUBLIC_PREFIXES = ("/ui/login", "/health", "/docs", "/openapi.json", "/api/", "
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Redirect unauthenticated /ui/ requests to login page."""
+    """Redirect unauthenticated /ui/ requests to login page. Enforce blog selection."""
 
     async def dispatch(self, request, call_next):
         path = request.url.path
@@ -29,6 +29,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 user = request.session.get("user")
                 if not user:
                     return StarletteRedirect(url="/ui/login", status_code=302)
+                # Enforce blog selection for all pages except /ui/blogs* and /ui/login
+                if (path.startswith("/ui/") and
+                    not path.startswith("/ui/blogs") and
+                    not path.startswith("/ui/login") and
+                    not path.startswith("/ui/logout") and
+                    not path.startswith("/ui/kb")):
+                    if not request.session.get("blog_id"):
+                        return StarletteRedirect(url="/ui/blogs", status_code=302)
         # Root redirect also needs auth check
         if path == "/":
             user = request.session.get("user")
@@ -115,7 +123,7 @@ def create_app() -> FastAPI:
     # Redirect root to UI
     @app.get("/", include_in_schema=False)
     async def root():
-        return RedirectResponse(url="/ui/articles")
+        return RedirectResponse(url="/ui/blogs")
 
     return app
 

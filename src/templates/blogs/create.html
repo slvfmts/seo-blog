@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}New Blog — SEO Blog{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">New Blog</h1>
+
+    {% if error %}
+    <div class="mb-4 p-4 bg-red-50 text-red-700 rounded-md">{{ error }}</div>
+    {% endif %}
+
+    <form method="POST" action="/ui/blogs/new" class="bg-white rounded-lg shadow-sm border p-6 space-y-4">
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input type="text" name="name" value="{{ name or '' }}" required
+                   class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                   placeholder="My Blog">
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Slug</label>
+            <input type="text" name="slug" value="{{ slug or '' }}" required
+                   class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                   placeholder="my-blog" pattern="[a-z0-9-]+">
+            <p class="text-xs text-gray-500 mt-1">Lowercase letters, numbers, hyphens only</p>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Domain</label>
+            <input type="text" name="domain" value="{{ domain or '' }}"
+                   class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                   placeholder="blog.example.com">
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Ghost URL</label>
+            <input type="text" name="ghost_url" value="{{ ghost_url or '' }}" required
+                   class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                   placeholder="http://ghost:2368">
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Ghost Admin Key</label>
+            <input type="text" name="ghost_admin_key" value="{{ ghost_admin_key or '' }}" required
+                   class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                   placeholder="xxxxxxxxxxxxxxxxxxxx:yyyyyyyyyyyy">
+        </div>
+
+        <div class="flex items-center space-x-3 pt-4">
+            <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 text-sm font-medium">
+                Create Blog
+            </button>
+            <a href="/ui/blogs" class="text-gray-500 hover:text-gray-700 text-sm">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
