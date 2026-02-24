@@ -107,6 +107,14 @@ img {
     flex-direction: column;
 }
 
+.post-card-link {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    color: inherit;
+    text-decoration: none;
+}
+
 .post-card-image-link {
     display: block;
     overflow: hidden;
@@ -136,13 +144,10 @@ img {
     line-height: 1.25;
     letter-spacing: -0.02em;
     margin-bottom: 8px;
-}
-
-.post-card-title a {
     transition: color 0.15s;
 }
 
-.post-card-title a:hover {
+.post-card:hover .post-card-title {
     color: #555;
 }
 
