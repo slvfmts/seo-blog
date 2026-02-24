@@ -560,6 +560,31 @@ img {
 }
 
 /* ========================
+   Meta Disclaimer
+   ======================== */
+.meta-asterisk {
+    font-size: 0.7em;
+    color: #999;
+    margin-left: 1px;
+    text-decoration: none;
+}
+
+.meta-disclaimer {
+    margin-top: 48px;
+    padding: 16px 20px;
+    background: #f5f5f5;
+    border-radius: 8px;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #888;
+}
+
+.meta-disclaimer-asterisk {
+    font-weight: 700;
+}
+
+/* ========================
    Ghost-specific: hide members/subscribe
    ======================== */
 .gh-portal-triggerbtn-container,
