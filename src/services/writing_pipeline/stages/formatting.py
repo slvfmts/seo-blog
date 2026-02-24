@@ -132,6 +132,8 @@ class FormattingStage(WritingStage):
 
             result = FormattingResult()
             tokens_total = 0
+            total_in = 0
+            total_out = 0
             article_md = context.edited_md
             publisher = self._get_publisher()
 
@@ -146,9 +148,11 @@ class FormattingStage(WritingStage):
                     article_title = h1_match.group(1).strip()
 
             # A) Generate cover (uploaded to Ghost, NOT inserted into body)
-            cover_asset, cover_error = await self._generate_cover(
+            cover_asset, cover_error, cover_in, cover_out = await self._generate_cover(
                 article_md, slug, assets_dir, publisher, article_title
             )
+            total_in += cover_in
+            total_out += cover_out
             if cover_asset:
                 result.assets.append(cover_asset)
                 result.cover_generated = True
@@ -158,10 +162,12 @@ class FormattingStage(WritingStage):
                 result.errors.append(f"Cover: {cover_error}")
 
             # B) Generate diagrams
-            diagrams, diagram_tokens, diagram_errors = await self._generate_diagrams(
+            diagrams, diagram_tokens, diagram_errors, diag_in, diag_out = await self._generate_diagrams(
                 article_md, slug, assets_dir, publisher
             )
             tokens_total += diagram_tokens
+            total_in += diag_in
+            total_out += diag_out
             result.diagrams_count = len(diagrams)
             result.errors.extend(diagram_errors)
 
@@ -182,7 +188,8 @@ class FormattingStage(WritingStage):
                     json.dump(result.to_dict(), f, ensure_ascii=False, indent=2)
 
             context.complete_stage(
-                tokens_used=tokens_total,
+                input_tokens=total_in,
+                output_tokens=total_out,
                 metadata={
                     "cover_generated": result.cover_generated,
                     "cover_ghost_url": result.cover_ghost_url,
@@ -200,10 +207,10 @@ class FormattingStage(WritingStage):
     async def _generate_cover(
         self, article_md: str, slug: str, assets_dir: str,
         publisher, article_title: str,
-    ) -> tuple[Optional[FormattingAsset], Optional[str]]:
+    ) -> tuple[Optional[FormattingAsset], Optional[str], int, int]:
         """Generate cover image via two-stage approach: Claude describes scene, gpt-image-1.5 renders."""
         if not self.openai_api_key:
-            return None, "No OpenAI API key configured"
+            return None, "No OpenAI API key configured", 0, 0
 
         try:
             import openai
@@ -212,7 +219,7 @@ class FormattingStage(WritingStage):
             # Stage 1: Claude generates scene description
             article_truncated = article_md[:6000]
             scene_prompt = COVER_SCENE_PROMPT + article_truncated
-            scene_description, scene_tokens = self._call_llm(
+            scene_description, _scene_in, _scene_out = self._call_llm(
                 scene_prompt, max_tokens=300, temperature=0.7,
             )
             scene_description = scene_description.strip()
@@ -276,34 +283,38 @@ class FormattingStage(WritingStage):
                 alt=alt_text,
                 caption="",
                 ghost_url=ghost_url,
-            ), None
+            ), None, _scene_in, _scene_out
 
         except Exception as e:
             logger.error(f"Cover generation failed: {e}")
-            return None, str(e)
+            return None, str(e), 0, 0
 
     async def _generate_diagrams(
         self, article_md: str, slug: str, assets_dir: str, publisher,
-    ) -> tuple[list[FormattingAsset], int, list[str]]:
+    ) -> tuple[list[FormattingAsset], int, list[str], int, int]:
         """Generate Mermaid diagrams via LLM, render via kroki.io, upload to Ghost."""
         assets = []
         errors = []
         tokens_total = 0
+        total_in = 0
+        total_out = 0
 
         # Get diagram specs from LLM
         prompt = DIAGRAM_PROMPT + article_md[:8000]
         try:
-            response_text, tokens = self._call_llm(prompt, max_tokens=4096, temperature=0.4)
-            tokens_total += tokens
+            response_text, in_t, out_t = self._call_llm(prompt, max_tokens=4096, temperature=0.4)
+            tokens_total += in_t + out_t
+            total_in += in_t
+            total_out += out_t
         except Exception as e:
-            return assets, 0, [f"Diagram LLM call failed: {e}"]
+            return assets, 0, [f"Diagram LLM call failed: {e}"], 0, 0
 
         # Parse diagram specs
         try:
             data = self._parse_json_response(response_text)
             diagrams = data.get("diagrams", [])
         except Exception as e:
-            return assets, tokens_total, [f"Failed to parse diagram specs: {e}"]
+            return assets, tokens_total, [f"Failed to parse diagram specs: {e}"], total_in, total_out
 
         # Render each diagram via kroki.io
         for i, diagram in enumerate(diagrams[:3]):
@@ -333,8 +344,10 @@ class FormattingStage(WritingStage):
                         f"and return ONLY the corrected Mermaid code, nothing else. "
                         f"Do NOT use subgraph. Avoid special characters in node text.\n\n{mermaid_code}"
                     )
-                    fixed_code, fix_tokens = self._call_llm(fix_prompt, max_tokens=2048, temperature=0.1)
-                    tokens_total += fix_tokens
+                    fixed_code, fix_in, fix_out = self._call_llm(fix_prompt, max_tokens=2048, temperature=0.1)
+                    tokens_total += fix_in + fix_out
+                    total_in += fix_in
+                    total_out += fix_out
                     fixed_code = fixed_code.strip()
                     if fixed_code.startswith("```"):
                         fixed_code = re.sub(r'^```\w*\n?', '', fixed_code)
@@ -369,7 +382,7 @@ class FormattingStage(WritingStage):
             else:
                 errors.append(f"{diagram_id}: render failed after retry")
 
-        return assets, tokens_total, errors
+        return assets, tokens_total, errors, total_in, total_out
 
     async def _render_mermaid_kroki(self, mermaid_code: str, output_path: str) -> bool:
         """Render Mermaid code to PNG via kroki.io."""

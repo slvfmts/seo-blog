@@ -248,6 +248,15 @@ class PipelineRunner:
         final_md = re.sub(r'^_[^_]+_\s*\n*', '', final_md, count=1)
         final_md = final_md.lstrip('\n')
 
+        # Build per-stage token breakdown
+        stage_tokens = {}
+        for slog in context.stage_logs:
+            stage_tokens[slog.stage_name] = {
+                "input": slog.input_tokens,
+                "output": slog.output_tokens,
+                "total": slog.tokens_used,
+            }
+
         # Build final result
         result = PipelineResult(
             topic=topic,
@@ -260,6 +269,9 @@ class PipelineRunner:
             cover_image_url=cover_image_url,
             cover_image_alt=cover_image_alt,
             linking_data=linking_data,
+            total_input_tokens=context.get_total_input_tokens(),
+            total_output_tokens=context.get_total_output_tokens(),
+            stage_tokens=stage_tokens,
             intent=context.intent,
             research=context.research,
             outline=context.outline,
@@ -282,11 +294,15 @@ class PipelineRunner:
                     "total_tokens": context.get_total_tokens(),
                     "started_at": result.started_at,
                     "completed_at": result.completed_at,
+                    "total_input_tokens": context.get_total_input_tokens(),
+                    "total_output_tokens": context.get_total_output_tokens(),
                     "stages": [
                         {
                             "name": log.stage_name,
                             "status": log.status,
                             "tokens": log.tokens_used,
+                            "input_tokens": log.input_tokens,
+                            "output_tokens": log.output_tokens,
                             "duration_ms": (
                                 (log.completed_at - log.started_at).total_seconds() * 1000
                                 if log.completed_at else None

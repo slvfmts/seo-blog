@@ -2528,6 +2528,11 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
             draft.meta_description = result.meta.meta_description
             draft.slug = result.meta.slug
 
+        # Save token usage
+        draft.total_input_tokens = result.total_input_tokens
+        draft.total_output_tokens = result.total_output_tokens
+        draft.stage_tokens = result.stage_tokens
+
         # Save cover image URL from Formatting stage
         if result.cover_image_url:
             draft.cover_image_url = result.cover_image_url

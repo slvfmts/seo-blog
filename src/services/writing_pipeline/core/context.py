@@ -18,6 +18,8 @@ class StageLog:
     status: str = "running"  # running | completed | failed
     error: Optional[str] = None
     tokens_used: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -70,13 +72,21 @@ class WritingContext:
         self.stage_logs.append(log)
         return log
 
-    def complete_stage(self, tokens_used: int = 0, metadata: Optional[Dict[str, Any]] = None):
+    def complete_stage(
+        self,
+        tokens_used: int = 0,
+        metadata: Optional[Dict[str, Any]] = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+    ):
         """Mark the current stage as completed."""
         if self.stage_logs:
             log = self.stage_logs[-1]
             log.completed_at = datetime.now()
             log.status = "completed"
-            log.tokens_used = tokens_used
+            log.input_tokens = input_tokens
+            log.output_tokens = output_tokens
+            log.tokens_used = input_tokens + output_tokens if (input_tokens or output_tokens) else tokens_used
             if metadata:
                 log.metadata.update(metadata)
         self.current_stage = None
@@ -101,6 +111,14 @@ class WritingContext:
     def get_total_tokens(self) -> int:
         """Get total tokens used across all stages."""
         return sum(log.tokens_used for log in self.stage_logs)
+
+    def get_total_input_tokens(self) -> int:
+        """Get total input tokens across all stages."""
+        return sum(log.input_tokens for log in self.stage_logs)
+
+    def get_total_output_tokens(self) -> int:
+        """Get total output tokens across all stages."""
+        return sum(log.output_tokens for log in self.stage_logs)
 
     def get_stage_log(self, stage_name: str) -> Optional[StageLog]:
         """Get log for a specific stage."""

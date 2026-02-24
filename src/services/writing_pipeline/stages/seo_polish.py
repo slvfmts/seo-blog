@@ -139,11 +139,12 @@ class SeoPolishStage(WritingStage):
             prompt = prompt.replace("{{issues}}", self._format_issues(analysis_before))
             prompt = prompt.replace("{{article_md}}", context.edited_md)
 
-            response_text, tokens = self._call_llm(
+            response_text, in_t, out_t = self._call_llm(
                 prompt,
                 max_tokens=16000,
                 temperature=0.2,
             )
+            tokens = in_t + out_t
 
             polished_md = response_text.strip()
 
@@ -180,7 +181,8 @@ class SeoPolishStage(WritingStage):
 
             self._save_intermediate(context, result)
             context.complete_stage(
-                tokens_used=tokens,
+                input_tokens=in_t,
+                output_tokens=out_t,
                 metadata={
                     "llm_called": True,
                     "keyword_density_before": analysis_before.keyword_density,

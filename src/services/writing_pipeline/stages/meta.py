@@ -59,7 +59,7 @@ class MetaStage(WritingStage):
             prompt = prompt.replace("{{article_md}}", context.edited_md)
             prompt = prompt.replace("{{target_keyword}}", target_keyword)
 
-            response_text, tokens = self._call_llm(
+            response_text, in_t, out_t = self._call_llm(
                 prompt,
                 max_tokens=1024,
                 temperature=0.4,
@@ -92,7 +92,8 @@ class MetaStage(WritingStage):
                     json.dump(meta.to_dict(), f, ensure_ascii=False, indent=2)
 
             context.complete_stage(
-                tokens_used=tokens,
+                input_tokens=in_t,
+                output_tokens=out_t,
                 metadata={
                     "meta_title_len": len(meta.meta_title),
                     "meta_description_len": len(meta.meta_description),

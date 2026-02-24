@@ -92,7 +92,7 @@ class LinkingStage(WritingStage):
             prompt = prompt_template.replace("{{article_md}}", context.edited_md)
             prompt = prompt.replace("{{related_articles_json}}", related_json)
 
-            response_text, tokens = self._call_llm(
+            response_text, in_t, out_t = self._call_llm(
                 prompt, max_tokens=16000, temperature=0.3
             )
 
@@ -120,7 +120,8 @@ class LinkingStage(WritingStage):
                     }, f, ensure_ascii=False, indent=2)
 
             context.complete_stage(
-                tokens_used=tokens,
+                input_tokens=in_t,
+                output_tokens=out_t,
                 metadata={
                     "related_count": len(related),
                     "links_inserted": link_count,

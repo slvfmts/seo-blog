@@ -97,7 +97,7 @@ class DraftingStage(WritingStage):
                 prompt = prompt.replace("{{terminology_canon_json}}", "null")
 
             # Call LLM with high token limit for full article
-            response_text, tokens = self._call_llm(
+            response_text, in_t, out_t = self._call_llm(
                 prompt,
                 max_tokens=16000,
                 temperature=0.7,
@@ -126,7 +126,8 @@ class DraftingStage(WritingStage):
                         json.dump(draft_meta.to_dict(), f, ensure_ascii=False, indent=2)
 
             context.complete_stage(
-                tokens_used=tokens,
+                input_tokens=in_t,
+                output_tokens=out_t,
                 metadata={
                     "word_count": word_count,
                     "target_words": context.outline.target_total_words,

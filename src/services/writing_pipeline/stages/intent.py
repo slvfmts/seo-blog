@@ -67,7 +67,7 @@ class IntentStage(WritingStage):
                 prompt = prompt.replace("{{today}}", datetime.now().strftime("%Y-%m-%d"))
 
             # Call LLM
-            response_text, tokens = self._call_llm(
+            response_text, in_t, out_t = self._call_llm(
                 prompt,
                 max_tokens=2048,
                 temperature=0.7,
@@ -102,7 +102,7 @@ class IntentStage(WritingStage):
                 with open(output_path, "w", encoding="utf-8") as f:
                     json.dump(context.intent.to_dict(), f, ensure_ascii=False, indent=2)
 
-            context.complete_stage(tokens_used=tokens)
+            context.complete_stage(input_tokens=in_t, output_tokens=out_t)
 
         except Exception as e:
             context.fail_stage(str(e))

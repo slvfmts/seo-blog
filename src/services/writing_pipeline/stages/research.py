@@ -166,6 +166,8 @@ class ResearchStage(WritingStage):
         """Execute research stage."""
         log = context.start_stage(self.name)
         total_tokens = 0
+        total_in = 0
+        total_out = 0
         factual_mode = context.config.get("factual_mode", "default")
 
         try:
@@ -182,7 +184,9 @@ class ResearchStage(WritingStage):
                 tokens = 0
                 logger.info("factual_mode=kb_only: skipping query generation")
             else:
-                queries, tokens = await self._generate_queries(context)
+                queries, tokens, q_in, q_out = await self._generate_queries(context)
+                total_in += q_in
+                total_out += q_out
 
             # If brief provides seed_queries, add them as additional queries
             brief = context.config.get("brief")
@@ -299,9 +303,11 @@ class ResearchStage(WritingStage):
                         json.dump(keyword_metrics.to_dict(), f, ensure_ascii=False, indent=2)
 
             # Step 6: Pack facts (with competitor analysis)
-            research, tokens = await self._pack_facts(context, competitor_pages)
+            research, tokens, fp_in, fp_out = await self._pack_facts(context, competitor_pages)
             context.research = research
             total_tokens += tokens
+            total_in += fp_in
+            total_out += fp_out
 
             # Save research pack if configured
             if context.save_intermediate and context.output_dir:
@@ -310,10 +316,12 @@ class ResearchStage(WritingStage):
                     json.dump(research.to_dict(), f, ensure_ascii=False, indent=2)
 
             # Step 7: Keyword clustering
-            clusters, cluster_tokens = await self._cluster_keywords(context)
+            clusters, cluster_tokens, ck_in, ck_out = await self._cluster_keywords(context)
             if clusters:
                 context.research.keyword_clusters = clusters
                 total_tokens += cluster_tokens
+                total_in += ck_in
+                total_out += ck_out
 
                 if context.save_intermediate and context.output_dir:
                     output_path = os.path.join(context.output_dir, "04b_keyword_clusters.json")
@@ -328,7 +336,8 @@ class ResearchStage(WritingStage):
             )
 
             context.complete_stage(
-                tokens_used=total_tokens,
+                input_tokens=total_in,
+                output_tokens=total_out,
                 metadata={
                     "queries_count": len(queries.queries),
                     "sources_count": len(research.sources),
@@ -346,20 +355,20 @@ class ResearchStage(WritingStage):
 
         return context
 
-    async def _generate_queries(self, context: WritingContext) -> tuple[QueryPlannerResult, int]:
-        """Generate search queries from intent."""
+    async def _generate_queries(self, context: WritingContext) -> tuple[QueryPlannerResult, int, int, int]:
+        """Generate search queries from intent. Returns (result, total_tokens, input_tokens, output_tokens)."""
         prompt_template = self._load_prompt("research_queries_v1")
         intent_json = json.dumps(context.intent.to_dict(), ensure_ascii=False, indent=2)
         prompt = prompt_template.replace("{{intent_spec_json}}", intent_json)
 
-        response_text, tokens = self._call_llm(
+        response_text, in_t, out_t = self._call_llm(
             prompt,
             max_tokens=1024,
             temperature=0.7,
         )
 
         data = self._parse_json_response(response_text)
-        return QueryPlannerResult.from_dict(data), tokens
+        return QueryPlannerResult.from_dict(data), in_t + out_t, in_t, out_t
 
     async def _execute_searches(self, context: WritingContext) -> List[Dict[str, Any]]:
         """Execute searches using available data sources."""
@@ -860,7 +869,7 @@ class ResearchStage(WritingStage):
         self,
         context: WritingContext,
         competitor_pages: Optional[Dict[str, Any]] = None,
-    ) -> tuple[ResearchResult, int]:
+    ) -> tuple[ResearchResult, int, int, int]:
         """Pack search results into structured research pack (v2 with claim_bank, unique_angle, etc.)."""
         prompt_template = self._load_prompt("research_packer_v2")
 
@@ -906,11 +915,12 @@ class ResearchStage(WritingStage):
         elif factual_mode == "kb_only":
             prompt += "\n\nВАЖНО: СТРОГО используй только факты из собственной базы знаний (is_knowledge_base=true). Не включай факты из открытых веб-источников. Все sources должны иметь origin: 'kb'."
 
-        response_text, tokens = self._call_llm(
+        response_text, in_t, out_t = self._call_llm(
             prompt,
             max_tokens=12000,
             temperature=0.5,
         )
+        tokens = in_t + out_t
 
         data = self._parse_json_response(response_text)
 
@@ -934,7 +944,7 @@ class ResearchStage(WritingStage):
         if "cluster_overlap_map" not in data:
             data["cluster_overlap_map"] = []
 
-        return ResearchResult.from_dict(data), tokens
+        return ResearchResult.from_dict(data), tokens, in_t, out_t
 
     def _format_existing_posts_for_prompt(self, existing_posts: List[Dict[str, Any]]) -> str:
         """Format existing posts for inclusion in research packer prompt."""
@@ -974,7 +984,7 @@ class ResearchStage(WritingStage):
     async def _cluster_keywords(
         self,
         context: WritingContext,
-    ) -> tuple[Optional[KeywordClusteringResult], int]:
+    ) -> tuple[Optional[KeywordClusteringResult], int, int, int]:
         """
         Cluster keywords by semantic similarity using LLM.
 
@@ -1008,7 +1018,7 @@ class ResearchStage(WritingStage):
         # Skip if too few keywords
         if len(all_keywords) < 5:
             logger.info(f"Skipping keyword clustering: only {len(all_keywords)} keywords")
-            return None, 0
+            return None, 0, 0, 0
 
         # Build keywords list with volume if available
         keywords_data = []
@@ -1029,7 +1039,7 @@ class ResearchStage(WritingStage):
         prompt = prompt.replace("{{keywords_json}}", json.dumps(keywords_data, ensure_ascii=False, indent=2))
 
         try:
-            response_text, tokens = self._call_llm(
+            response_text, in_t, out_t = self._call_llm(
                 prompt,
                 max_tokens=2048,
                 temperature=0.5,
@@ -1043,8 +1053,8 @@ class ResearchStage(WritingStage):
                 f"{len(result.unclustered)} unclustered"
             )
 
-            return result, tokens
+            return result, in_t + out_t, in_t, out_t
 
         except Exception as e:
             logger.warning(f"Keyword clustering failed: {e}")
-            return None, 0
+            return None, 0, 0, 0

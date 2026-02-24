@@ -41,7 +41,7 @@ class EditingStage(WritingStage):
             prompt = prompt.replace("{{intent_spec_json}}", intent_json)
 
             # Call LLM
-            response_text, tokens = self._call_llm(
+            response_text, in_t, out_t = self._call_llm(
                 prompt,
                 max_tokens=16000,
                 temperature=0.3,  # Lower temperature for more consistent editing
@@ -61,7 +61,8 @@ class EditingStage(WritingStage):
                     f.write(context.edited_md)
 
             context.complete_stage(
-                tokens_used=tokens,
+                input_tokens=in_t,
+                output_tokens=out_t,
                 metadata={
                     "word_count": word_count,
                     "draft_word_count": len(context.draft_md.split()),

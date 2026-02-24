@@ -190,6 +190,11 @@ class Draft(Base):
     # Generation mode
     step_by_step = Column(Boolean, default=False)  # True = pause at key stages
 
+    # Token usage
+    total_input_tokens = Column(Integer)
+    total_output_tokens = Column(Integer)
+    stage_tokens = Column(JSON)
+
     # Cover image
     cover_image_url = Column(String(500))
     cover_image_alt = Column(String(500))

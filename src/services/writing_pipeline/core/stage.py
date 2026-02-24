@@ -66,12 +66,12 @@ class WritingStage(ABC):
         prompt: str,
         max_tokens: int = 4096,
         temperature: float = 0.7,
-    ) -> tuple[str, int]:
+    ) -> tuple[str, int, int]:
         """
         Call the LLM with a prompt using streaming to avoid proxy timeouts.
 
         Returns:
-            Tuple of (response_text, tokens_used)
+            Tuple of (response_text, input_tokens, output_tokens)
         """
         max_retries = 3
         for attempt in range(max_retries):
@@ -92,9 +92,8 @@ class WritingStage(ABC):
                 output_tokens = response.usage.output_tokens
 
                 text = "".join(chunks)
-                tokens = input_tokens + output_tokens
 
-                return text, tokens
+                return text, input_tokens, output_tokens
 
             except (anthropic.APIStatusError, anthropic.APIConnectionError) as e:
                 is_retryable = isinstance(e, anthropic.APIConnectionError) or (
@@ -246,7 +245,7 @@ class WritingStage(ABC):
         )
 
         logger.info("Attempting LLM JSON repair")
-        response_text, _ = self._call_llm(repair_prompt, max_tokens=16384, temperature=0.0)
+        response_text, _, _ = self._call_llm(repair_prompt, max_tokens=16384, temperature=0.0)
 
         # Parse the repaired JSON
         response_text = response_text.strip()

@@ -74,7 +74,7 @@ class QualityGateStage(WritingStage):
                 prompt = prompt.replace("{{existing_posts_json}}", "[]")
 
             # Call LLM
-            response_text, tokens = self._call_llm(
+            response_text, in_t, out_t = self._call_llm(
                 prompt,
                 max_tokens=16000,
                 temperature=0.2,
@@ -100,7 +100,8 @@ class QualityGateStage(WritingStage):
                         json.dump(quality_report, f, ensure_ascii=False, indent=2)
 
             context.complete_stage(
-                tokens_used=tokens,
+                input_tokens=in_t,
+                output_tokens=out_t,
                 metadata={
                     "quality_score": quality_report.get("quality_score", 0) if quality_report else 0,
                     "claims_removed": len(quality_report.get("claims_removed", [])) if quality_report else 0,

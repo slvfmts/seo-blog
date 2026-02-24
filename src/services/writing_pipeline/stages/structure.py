@@ -72,7 +72,7 @@ class StructureStage(WritingStage):
             prompt = prompt.replace("{{keyword_clusters_json}}", clusters_json)
 
             # Call LLM
-            response_text, tokens = self._call_llm(
+            response_text, in_t, out_t = self._call_llm(
                 prompt,
                 max_tokens=4096,
                 temperature=0.7,
@@ -92,7 +92,8 @@ class StructureStage(WritingStage):
                     json.dump(context.outline.to_dict(), f, ensure_ascii=False, indent=2)
 
             context.complete_stage(
-                tokens_used=tokens,
+                input_tokens=in_t,
+                output_tokens=out_t,
                 metadata={
                     "sections_count": len(context.outline.sections),
                     "target_words": context.outline.target_total_words,

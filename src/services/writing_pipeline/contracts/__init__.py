@@ -1408,6 +1408,11 @@ class PipelineResult:
     # Internal linking data (for post-publication registration)
     linking_data: Optional[Dict[str, Any]] = None
 
+    # Token usage
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    stage_tokens: Dict[str, Dict[str, int]] = field(default_factory=dict)
+
     # Metadata
     started_at: str = ""
     completed_at: str = ""
@@ -1430,6 +1435,9 @@ class PipelineResult:
             "research": self.research.to_dict() if self.research else None,
             "outline": self.outline.to_dict() if self.outline else None,
             "draft_md": self.draft_md,
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "stage_tokens": self.stage_tokens,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "stages_completed": self.stages_completed,
