@@ -22,13 +22,15 @@ from ..contracts import FormattingResult, FormattingAsset
 logger = logging.getLogger(__name__)
 
 
-COVER_SCENE_PROMPT = """You are an art director for a cozy pixel-art blog. Read the article and describe ONE specific scene for the cover in 3-5 sentences in English.
+COVER_SCENE_PROMPT = """You are an art director for a pixel-art blog. Read the article and describe ONE specific, unique scene for the cover in 3-5 sentences in English.
 
 Rules:
-- The scene should be an atmospheric interior or landscape that metaphorically relates to the article topic
-- Think cozy spaces: a study with bookshelves, a workshop, a window overlooking a city, a garden, a library, a café, a cabin in the woods — pick what fits the topic
-- Include environmental storytelling details: warm lighting (lamps, candles, sunset glow, fireplace), objects on shelves/desks, weather outside windows, plants, cats, mugs
-- Time of day matters: evening/night with warm interior light is preferred, but dawn/morning works too
+- The scene is a visual METAPHOR for the article's core idea — not a literal depiction of the topic
+- Be CREATIVE with settings. Choose from a WIDE range: a rooftop garden, a busy marketplace, a cat napping on a stack of books, a lighthouse at dawn, a workshop with tools, a train station, a forest path, a kitchen table with scattered notes, a cityscape from above, a boat on a calm lake — pick what resonates with THIS specific article
+- VARY the time of day and lighting: bright morning sun, overcast afternoon, neon-lit night, foggy dawn, golden sunset, blue hour — not always evening
+- VARY the color mood: cool blues, lush greens, warm oranges, muted pastels, vibrant neons — not always warm tones
+- Include 3-5 specific objects that tell a story about the scene
+- AVOID: generic desk-with-laptop-and-window scenes. Every article deserves its own world
 - NO people, NO hands, NO faces, NO text, NO letters, NO numbers, NO logos
 - Write ONLY the scene description, nothing else
 
@@ -36,10 +38,11 @@ Rules:
 """
 
 COVER_STYLE_PREFIX = (
-    "Wide 16:9 high-quality pixel art illustration. Detailed retro pixel art style inspired by Owlboy and Eastward. "
-    "Rich warm color palette with atmospheric lighting — golden hour, cozy lamplight, or soft moonlight. "
+    "Wide 16:9 high-quality pixel art illustration. "
+    "Detailed retro pixel art style inspired by Owlboy and Eastward. "
     "Fine pixel detail on objects and textures, slight dithering for smooth gradients. "
-    "Moody and atmospheric, NOT flat or cartoony. No text, no letters, no numbers, no logos, no people, no hands. "
+    "Rich, atmospheric, NOT flat or cartoony. "
+    "No text, no letters, no numbers, no logos, no people, no hands. "
     "Scene: "
 )
 
@@ -229,7 +232,7 @@ class FormattingStage(WritingStage):
                 model="gpt-image-1.5",
                 prompt=image_prompt,
                 size="1536x1024",
-                quality="high",
+                quality="medium",
                 n=1,
             )
 

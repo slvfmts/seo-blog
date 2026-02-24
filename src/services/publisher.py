@@ -6,22 +6,16 @@ import json
 import hmac
 import hashlib
 import base64
-import logging
 import re
 import httpx
 from datetime import datetime
-
-logger = logging.getLogger(__name__)
 
 
 class GhostPublisher:
     """Публикация статей в Ghost."""
 
     def __init__(self, ghost_url: str, admin_key: str):
-        url = ghost_url.rstrip("/")
-        if url and not url.startswith(("http://", "https://")):
-            url = f"https://{url}"
-        self.ghost_url = url
+        self.ghost_url = ghost_url.rstrip("/")
         self.admin_key = admin_key
 
     def _base64url_encode(self, data: bytes) -> str:
@@ -97,25 +91,16 @@ class GhostPublisher:
 
         return re.sub(r'\[\[LINK:([^|]+)\|([^\]]+)\]\]', replace_match, content)
 
-    def _markdown_to_lexical(self, markdown: str) -> str:
-        """Конвертирует Markdown в Ghost lexical формат (Ghost 5+)."""
-        lexical = {
-            "root": {
-                "children": [
-                    {
-                        "type": "markdown",
-                        "version": 1,
-                        "markdown": markdown,
-                    }
-                ],
-                "direction": None,
-                "format": "",
-                "indent": 0,
-                "type": "root",
-                "version": 1,
-            }
+    def _markdown_to_mobiledoc(self, markdown: str) -> str:
+        """Конвертирует Markdown в Ghost mobiledoc формат."""
+        mobiledoc = {
+            "version": "0.3.1",
+            "markups": [],
+            "atoms": [],
+            "cards": [["markdown", {"markdown": markdown}]],
+            "sections": [[10, 0]]
         }
-        return json.dumps(lexical)
+        return json.dumps(mobiledoc)
 
     def upload_image(self, filepath: str, ref: str = "") -> str | None:
         """
@@ -157,11 +142,9 @@ class GhostPublisher:
                 images = response.json().get("images", [])
                 if images:
                     return images[0].get("url")
-            logger.error(f"Ghost image upload failed: {response.status_code} {response.text[:300]}")
             return None
 
-        except Exception as e:
-            logger.error(f"Ghost image upload exception: {e}")
+        except Exception:
             return None
 
     def get_posts(self) -> list[dict]:
@@ -226,7 +209,7 @@ class GhostPublisher:
         """
         Fetch single post by Ghost ID.
 
-        Returns: {id, title, url, slug, lexical, updated_at} or None.
+        Returns: {id, title, url, slug, mobiledoc, updated_at} or None.
         """
         token = self._create_jwt_token()
         headers = {
@@ -241,7 +224,7 @@ class GhostPublisher:
                     headers=headers,
                     params={
                         "fields": "id,title,url,slug,updated_at",
-                        "formats": "lexical",
+                        "formats": "mobiledoc",
                     },
                 )
 
@@ -252,7 +235,7 @@ class GhostPublisher:
                         "title": post.get("title", ""),
                         "url": post.get("url", ""),
                         "slug": post.get("slug", ""),
-                        "lexical": post.get("lexical", ""),
+                        "mobiledoc": post.get("mobiledoc", ""),
                         "updated_at": post.get("updated_at", ""),
                     }
 
@@ -275,9 +258,10 @@ class GhostPublisher:
 
         clean_content, extracted_scripts = self._extract_script_tags(content_md)
         clean_content = self._resolve_link_placeholders(clean_content)
+        clean_content = re.sub(r'\A\s*#\s+[^\n]+\n*', '', clean_content)
         post_data = {
             "posts": [{
-                "lexical": self._markdown_to_lexical(clean_content),
+                "mobiledoc": self._markdown_to_mobiledoc(clean_content),
                 "updated_at": updated_at,
             }]
         }
@@ -328,11 +312,14 @@ class GhostPublisher:
         # Extract <script> tags (e.g. JSON-LD) from content body
         clean_content, extracted_scripts = self._extract_script_tags(content)
         clean_content = self._resolve_link_placeholders(clean_content)
+        # Strip leading H1 — Ghost renders title from post metadata,
+        # so H1 in body causes duplicate heading
+        clean_content = re.sub(r'\A\s*#\s+[^\n]+\n*', '', clean_content)
 
         post_data = {
             "posts": [{
                 "title": title,
-                "lexical": self._markdown_to_lexical(clean_content),
+                "mobiledoc": self._markdown_to_mobiledoc(clean_content),
                 "status": status,
             }]
         }
