@@ -38,27 +38,101 @@
 </div>
 {% endif %}
 
-<!-- Upload Form -->
+<!-- Upload Drop Zone -->
 <div class="bg-white shadow sm:rounded-lg mb-6">
     <div class="px-4 py-5 sm:p-6">
-        <h2 class="text-lg font-medium text-gray-900 mb-4">Загрузить документ</h2>
-        <form method="POST" action="/ui/kb/{{ folder.id }}/upload" enctype="multipart/form-data">
-            <div class="flex items-center space-x-4">
-                <input
-                    type="file"
-                    name="file"
-                    accept=".md,.txt,.pdf,.docx"
-                    required
-                    class="block text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                >
-                <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">
-                    Загрузить
-                </button>
-            </div>
-            <p class="mt-2 text-xs text-gray-500">Форматы: .md, .txt, .pdf, .docx. Макс. размер: 50 МБ.</p>
-        </form>
+        <h2 class="text-lg font-medium text-gray-900 mb-4">Загрузить документы</h2>
+        <div id="drop-zone"
+             class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer transition-colors hover:border-indigo-400 hover:bg-indigo-50/30">
+            <svg class="mx-auto h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            <p class="mt-2 text-sm text-gray-600">Перетащите файлы сюда или <span class="text-indigo-600 font-medium">нажмите для выбора</span></p>
+            <p class="mt-1 text-xs text-gray-400">.md, .txt, .pdf, .docx — до 50 МБ каждый</p>
+            <input id="file-input" type="file" multiple accept=".md,.txt,.pdf,.docx" class="hidden">
+        </div>
+        <div id="upload-list" class="mt-3 space-y-1"></div>
     </div>
 </div>
+
+<script>
+(function() {
+    const zone = document.getElementById('drop-zone');
+    const input = document.getElementById('file-input');
+    const list = document.getElementById('upload-list');
+    const folderId = '{{ folder.id }}';
+    const allowedExts = ['.md', '.txt', '.pdf', '.docx'];
+
+    zone.addEventListener('click', () => input.click());
+    input.addEventListener('change', () => { if (input.files.length) handleFiles(input.files); input.value = ''; });
+
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('border-indigo-500', 'bg-indigo-50'); });
+    zone.addEventListener('dragleave', e => { e.preventDefault(); zone.classList.remove('border-indigo-500', 'bg-indigo-50'); });
+    zone.addEventListener('drop', e => {
+        e.preventDefault();
+        zone.classList.remove('border-indigo-500', 'bg-indigo-50');
+        if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+    });
+
+    function getExt(name) { const i = name.lastIndexOf('.'); return i >= 0 ? name.slice(i).toLowerCase() : ''; }
+
+    function formatSize(b) {
+        if (b < 1024) return b + ' B';
+        if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+        return (b / 1048576).toFixed(1) + ' MB';
+    }
+
+    function addRow(name) {
+        const row = document.createElement('div');
+        row.className = 'flex items-center text-sm py-1 px-2 rounded';
+        row.innerHTML = '<span class="status w-5 h-5 mr-2 flex-shrink-0">' +
+            '<svg class="animate-spin h-4 w-4 text-indigo-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>' +
+            '</span>' +
+            '<span class="name text-gray-700 truncate flex-1">' + name + '</span>' +
+            '<span class="info text-gray-400 ml-2 whitespace-nowrap">загрузка…</span>';
+        list.appendChild(row);
+        return row;
+    }
+
+    function setRowOk(row, wc, size) {
+        row.querySelector('.status').innerHTML = '<svg class="h-4 w-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
+        row.querySelector('.info').textContent = (wc ? wc.toLocaleString('ru-RU') + ' слов' : '') + (size ? ' · ' + formatSize(size) : '');
+        row.querySelector('.info').className = 'info text-green-600 ml-2 whitespace-nowrap';
+    }
+
+    function setRowErr(row, msg) {
+        row.querySelector('.status').innerHTML = '<svg class="h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>';
+        row.querySelector('.info').textContent = msg;
+        row.querySelector('.info').className = 'info text-red-600 ml-2 whitespace-nowrap';
+    }
+
+    async function handleFiles(fileList) {
+        const files = [];
+        for (const f of fileList) {
+            const ext = getExt(f.name);
+            if (!allowedExts.includes(ext)) {
+                const row = addRow(f.name);
+                setRowErr(row, 'неподдерживаемый формат');
+                continue;
+            }
+            files.push(f);
+        }
+        let uploaded = 0;
+        for (const f of files) {
+            const row = addRow(f.name);
+            try {
+                const fd = new FormData();
+                fd.append('file', f);
+                const resp = await fetch('/ui/kb/' + folderId + '/upload-ajax', { method: 'POST', body: fd });
+                const data = await resp.json();
+                if (data.ok) { setRowOk(row, data.word_count, data.file_size); uploaded++; }
+                else { setRowErr(row, data.error || 'ошибка'); }
+            } catch (e) { setRowErr(row, 'сетевая ошибка'); }
+        }
+        if (uploaded > 0) setTimeout(() => location.reload(), 1200);
+    }
+})();
+</script>
 
 <!-- Documents Table -->
 <div class="bg-white shadow sm:rounded-lg">

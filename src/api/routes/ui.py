@@ -15,7 +15,7 @@ from typing import List
 
 logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, BackgroundTasks, UploadFile, File
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 import markdown
@@ -1175,6 +1175,67 @@ async def kb_upload(
         url=f"/ui/kb/{folder_id}?success=Загружен: {file.filename} ({word_count} слов)",
         status_code=303,
     )
+
+
+@router.post("/kb/{folder_id}/upload-ajax")
+async def kb_upload_ajax(
+    request: Request,
+    folder_id: UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """AJAX single-file upload for drag-and-drop UI."""
+    from src.services.text_extractor import extract_text
+
+    folder = db.query(models.KnowledgeFolder).filter(models.KnowledgeFolder.id == folder_id).first()
+    if not folder:
+        return JSONResponse({"ok": False, "error": "Папка не найдена"}, status_code=404)
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return JSONResponse({"ok": False, "error": f"Недопустимый формат: {ext}"})
+
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        return JSONResponse({"ok": False, "error": "Файл слишком большой (макс. 50 МБ)"})
+
+    settings = get_settings()
+    upload_dir = os.path.join(settings.upload_dir, str(folder_id))
+    os.makedirs(upload_dir, exist_ok=True)
+
+    safe_filename = f"{uuid_lib.uuid4().hex}{ext}"
+    file_path = os.path.join(upload_dir, safe_filename)
+
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    mime_type = MIME_MAP.get(ext, "application/octet-stream")
+    try:
+        text, word_count = extract_text(file_path, mime_type)
+    except Exception as e:
+        os.remove(file_path)
+        return JSONResponse({"ok": False, "error": f"Ошибка извлечения текста: {e}"})
+
+    doc = models.KnowledgeDocument(
+        folder_id=folder_id,
+        filename=safe_filename,
+        original_filename=file.filename or safe_filename,
+        file_path=file_path,
+        file_size=len(content),
+        mime_type=mime_type,
+        content_text=text,
+        word_count=word_count,
+    )
+    db.add(doc)
+    db.commit()
+
+    return JSONResponse({
+        "ok": True,
+        "filename": file.filename,
+        "word_count": word_count,
+        "doc_id": str(doc.id),
+        "file_size": len(content),
+    })
 
 
 @router.post("/kb/{folder_id}/documents/{doc_id}/delete", response_class=HTMLResponse)
