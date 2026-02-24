@@ -444,7 +444,7 @@ img {
 .promo-banner {
     margin: 48px 0;
     padding: 28px 32px;
-    background: linear-gradient(135deg, #fef3e2 0%, #fce7d0 100%);
+    background: #ededfa;
     border-radius: 16px;
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 }
