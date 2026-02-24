@@ -1998,6 +1998,15 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
             except Exception:
                 pass  # Graceful degradation — publish succeeds even if linking fails
 
+            # Ping IndexNow (Yandex + Bing)
+            try:
+                from src.services.indexnow import ping_indexnow
+                published_url = result["post"].get("url", "")
+                if published_url:
+                    await ping_indexnow(published_url)
+            except Exception:
+                pass  # Graceful degradation
+
     except Exception:
         # Rollback to approved so user can retry
         draft.status = "approved"
