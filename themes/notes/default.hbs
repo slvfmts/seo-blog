@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{meta_title}}</title>
+    {{ghost_head}}
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{asset "css/style.css"}}">
+</head>
+<body class="{{body_class}}">
+
+    {{> header}}
+
+    <main>
+        {{{body}}}
+    </main>
+
+    {{> footer}}
+
+    <div class="cookie-banner" id="cookieBanner">
+        <p>Всему интернету нужны ваши куки — нам тоже. <a href="/privacy/">Подробнее</a></p>
+        <button onclick="document.getElementById('cookieBanner').remove();localStorage.setItem('cookies_ok','1')">Мне ок</button>
+    </div>
+    <script src="{{asset "js/typograph.js"}}"></script>
+    <script src="{{asset "js/promo-banner.js"}}"></script>
+    <script>if(localStorage.getItem('cookies_ok'))document.getElementById('cookieBanner').remove()</script>
+    <!-- Yandex.Metrika counter -->
+    <script type="text/javascript">
+        (function(m,e,t,r,i,k,a){
+            m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+            m[i].l=1*new Date();
+            for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+            k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+        })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=106970792', 'ym');
+        ym(106970792, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+    </script>
+    <noscript><div><img src="https://mc.yandex.ru/watch/106970792" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+    <!-- /Yandex.Metrika counter -->
+    {{ghost_foot}}
+</body>
+</html>

@@ -1,0 +1,25 @@
+{{!< default}}
+
+{{#post}}
+<article class="post-full">
+    <header class="post-header">
+        <h1 class="post-title">{{title}}</h1>
+        {{#if custom_excerpt}}
+            <p class="post-subtitle">{{custom_excerpt}}</p>
+        {{/if}}
+        <div class="post-meta">
+            <time datetime="{{date format="YYYY-MM-DD"}}">{{date format="D MMMM YYYY"}}</time>
+        </div>
+    </header>
+
+    {{#if feature_image}}
+    <figure class="post-cover">
+        <img src="{{feature_image}}" alt="{{title}}">
+    </figure>
+    {{/if}}
+
+    <section class="post-content">
+        {{content}}
+    </section>
+</article>
+{{/post}}

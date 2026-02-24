@@ -1,0 +1,16 @@
+<header class="site-header">
+    <div class="header-inner">
+        <a href="{{@site.url}}" class="site-logo">
+            {{#if @site.logo}}
+                <img src="{{@site.logo}}" alt="{{@site.title}}">
+            {{else}}
+                <span class="logo-text">{{@site.title}}</span>
+            {{/if}}
+        </a>
+        <nav class="site-nav">
+            <a href="/about/">О проекте</a>
+            <a href="https://editors.one?utm_source=seo-blog&utm_medium=internal&utm_campaign=header" target="_blank" rel="noopener" class="nav-external">Первая редакция <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3.5 1.5H10.5V8.5M10.5 1.5L1.5 10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+            <a href="https://editors.one/unemployed?utm_source=seo-blog&utm_medium=internal&utm_campaign=header" target="_blank" rel="noopener" class="btn-primary">Курс про фриланс</a>
+        </nav>
+    </div>
+</header>
