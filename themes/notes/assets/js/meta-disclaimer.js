@@ -1,20 +1,24 @@
 (function () {
-  // Words to mark with an asterisk (case-insensitive)
-  // Covers: Instagram, Инстаграм, Facebook, Фейсбук, Threads, Тредс, Тредз, WhatsApp, Ватсап
-  var KEYWORDS = [
-    'Instagram', 'Инстаграм', 'Инстаграме', 'Инстаграма', 'Инстаграму',
-    'Facebook', 'Фейсбук', 'Фейсбуке', 'Фейсбука', 'Фейсбуку',
-    'Threads', 'Тредс', 'Тредз',
-    'WhatsApp', 'Ватсап', 'Ватсапе', 'Ватсапа',
-    'Meta'
-  ];
+  // Stems to match — covers all case forms (Фейсбук, Фейсбуке, Фейсбука, etc.)
+  var LATIN_WORDS = ['Instagram', 'Facebook', 'Threads', 'WhatsApp', 'Meta Platforms'];
+  var CYRILLIC_STEMS = ['Инстаграм', 'Фейсбук', 'Тредс', 'Тредз', 'Ватсап'];
 
   var DISCLAIMER = 'Компания Meta Platforms\u00a0Inc. признана экстремистской организацией, ' +
     'её деятельность на\u00a0территории России запрещена.';
 
-  // Build regex: match whole words only, case-insensitive
+  // Latin words: standard \b works fine
+  // Cyrillic stems: use lookahead for non-cyrillic char (or end of string)
+  var latinPart = LATIN_WORDS.map(function (w) {
+    return '\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b';
+  }).join('|');
+
+  var cyrillicPart = CYRILLIC_STEMS.map(function (s) {
+    return s + '[а-яё]*';
+  }).join('|');
+
+  // Cyrillic boundary: not preceded/followed by a Cyrillic letter
   var pattern = new RegExp(
-    '\\b(' + KEYWORDS.join('|') + ')\\b',
+    '(' + latinPart + '|(?<![а-яёА-ЯЁ])(?:' + cyrillicPart + ')(?![а-яёА-ЯЁ]))',
     'gi'
   );
 
@@ -23,10 +27,8 @@
     var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
     var nodes = [];
 
-    // Collect text nodes first (can't modify DOM while walking)
     while (walker.nextNode()) {
       var node = walker.currentNode;
-      // Skip nodes inside scripts, styles, links, and already-marked spans
       var parent = node.parentElement;
       if (!parent) continue;
       var tag = parent.tagName;
@@ -41,7 +43,6 @@
       pattern.lastIndex = 0;
     }
 
-    // Replace text nodes with marked versions
     nodes.forEach(function (node) {
       var frag = document.createDocumentFragment();
       var text = node.nodeValue;
@@ -50,11 +51,9 @@
       pattern.lastIndex = 0;
 
       while ((match = pattern.exec(text)) !== null) {
-        // Text before match
         if (match.index > lastIndex) {
           frag.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
         }
-        // The keyword + asterisk
         var span = document.createElement('span');
         span.className = 'meta-marked';
         span.textContent = match[0];
@@ -68,7 +67,6 @@
         lastIndex = pattern.lastIndex;
       }
 
-      // Remaining text
       if (lastIndex < text.length) {
         frag.appendChild(document.createTextNode(text.slice(lastIndex)));
       }
@@ -87,7 +85,6 @@
   }
 
   function init() {
-    // Only on post pages
     if (!document.body.classList.contains('post-template')) return;
     if (document.body.classList.contains('page-template')) return;
 
