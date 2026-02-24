@@ -97,16 +97,25 @@ class GhostPublisher:
 
         return re.sub(r'\[\[LINK:([^|]+)\|([^\]]+)\]\]', replace_match, content)
 
-    def _markdown_to_mobiledoc(self, markdown: str) -> str:
-        """Конвертирует Markdown в Ghost mobiledoc формат."""
-        mobiledoc = {
-            "version": "0.3.1",
-            "markups": [],
-            "atoms": [],
-            "cards": [["markdown", {"markdown": markdown}]],
-            "sections": [[10, 0]]
+    def _markdown_to_lexical(self, markdown: str) -> str:
+        """Конвертирует Markdown в Ghost lexical формат (Ghost 5+)."""
+        lexical = {
+            "root": {
+                "children": [
+                    {
+                        "type": "markdown",
+                        "version": 1,
+                        "markdown": markdown,
+                    }
+                ],
+                "direction": None,
+                "format": "",
+                "indent": 0,
+                "type": "root",
+                "version": 1,
+            }
         }
-        return json.dumps(mobiledoc)
+        return json.dumps(lexical)
 
     def upload_image(self, filepath: str, ref: str = "") -> str | None:
         """
@@ -217,7 +226,7 @@ class GhostPublisher:
         """
         Fetch single post by Ghost ID.
 
-        Returns: {id, title, url, slug, mobiledoc, updated_at} or None.
+        Returns: {id, title, url, slug, lexical, updated_at} or None.
         """
         token = self._create_jwt_token()
         headers = {
@@ -232,7 +241,7 @@ class GhostPublisher:
                     headers=headers,
                     params={
                         "fields": "id,title,url,slug,updated_at",
-                        "formats": "mobiledoc",
+                        "formats": "lexical",
                     },
                 )
 
@@ -243,7 +252,7 @@ class GhostPublisher:
                         "title": post.get("title", ""),
                         "url": post.get("url", ""),
                         "slug": post.get("slug", ""),
-                        "mobiledoc": post.get("mobiledoc", ""),
+                        "lexical": post.get("lexical", ""),
                         "updated_at": post.get("updated_at", ""),
                     }
 
@@ -268,7 +277,7 @@ class GhostPublisher:
         clean_content = self._resolve_link_placeholders(clean_content)
         post_data = {
             "posts": [{
-                "mobiledoc": self._markdown_to_mobiledoc(clean_content),
+                "lexical": self._markdown_to_lexical(clean_content),
                 "updated_at": updated_at,
             }]
         }
@@ -323,7 +332,7 @@ class GhostPublisher:
         post_data = {
             "posts": [{
                 "title": title,
-                "mobiledoc": self._markdown_to_mobiledoc(clean_content),
+                "lexical": self._markdown_to_lexical(clean_content),
                 "status": status,
             }]
         }
