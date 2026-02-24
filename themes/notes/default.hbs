@@ -21,25 +21,50 @@
     {{> footer}}
 
     <div class="cookie-banner" id="cookieBanner">
-        <p>Всему интернету нужны ваши куки — нам тоже. <a href="/privacy/">Подробнее</a></p>
-        <button onclick="document.getElementById('cookieBanner').remove();localStorage.setItem('cookies_ok','1')">Мне ок</button>
+        <p>Мы используем куки для аналитики посещаемости. <a href="/privacy/">Подробнее</a></p>
+        <div class="cookie-banner-buttons">
+            <button id="cookieAccept">Принять</button>
+            <button id="cookieReject" class="cookie-reject">Отклонить</button>
+        </div>
     </div>
     <script src="{{asset "js/typograph.js"}}"></script>
     <script src="{{asset "js/promo-banner.js"}}"></script>
     <script src="{{asset "js/meta-disclaimer.js"}}"></script>
-    <script>if(localStorage.getItem('cookies_ok'))document.getElementById('cookieBanner').remove()</script>
-    <!-- Yandex.Metrika counter -->
-    <script type="text/javascript">
-        (function(m,e,t,r,i,k,a){
-            m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-            m[i].l=1*new Date();
-            for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
-            k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
-        })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=106970792', 'ym');
-        ym(106970792, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+    <script>
+    (function() {
+        var consent = localStorage.getItem('cookie_consent');
+        var banner = document.getElementById('cookieBanner');
+
+        function loadMetrika() {
+            if (window._ym_loaded) return;
+            window._ym_loaded = true;
+            (function(m,e,t,r,i,k,a){
+                m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+                m[i].l=1*new Date();
+                for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+                k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+            })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=106970792', 'ym');
+            ym(106970792, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+        }
+
+        if (consent === 'accepted') {
+            banner.remove();
+            loadMetrika();
+        } else if (consent === 'rejected') {
+            banner.remove();
+        }
+
+        document.getElementById('cookieAccept').addEventListener('click', function() {
+            localStorage.setItem('cookie_consent', 'accepted');
+            banner.remove();
+            loadMetrika();
+        });
+        document.getElementById('cookieReject').addEventListener('click', function() {
+            localStorage.setItem('cookie_consent', 'rejected');
+            banner.remove();
+        });
+    })();
     </script>
-    <noscript><div><img src="https://mc.yandex.ru/watch/106970792" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
-    <!-- /Yandex.Metrika counter -->
     {{ghost_foot}}
 </body>
 </html>
