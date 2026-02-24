@@ -150,6 +150,19 @@ img {
     font-size: 15px;
     line-height: 1.5;
     color: #666;
+    position: relative;
+    max-height: 4.5em; /* 3 lines */
+    overflow: hidden;
+}
+
+.post-card-excerpt::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 1.8em;
+    background: linear-gradient(transparent, #fff);
 }
 
 /* ========================
