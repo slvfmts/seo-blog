@@ -116,9 +116,10 @@ def update_post(post_id, updated_at, **fields):
 
 def upload_image(image_bytes, filename):
     h = {"Authorization": f"Ghost {_jwt()}"}
+    ct = "image/webp" if filename.endswith(".webp") else "image/png"
     with _client() as c:
         r = c.post(f"{GHOST_URL}/ghost/api/admin/images/upload/",
-                   headers=h, files={"file": (filename, image_bytes, "image/png")},
+                   headers=h, files={"file": (filename, image_bytes, ct)},
                    data={"ref": filename})
     if r.status_code == 201:
         imgs = r.json().get("images", [])
@@ -147,21 +148,32 @@ def generate_cover(article_md, slug, title):
     print(f"  Scene: {scene[:180]}...")
 
     # gpt-image-1.5 → pixel art
+    # OpenAI proxy reuses the same x-proxy-token as Anthropic proxy
     okw = {"api_key": OPENAI_API_KEY}
     if OPENAI_PROXY_URL:
         okw["base_url"] = OPENAI_PROXY_URL
-        if OPENAI_PROXY_SECRET:
-            okw["default_headers"] = {"x-proxy-token": OPENAI_PROXY_SECRET}
+        proxy_secret = OPENAI_PROXY_SECRET or ANTHROPIC_PROXY_SECRET
+        if proxy_secret:
+            okw["default_headers"] = {"x-proxy-token": proxy_secret}
     oc = oai.OpenAI(**okw)
 
     img = oc.images.generate(
         model="gpt-image-1.5", prompt=COVER_STYLE_PREFIX + scene,
         size="1536x1024", quality="medium", n=1,
     )
-    data = base64.b64decode(img.data[0].b64_json)
-    print(f"  Image: {len(data)} bytes")
+    raw = base64.b64decode(img.data[0].b64_json)
+    print(f"  Raw PNG: {len(raw)} bytes")
 
-    url = upload_image(data, f"{slug}__cover_v2.png")
+    # Convert to WebP
+    from PIL import Image
+    from io import BytesIO
+    pil_img = Image.open(BytesIO(raw))
+    buf = BytesIO()
+    pil_img.save(buf, format="WEBP", quality=85, method=6)
+    data = buf.getvalue()
+    print(f"  WebP: {len(data)} bytes ({100 * len(data) / len(raw):.0f}% of original)")
+
+    url = upload_image(data, f"{slug}__cover_v2.webp")
     alt = f"{title} — обложка статьи" if title else "Обложка статьи"
     return url, alt
 

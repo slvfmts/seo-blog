@@ -123,6 +123,8 @@ class GhostPublisher:
         content_type = "image/png"
         if filename.endswith(".jpg") or filename.endswith(".jpeg"):
             content_type = "image/jpeg"
+        elif filename.endswith(".webp"):
+            content_type = "image/webp"
         elif filename.endswith(".svg"):
             content_type = "image/svg+xml"
 

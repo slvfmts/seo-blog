@@ -236,16 +236,25 @@ class FormattingStage(WritingStage):
                 n=1,
             )
 
-            # gpt-image-1 returns base64
+            # gpt-image-1 returns base64 PNG → convert to WebP for smaller size
             image_base64 = response.data[0].b64_json
-            image_bytes = b64.b64decode(image_base64)
+            raw_bytes = b64.b64decode(image_base64)
+            logger.info(f"Cover raw PNG: {len(raw_bytes)} bytes")
 
-            filename = f"{slug}__cover.png"
+            from PIL import Image
+            from io import BytesIO
+            img = Image.open(BytesIO(raw_bytes))
+            webp_buf = BytesIO()
+            img.save(webp_buf, format="WEBP", quality=85, method=6)
+            image_bytes = webp_buf.getvalue()
+
+            filename = f"{slug}__cover.webp"
             filepath = os.path.join(assets_dir, filename)
             with open(filepath, "wb") as f:
                 f.write(image_bytes)
 
-            logger.info(f"Cover generated: {filepath} ({len(image_bytes)} bytes)")
+            logger.info(f"Cover generated: {filepath} ({len(image_bytes)} bytes, "
+                        f"{100 * len(image_bytes) / len(raw_bytes):.0f}% of original)")
 
             # Dynamic alt-text from article title
             alt_text = f"{article_title} — обложка статьи" if article_title else "Обложка статьи"
