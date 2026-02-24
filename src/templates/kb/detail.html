@@ -124,6 +124,9 @@
                 const fd = new FormData();
                 fd.append('file', f);
                 const resp = await fetch('/ui/kb/' + folderId + '/upload-ajax', { method: 'POST', body: fd });
+                if (!resp.ok && resp.headers.get('content-type')?.indexOf('json') === -1) {
+                    setRowErr(row, 'HTTP ' + resp.status); continue;
+                }
                 const data = await resp.json();
                 if (data.ok) { setRowOk(row, data.word_count, data.file_size); uploaded++; }
                 else { setRowErr(row, data.error || 'ошибка'); }
