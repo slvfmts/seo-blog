@@ -1,14 +1,25 @@
 (function () {
   // --- Config ---
   var CONFIG = {
-    title: 'Курс про фриланс для редакторов',
-    text: 'Научитесь находить клиентов, вести проекты и зарабатывать на текстах — без бирж и демпинга.',
-    btnText: 'Узнать подробнее',
-    btnUrl: 'https://editors.one/unemployed?utm_source=notes&utm_medium=banner&utm_campaign=freelance_course',
+    title: 'Курс про фриланс',
+    text: 'Как искать клиентов, считать деньги, управлять проектами, договариваться с\u00a0сложными персонажами\u00a0— и\u00a0не\u00a0сходить с\u00a0ума.',
+    btnText: 'Звучит интересно',
+    baseUrl: 'https://editors.one/unemployed',
     image: 'https://notes.editors.one/content/images/promo/freelance-course.webp'
   };
 
+  function buildUtmUrl() {
+    // utm_campaign = first 3-5 slug words from current URL path
+    var slug = location.pathname.replace(/^\/|\/$/g, '');
+    var words = slug.split('-').slice(0, 5).join('-');
+    var campaign = words || 'homepage';
+    return CONFIG.baseUrl +
+      '?utm_source=seo_blog&utm_medium=internal&utm_campaign=' +
+      encodeURIComponent(campaign);
+  }
+
   function createBanner(position) {
+    var url = buildUtmUrl();
     var banner = document.createElement('aside');
     banner.className = 'promo-banner promo-banner--' + position;
     banner.innerHTML =
@@ -17,7 +28,7 @@
         '<div class="promo-banner-content">' +
           '<div class="promo-banner-title">' + CONFIG.title + '</div>' +
           '<p class="promo-banner-text">' + CONFIG.text + '</p>' +
-          '<a class="promo-banner-btn" href="' + CONFIG.btnUrl + '">' + CONFIG.btnText + '</a>' +
+          '<a class="promo-banner-btn" href="' + url + '">' + CONFIG.btnText + '</a>' +
         '</div>' +
       '</div>';
     return banner;
