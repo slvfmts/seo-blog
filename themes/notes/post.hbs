@@ -8,18 +8,88 @@
             <p class="post-subtitle">{{custom_excerpt}}</p>
         {{/if}}
         <div class="post-meta">
-            <time datetime="{{date format="YYYY-MM-DD"}}">{{date format="D MMMM YYYY"}}</time>
+            <time datetime="{{date format="YYYY-MM-DD"}}">{{date format="D MMMM YYYY"}}</time> · {{reading_time minute="% мин чтения" minutes="% мин чтения"}}
         </div>
     </header>
 
     {{#if feature_image}}
     <figure class="post-cover">
-        <img src="{{feature_image}}" alt="{{title}}">
+        <img
+            src="{{img_url feature_image size="l"}}"
+            srcset="{{img_url feature_image size="s"}} 300w,
+                    {{img_url feature_image size="m"}} 600w,
+                    {{img_url feature_image size="l"}} 1000w,
+                    {{img_url feature_image size="xl"}} 2000w"
+            sizes="(max-width: 760px) calc(100vw - 32px), 760px"
+            alt="{{title}}"
+        >
     </figure>
     {{/if}}
 
     <section class="post-content">
         {{content}}
     </section>
+
+    {{#primary_author}}
+    <div class="post-author">
+        {{#if profile_image}}
+        <img class="post-author-image" src="{{profile_image}}" alt="{{name}}">
+        {{/if}}
+        <div class="post-author-info">
+            <div class="post-author-name">
+                {{#if website}}<a href="{{website}}">{{name}}</a>{{else}}{{name}}{{/if}}
+            </div>
+            {{#if bio}}<p class="post-author-bio">{{bio}}</p>{{/if}}
+        </div>
+    </div>
+    {{/primary_author}}
 </article>
+
+{{#get "posts" limit="3" filter="id:-{{id}}" order="published_at desc"}}
+    {{#if posts}}
+    <aside class="related-posts">
+        <h2 class="related-posts-title">Больше интересного</h2>
+        <div class="related-posts-grid">
+            {{#foreach posts}}
+            <a href="{{url}}" class="related-card">
+                {{#if feature_image}}
+                <div class="related-card-image-link">
+                    <img class="related-card-image"
+                        src="{{img_url feature_image size="m"}}"
+                        srcset="{{img_url feature_image size="s"}} 300w,
+                                {{img_url feature_image size="m"}} 600w,
+                                {{img_url feature_image size="l"}} 1000w"
+                        sizes="(max-width: 560px) calc(100vw - 32px), (max-width: 900px) calc(50vw - 36px), 370px"
+                        alt="{{title}}"
+                        loading="lazy"
+                    >
+                </div>
+                {{/if}}
+                <h3 class="related-card-title">{{title}}</h3>
+            </a>
+            {{/foreach}}
+        </div>
+    </aside>
+    {{/if}}
+{{/get}}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Главная",
+            "item": "{{@site.url}}"
+        },
+        {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "{{title}}",
+            "item": "{{url absolute="true"}}"
+        }
+    ]
+}
+</script>
 {{/post}}

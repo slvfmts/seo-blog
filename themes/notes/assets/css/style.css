@@ -91,12 +91,35 @@ img {
 }
 
 /* ========================
+   Home Hero
+   ======================== */
+.home-hero {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 48px 24px 0;
+}
+
+.home-title {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+}
+
+.home-description {
+    font-size: 17px;
+    color: #666;
+    margin-top: 8px;
+    line-height: 1.5;
+}
+
+/* ========================
    Post Grid (home)
    ======================== */
 .post-grid {
     max-width: 1200px;
     margin: 0 auto;
-    padding: 48px 24px;
+    padding: 32px 24px 48px;
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 40px 32px;
@@ -441,6 +464,20 @@ img {
     margin: 0 auto;
     padding: 24px;
     text-align: center;
+    font-size: 14px;
+    color: #999;
+}
+
+.footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px 0;
+}
+
+.footer-sep {
+    margin: 0 8px;
+    color: #ccc;
 }
 
 .footer-inner a {
@@ -451,6 +488,12 @@ img {
 
 .footer-inner a:hover {
     color: #555;
+}
+
+.footer-copy {
+    margin-top: 8px;
+    font-size: 13px;
+    color: #bbb;
 }
 
 /* ========================
