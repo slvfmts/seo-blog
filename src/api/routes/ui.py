@@ -3245,6 +3245,9 @@ async def update_cluster_kb(
 
     form = await request.form()
     folder_ids = form.getlist("folder_ids")
+    factual_mode = form.get("factual_mode", "default")
+    if factual_mode not in ("default", "kb_priority", "kb_only"):
+        factual_mode = "default"
 
     # Clear and re-attach
     cluster.knowledge_folders = []
@@ -3253,6 +3256,7 @@ async def update_cluster_kb(
             models.KnowledgeFolder.id.in_(folder_ids),
         ).all()
         cluster.knowledge_folders = folders
+    cluster.factual_mode = factual_mode
     db.commit()
 
     return RedirectResponse(
