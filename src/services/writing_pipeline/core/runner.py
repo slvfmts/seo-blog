@@ -5,6 +5,7 @@ PipelineRunner - Orchestrates the writing pipeline stages.
 import os
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Optional, List, Callable
 
@@ -241,11 +242,17 @@ class PipelineRunner:
             cover_image_url = context.formatting_result.cover_ghost_url or ""
             cover_image_alt = context.formatting_result.cover_image_alt or ""
 
+        # Strip H1 (and optional italic subtitle) — Ghost renders title separately
+        final_md = context.edited_md
+        final_md = re.sub(r'^#\s+.+\n*', '', final_md, count=1)
+        final_md = re.sub(r'^_[^_]+_\s*\n*', '', final_md, count=1)
+        final_md = final_md.lstrip('\n')
+
         # Build final result
         result = PipelineResult(
             topic=topic,
             region=region,
-            article_md=context.edited_md,
+            article_md=final_md,
             title=context.outline.title,
             subtitle=context.outline.subtitle,
             word_count=len(context.edited_md.split()),

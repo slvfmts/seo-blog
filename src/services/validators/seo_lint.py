@@ -74,11 +74,11 @@ class SEOLintValidator:
         # 3. Meta description length
         issues.append(self._check_meta_description(meta_description))
 
-        # 4. H1 count
+        # 4. H1 count (H1 may be absent if Ghost renders title separately)
         issues.append(self._check_h1_count(content_md))
 
-        # 5. H1 contains keyword
-        issues.append(self._check_h1_keyword(content_md, target_keyword))
+        # 5. H1/title contains keyword (uses title as fallback when no H1 in body)
+        issues.append(self._check_h1_keyword(content_md, target_keyword, title=title))
 
         # 6. Keyword density
         issues.append(self._check_keyword_density(content_md, target_keyword))
@@ -241,27 +241,18 @@ class SEOLintValidator:
             )
 
     def _check_h1_count(self, content: str) -> Issue:
-        """Check that there's exactly one H1 heading."""
-        # Match markdown H1: starts with single # followed by space
+        """Check that there's at most one H1 heading (zero is OK — Ghost renders title)."""
         h1_pattern = r'^# [^\n]+'
         h1_matches = re.findall(h1_pattern, content, re.MULTILINE)
         count = len(h1_matches)
 
-        if count == 1:
+        if count <= 1:
             return Issue(
                 check="h1_count",
                 severity=Severity.PASS,
-                message="Exactly one H1 heading found",
+                message="H1 OK" if count == 1 else "No H1 in body (Ghost renders title)",
                 value=str(count),
-                expected="1",
-            )
-        elif count == 0:
-            return Issue(
-                check="h1_count",
-                severity=Severity.WARNING,
-                message="No H1 heading found (will use title)",
-                value="0",
-                expected="1",
+                expected="0-1",
             )
         else:
             return Issue(
@@ -269,35 +260,48 @@ class SEOLintValidator:
                 severity=Severity.FAIL,
                 message=f"Multiple H1 headings found ({count})",
                 value=str(count),
-                expected="1",
+                expected="0-1",
             )
 
-    def _check_h1_keyword(self, content: str, keyword: str) -> Issue:
-        """Check if H1 contains keyword."""
+    def _check_h1_keyword(self, content: str, keyword: str, title: str = "") -> Issue:
+        """Check if H1 (or title fallback) contains keyword."""
         h1_pattern = r'^# ([^\n]+)'
         h1_match = re.search(h1_pattern, content, re.MULTILINE)
 
-        if not h1_match:
+        # Use H1 from body, or fall back to title (Ghost renders title as H1)
+        check_text = h1_match.group(1) if h1_match else title
+        source = "H1" if h1_match else "Title"
+
+        if not check_text or not keyword:
             return Issue(
                 check="h1_keyword",
                 severity=Severity.WARNING,
-                message="No H1 to check for keyword",
+                message="No H1/title to check for keyword",
             )
 
-        h1_text = h1_match.group(1).lower()
-        keyword_lower = keyword.lower()
-
-        if keyword_lower in h1_text:
+        if keyword.lower() in check_text.lower():
             return Issue(
                 check="h1_keyword",
                 severity=Severity.PASS,
-                message="H1 contains target keyword",
+                message=f"{source} contains target keyword",
+            )
+
+        # Stem-based fallback
+        keyword_words = [w for w in keyword.lower().split() if len(w) >= 2]
+        text_words = [w for w in re.findall(r'[a-zа-яё]+', check_text.lower()) if len(w) >= 2]
+        matches = sum(1 for kw in keyword_words if any(self._stem_match(kw, tw) for tw in text_words))
+
+        if matches == len(keyword_words):
+            return Issue(
+                check="h1_keyword",
+                severity=Severity.PASS,
+                message=f"{source} contains target keyword (morphological match)",
             )
 
         return Issue(
             check="h1_keyword",
             severity=Severity.WARNING,
-            message="H1 does not contain target keyword",
+            message=f"{source} does not contain target keyword",
         )
 
     def _check_keyword_density(self, content: str, keyword: str) -> Issue:

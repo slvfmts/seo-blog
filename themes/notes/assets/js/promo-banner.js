@@ -50,16 +50,20 @@
       // Too few sections — one banner at the end only
       content.appendChild(createBanner('end'));
     } else {
-      // Find heading closest to 50% of content height, but not before the 2nd
+      // Find heading closest to 45% of content height, but not before the 2nd.
+      // Skip if previous sibling is also a heading (avoid inserting between h2→h3).
       var contentHeight = content.offsetHeight;
-      var midHeading = headings[1]; // default: 2nd heading
+      var midHeading = null;
       for (var i = 1; i < headings.length; i++) {
         if (headings[i].offsetTop >= contentHeight * 0.45) {
+          var prev = headings[i].previousElementSibling;
+          if (prev && /^H[2-4]$/.test(prev.tagName)) continue;
           midHeading = headings[i];
           break;
         }
       }
-      // Insert banner BEFORE the heading
+      if (!midHeading) midHeading = headings[1];
+      // Insert banner BEFORE the heading (after the end of previous section)
       midHeading.parentNode.insertBefore(createBanner('mid'), midHeading);
 
       // End banner
