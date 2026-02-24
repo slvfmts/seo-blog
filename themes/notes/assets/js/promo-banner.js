@@ -28,6 +28,7 @@
         '<div class="promo-banner-content">' +
           '<div class="promo-banner-title">' + CONFIG.title + '</div>' +
           '<p class="promo-banner-text">' + CONFIG.text + '</p>' +
+          '<p class="promo-banner-promo">\u221220% по промокоду <span class="promo-banner-code">БЛОГ</span></p>' +
           '<a class="promo-banner-btn" href="' + url + '">' + CONFIG.btnText + '</a>' +
         '</div>' +
       '</div>';

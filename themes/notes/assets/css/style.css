@@ -479,12 +479,28 @@ img {
     margin-bottom: 8px;
 }
 
+.promo-banner .promo-banner-promo {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: #5b4fc4;
+    margin: 0 0 16px;
+}
+
+.promo-banner-code {
+    background: #fff;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+
 .promo-banner .promo-banner-text {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 15px;
     line-height: 1.5;
     color: #444;
-    margin: 0 0 20px;
+    margin: 0 0 8px;
 }
 
 .promo-banner-btn {
