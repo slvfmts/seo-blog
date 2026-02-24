@@ -111,6 +111,57 @@ class ResearchStage(WritingStage):
                 logger.warning(f"Trafilatura (proxied) not available: {e}")
         return self._trafilatura_proxied
 
+    def _filter_kb_docs(
+        self,
+        kb_docs: List[Dict[str, Any]],
+        topic: str,
+        keywords: List[str],
+        max_docs: int = 7,
+    ) -> List[Dict[str, Any]]:
+        """Filter KB documents by keyword overlap relevance.
+
+        Args:
+            kb_docs: Raw KB documents with title and content_text
+            topic: Article topic
+            keywords: Target terms, seed queries, must-answer questions
+            max_docs: Maximum documents to keep
+
+        Returns:
+            Filtered list sorted by relevance score (descending)
+        """
+        if len(kb_docs) <= max_docs:
+            return kb_docs
+
+        # Build keyword set from topic + all keyword sources
+        raw_terms = [topic] + keywords
+        term_words: set[str] = set()
+        for term in raw_terms:
+            for w in re_module.findall(r'[a-zA-Zа-яА-ЯёЁ]{3,}', term.lower()):
+                term_words.add(w)
+
+        if not term_words:
+            return kb_docs[:max_docs]
+
+        scored: list[tuple[float, int, Dict[str, Any]]] = []
+        for idx, doc in enumerate(kb_docs):
+            title = (doc.get("title") or "").lower()
+            content = (doc.get("content_text") or "")[:2000].lower()
+
+            title_words = set(re_module.findall(r'[a-zA-Zа-яА-ЯёЁ]{3,}', title))
+            content_words = set(re_module.findall(r'[a-zA-Zа-яА-ЯёЁ]{3,}', content))
+
+            title_overlap = len(term_words & title_words)
+            content_overlap = len(term_words & content_words)
+            score = title_overlap * 3 + content_overlap
+
+            scored.append((score, idx, doc))
+
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        selected = [item[2] for item in scored[:max_docs]]
+        scores_str = ", ".join(f"{s[2].get('title','?')}={s[0]}" for s in scored[:max_docs])
+        logger.info(f"KB filtering: {len(kb_docs)} docs → {len(selected)} selected (scores: {scores_str})")
+        return selected
+
     async def run(self, context: WritingContext) -> WritingContext:
         """Execute research stage."""
         log = context.start_stage(self.name)
@@ -121,14 +172,22 @@ class ResearchStage(WritingStage):
             if context.intent is None:
                 raise ValueError("Intent stage must be completed before research")
 
-            # Step 1: Generate search queries
-            queries, tokens = await self._generate_queries(context)
+            # Step 1: Generate search queries (skip in kb_only mode)
+            from ..contracts import Query
+            if factual_mode == "kb_only":
+                queries = QueryPlannerResult(
+                    topic=context.topic,
+                    queries=[Query(query=context.topic, purpose="other")],
+                )
+                tokens = 0
+                logger.info("factual_mode=kb_only: skipping query generation")
+            else:
+                queries, tokens = await self._generate_queries(context)
 
             # If brief provides seed_queries, add them as additional queries
             brief = context.config.get("brief")
             if brief:
                 brief_data = brief if isinstance(brief, dict) else brief.to_dict()
-                from ..contracts import Query
                 for sq in brief_data.get("seed_queries", []):
                     if sq not in [q.query for q in queries.queries]:
                         queries.queries.append(Query(query=sq, purpose="other"))
@@ -174,6 +233,20 @@ class ResearchStage(WritingStage):
             # Inject Knowledge Base documents (if attached)
             kb_docs = context.config.get("knowledge_base_docs", [])
             if kb_docs:
+                # Fix 1: Filter by relevance
+                filter_keywords: list[str] = []
+                if brief:
+                    brief_data = brief if isinstance(brief, dict) else brief.to_dict()
+                    filter_keywords.extend(brief_data.get("target_terms", []))
+                    filter_keywords.extend(brief_data.get("seed_queries", []))
+                if context.intent and context.intent.must_answer_questions:
+                    filter_keywords.extend(context.intent.must_answer_questions)
+                kb_docs = self._filter_kb_docs(kb_docs, context.topic, filter_keywords)
+
+                # Fix 2: Budget model — distribute chars across docs
+                KB_TOTAL_BUDGET = 60_000
+                chars_per_doc = max(4000, KB_TOTAL_BUDGET // len(kb_docs))
+
                 kb_result = {
                     "query": context.topic,
                     "purpose": "knowledge_base",
@@ -182,8 +255,7 @@ class ResearchStage(WritingStage):
                         "position": 0,
                         "title": doc["title"],
                         "link": f"kb://{doc['id']}",
-                        "snippet": doc["content_text"][:300],
-                        "page_content": doc["content_text"][:4000],
+                        "page_content": doc["content_text"][:chars_per_doc],
                         "page_word_count": doc.get("word_count", 0),
                         "is_knowledge_base": True,
                         "origin": "kb",
@@ -194,7 +266,7 @@ class ResearchStage(WritingStage):
                     search_results.insert(0, kb_result)
                 else:
                     search_results.append(kb_result)
-                logger.info(f"Injected {len(kb_docs)} KB documents (mode={factual_mode})")
+                logger.info(f"Injected {len(kb_docs)} KB documents (mode={factual_mode}, budget={chars_per_doc} chars/doc)")
             elif factual_mode == "kb_only":
                 logger.warning("factual_mode=kb_only but no KB docs provided — research will be thin")
 

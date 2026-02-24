@@ -3370,6 +3370,13 @@ async def generate_single_brief(
                     "word_count": doc.word_count or 0,
                 })
 
+    # Validate: kb_only requires attached documents
+    if (cluster.factual_mode or "default") == "kb_only" and not kb_docs:
+        return RedirectResponse(
+            url=f"/ui/clusters/{cluster_id}?error=Режим «Только фактура» требует прикреплённых документов",
+            status_code=303,
+        )
+
     brief.status = "in_writing"
     db.commit()
 
@@ -3823,6 +3830,13 @@ async def generate_cluster_articles(
                             "word_count": doc.word_count or 0,
                         })
                         seen_doc_ids.add(str(doc.id))
+
+    # Validate: kb_only requires attached documents
+    if factual_mode == "kb_only" and not kb_docs:
+        return RedirectResponse(
+            url=f"/ui/clusters/{cluster_id}?error=Режим «Только фактура» требует прикреплённых документов",
+            status_code=303,
+        )
 
     # Sort: pillar first, then by priority
     def brief_sort_key(b):
