@@ -578,6 +578,14 @@ async def topic_detail(
     all_folders = get_blog_kb_folders(db, current_blog)
     attached_folder_ids = {str(f.id) for f in topic.knowledge_folders}
 
+    # Load analysis data: competitors + seed keywords count
+    competitors = db.query(models.Competitor).filter(
+        models.Competitor.site_id == topic_id,
+    ).all()
+    seed_keyword_count = db.query(models.Keyword).filter(
+        models.Keyword.site_id == topic_id,
+    ).count()
+
     return _render(request, db, "topics/detail.html", {
         "topic": topic,
         "clusters": planned_clusters,
@@ -586,6 +594,8 @@ async def topic_detail(
         "total_traffic": total_traffic,
         "all_folders": all_folders,
         "attached_folder_ids": attached_folder_ids,
+        "competitors": competitors,
+        "seed_keyword_count": seed_keyword_count,
         "error": request.query_params.get("error"),
         "success": request.query_params.get("success"),
     })
@@ -1380,6 +1390,12 @@ async def plan_discovered_cluster(
             target_count=10,
             knowledge_base_docs=kb_docs if kb_docs else None,
         )
+
+        if not plan.cluster_articles:
+            return RedirectResponse(
+                url=f"/ui/topics/{topic_id}?error=Планирование не удалось — 0 статей. Попробуйте расширить тему.",
+                status_code=303,
+            )
 
         await planner.save_plan_to_existing_cluster(plan, cluster, db)
 

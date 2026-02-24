@@ -50,6 +50,7 @@ class RushAnalyticsProvider(VolumeProvider):
         self.region_id = region_id
         self.timeout = timeout
         self._semaphore = asyncio.Semaphore(1)  # 1 req/sec
+        self._api_exhausted = False  # circuit breaker for 403 "No more free API threads"
 
     @property
     def source_name(self) -> str:
@@ -63,6 +64,9 @@ class RushAnalyticsProvider(VolumeProvider):
         """
         if not keywords:
             return []
+
+        if self._api_exhausted:
+            return [VolumeResult(keyword=kw, volume=0, source="rush") for kw in keywords]
 
         try:
             # Step 1: Create task
@@ -107,6 +111,10 @@ class RushAnalyticsProvider(VolumeProvider):
                 )
 
                 if resp.status_code not in (200, 201):
+                    if resp.status_code == 403 and "no more free" in resp.text.lower():
+                        self._api_exhausted = True
+                        logger.warning("Rush Analytics: API exhausted (403 'No more free API threads') — circuit breaker ON, skipping further requests")
+                        return None
                     logger.error(f"Rush create wordstat HTTP {resp.status_code}: {resp.text[:500]}")
                     return None
 
@@ -196,6 +204,8 @@ class RushAnalyticsProvider(VolumeProvider):
 
     async def get_suggestions(self, keyword: str) -> list[str]:
         """Get search suggestions from Yandex via Rush suggest endpoint."""
+        if self._api_exhausted:
+            return []
         try:
             project_id = await self._create_suggest_task(keyword)
             if not project_id:
@@ -228,6 +238,10 @@ class RushAnalyticsProvider(VolumeProvider):
                 )
 
                 if resp.status_code not in (200, 201):
+                    if resp.status_code == 403 and "no more free" in resp.text.lower():
+                        self._api_exhausted = True
+                        logger.warning("Rush Analytics: API exhausted (403 suggest) — circuit breaker ON")
+                        return None
                     logger.error(f"Rush suggest create HTTP {resp.status_code}: {resp.text[:300]}")
                     return None
 

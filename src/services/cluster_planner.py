@@ -68,8 +68,12 @@ class ClusterPlanner:
         """
         logger.info(f"ClusterPlanner: starting for '{big_topic}' (region={region}, target={target_count})")
 
+        # Build topic prefix stems for relevance filtering
+        topic_prefixes = _make_topic_words(big_topic)
+        logger.info(f"Topic prefixes for relevance filter: {topic_prefixes}")
+
         # Step 1: Discover real keywords from search
-        search_data = await self._discover_keywords(big_topic, region)
+        search_data = await self._discover_keywords(big_topic, region, topic_prefixes=topic_prefixes)
         logger.info(
             f"Step 1: discovered {len(search_data['keywords'])} keywords, "
             f"{len(search_data['paa_questions'])} PAA questions, "
@@ -80,11 +84,11 @@ class ClusterPlanner:
         competitor_headings = await self._analyze_competitors(search_data["top_urls"], region)
         logger.info(f"Step 2: extracted headings from {len(competitor_headings)} pages")
 
-        # Step 2b: Add competitor headings as keywords (validated only)
+        # Step 2b: Add competitor headings as keywords (validated + topic-relevant only)
         all_keywords = search_data["keywords"]
         for page in competitor_headings:
             for heading in page.get("headings", []):
-                if _is_valid_keyword(heading):
+                if _is_valid_keyword(heading, topic_prefixes=topic_prefixes):
                     all_keywords.add(heading.lower())
         logger.info(f"Step 2b: {len(all_keywords)} keywords after adding headings")
 
@@ -101,7 +105,7 @@ class ClusterPlanner:
                     added = 0
                     for s in suggestions:
                         s_clean = s.lower().strip()
-                        if _is_valid_keyword(s_clean):
+                        if _is_valid_keyword(s_clean, topic_prefixes=topic_prefixes):
                             all_keywords.add(s_clean)
                             added += 1
                     logger.info(f"VolumeProvider suggestions for '{seed}': +{added} valid keywords (of {len(suggestions)})")
@@ -132,7 +136,7 @@ class ClusterPlanner:
 
         return plan
 
-    async def _discover_keywords(self, big_topic: str, region: str) -> dict:
+    async def _discover_keywords(self, big_topic: str, region: str, topic_prefixes: set[str] | None = None) -> dict:
         """
         Step 1: Discover real keywords from Serper search.
         Runs 3-5 search queries + autocomplete around the topic.
@@ -236,7 +240,7 @@ class ClusterPlanner:
             elif task_type == "autocomplete":
                 for item in result.get("suggestions", []):
                     q = item.get("value", "").strip()
-                    if q:
+                    if q and _is_valid_keyword(q, topic_prefixes=topic_prefixes):
                         all_keywords.add(q)
 
         return {
@@ -537,25 +541,12 @@ class ClusterPlanner:
                 cluster_articles=cluster_articles,
                 generated_at=datetime.now(timezone.utc).isoformat(),
             )
+        except json.JSONDecodeError as e:
+            logger.error(f"Clustering JSON parse failed: {e}\nRaw LLM text: {text[:1000]}")
+            raise RuntimeError(f"Кластеризация: ошибка парсинга JSON от LLM — {e}") from e
         except Exception as e:
-            logger.error(f"Clustering failed: {e}")
-            return ClusterPlan(
-                big_topic=big_topic,
-                region=region,
-                pillar=ArticleBrief(
-                    title_candidate=big_topic,
-                    role="pillar",
-                    primary_intent="informational",
-                    topic_boundaries={"in_scope": [big_topic], "out_of_scope": []},
-                    must_answer_questions=[],
-                    target_terms=[big_topic],
-                    unique_angle={"differentiators": [], "must_not_cover": []},
-                    internal_links_plan=[],
-                    seed_queries=[big_topic],
-                ),
-                cluster_articles=[],
-                generated_at=datetime.now(timezone.utc).isoformat(),
-            )
+            logger.error(f"Clustering failed: {e}", exc_info=True)
+            raise
 
     async def discover_clusters(
         self,
@@ -593,7 +584,7 @@ class ClusterPlanner:
         if seed_keywords:
             seed_section = f"\nДополнительные ключевые слова от пользователя: {', '.join(seed_keywords)}\n"
 
-        prompt = f"""Ты SEO-стратег. Для темы "{big_topic}" (регион: {region}) предложи {target_clusters} тематических подкластеров.
+        prompt = f"""Ты SEO-стратег. Для темы "{big_topic}" (регион: {region}) предложи от 2 до {target_clusters} тематических подкластеров.
 
 ## Данные из поиска:
 Найденные ключевые слова ({len(kw_list)} шт.): {json.dumps(kw_list, ensure_ascii=False)}
@@ -601,7 +592,9 @@ class ClusterPlanner:
 Вопросы «Люди также спрашивают» ({len(paa_list)} шт.): {json.dumps(paa_list, ensure_ascii=False)}
 {niche_section}{seed_section}
 ## Задача:
-Предложи {target_clusters} тематических подкластеров для контент-стратегии.
+Предложи от 2 до {target_clusters} тематических подкластеров для контент-стратегии.
+Если тема узкая, лучше 2-3 глубоких кластера чем {target_clusters} поверхностных.
+Все кластеры ДОЛЖНЫ быть строго в рамках темы "{big_topic}" — не расширяй за пределы.
 
 Правила:
 - Каждый кластер — отдельное направление контента с 3-15 статьями
@@ -852,8 +845,42 @@ class ClusterPlanner:
         return str(cluster.id)
 
 
-def _is_valid_keyword(text: str) -> bool:
-    """Check if a string looks like a valid search keyword (not page noise)."""
+def _make_topic_words(big_topic: str) -> set[str]:
+    """
+    Build a set of prefix stems from the topic for relevance matching.
+    E.g. "клиенты на фрилансе" → {"клиен", "фрила"}
+    Stopwords are excluded. Uses first 5 chars as prefix stem.
+    """
+    _stopwords = {
+        "в", "на", "для", "и", "с", "по", "от", "к", "из", "о", "как", "что",
+        "это", "или", "не", "но", "же", "ли", "бы", "то", "за", "при", "до",
+        "во", "со", "без", "через", "после", "перед", "между", "под", "над",
+        "the", "a", "an", "in", "on", "for", "and", "with", "to", "of", "how",
+        "what", "is", "are", "this", "that", "from", "by", "at", "or", "not",
+    }
+    words = set()
+    for w in big_topic.lower().split():
+        w = w.strip(".,!?\"'()[]{}:")
+        if len(w) >= 3 and w not in _stopwords:
+            words.add(w[:5])  # prefix stem for fuzzy matching
+    return words
+
+
+def _has_topic_relevance(text: str, topic_prefixes: set[str]) -> bool:
+    """Check if text contains at least one word matching topic prefixes."""
+    if not topic_prefixes:
+        return True
+    for w in text.lower().split():
+        w = w.strip(".,!?\"'()[]{}:")
+        if len(w) >= 3 and w[:5] in topic_prefixes:
+            return True
+    return False
+
+
+def _is_valid_keyword(text: str, topic_prefixes: set[str] | None = None) -> bool:
+    """Check if a string looks like a valid search keyword (not page noise).
+    If topic_prefixes provided, also requires at least 1 word overlap with topic.
+    """
     if not text or len(text) < 3 or len(text) > 60:
         return False
     # Skip lines starting with bullet markers or numbering
@@ -873,6 +900,9 @@ def _is_valid_keyword(text: str) -> bool:
         return False
     # Skip very long phrases (> 6 words) — not real search queries
     if len(text.split()) > 6:
+        return False
+    # Topic relevance check (when topic_prefixes provided)
+    if topic_prefixes and not _has_topic_relevance(text, topic_prefixes):
         return False
     return True
 
