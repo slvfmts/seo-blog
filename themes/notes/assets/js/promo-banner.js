@@ -43,23 +43,24 @@
     var content = document.querySelector('.post-content');
     if (!content) return;
 
-    // Collect top-level block elements (p, h2, h3, ul, ol, blockquote, figure, pre)
-    var blocks = [];
-    for (var i = 0; i < content.children.length; i++) {
-      var tag = content.children[i].tagName;
-      if (/^(P|H2|H3|H4|UL|OL|BLOCKQUOTE|FIGURE|PRE)$/.test(tag)) {
-        blocks.push(content.children[i]);
-      }
-    }
+    // Collect all headings (h2, h3) as natural section boundaries
+    var headings = content.querySelectorAll('h2, h3');
 
-    if (blocks.length < 5) {
-      // Short article — one banner at the end
+    if (headings.length < 3) {
+      // Too few sections — one banner at the end only
       content.appendChild(createBanner('end'));
     } else {
-      // Mid-banner after ~50% of blocks (but not before 3rd)
-      var midIndex = Math.max(2, Math.floor(blocks.length / 2) - 1);
-      var midTarget = blocks[midIndex];
-      midTarget.parentNode.insertBefore(createBanner('mid'), midTarget.nextSibling);
+      // Find heading closest to 50% of content height, but not before the 2nd
+      var contentHeight = content.offsetHeight;
+      var midHeading = headings[1]; // default: 2nd heading
+      for (var i = 1; i < headings.length; i++) {
+        if (headings[i].offsetTop >= contentHeight * 0.45) {
+          midHeading = headings[i];
+          break;
+        }
+      }
+      // Insert banner BEFORE the heading
+      midHeading.parentNode.insertBefore(createBanner('mid'), midHeading);
 
       // End banner
       content.appendChild(createBanner('end'));
