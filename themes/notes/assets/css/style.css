@@ -479,7 +479,7 @@ img {
     margin-bottom: 8px;
 }
 
-.promo-banner-text {
+.promo-banner .promo-banner-text {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 15px;
     line-height: 1.5;
