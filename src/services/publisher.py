@@ -6,16 +6,22 @@ import json
 import hmac
 import hashlib
 import base64
+import logging
 import re
 import httpx
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class GhostPublisher:
     """Публикация статей в Ghost."""
 
     def __init__(self, ghost_url: str, admin_key: str):
-        self.ghost_url = ghost_url.rstrip("/")
+        url = ghost_url.rstrip("/")
+        if url and not url.startswith(("http://", "https://")):
+            url = f"https://{url}"
+        self.ghost_url = url
         self.admin_key = admin_key
 
     def _base64url_encode(self, data: bytes) -> str:
@@ -142,9 +148,11 @@ class GhostPublisher:
                 images = response.json().get("images", [])
                 if images:
                     return images[0].get("url")
+            logger.error(f"Ghost image upload failed: {response.status_code} {response.text[:300]}")
             return None
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"Ghost image upload exception: {e}")
             return None
 
     def get_posts(self) -> list[dict]:
