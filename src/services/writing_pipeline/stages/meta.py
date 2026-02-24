@@ -43,7 +43,14 @@ class MetaStage(WritingStage):
             # Step 1: LLM-generated meta (title, description, slug)
             prompt_template = self._load_prompt("meta_v1")
 
-            target_keyword = context.intent.topic
+            # Use brief's target_keyword when available (matches SEO lint validation)
+            brief = context.config.get("brief")
+            if brief:
+                brief_data = brief if isinstance(brief, dict) else brief.to_dict()
+                target_terms = brief_data.get("target_terms", [])
+                target_keyword = target_terms[0] if target_terms else context.intent.topic
+            else:
+                target_keyword = context.intent.topic
 
             prompt = prompt_template.replace("{{topic}}", context.intent.topic)
             prompt = prompt.replace("{{primary_intent}}", context.intent.primary_intent)
