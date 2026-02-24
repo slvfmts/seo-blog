@@ -5,7 +5,7 @@
     text: 'Как искать клиентов, считать деньги, управлять проектами, договариваться с\u00a0сложными персонажами\u00a0— и\u00a0не\u00a0сходить с\u00a0ума.',
     btnText: 'Звучит интересно',
     baseUrl: 'https://editors.one/unemployed',
-    image: 'https://notes.editors.one/content/images/promo/freelance-course.webp'
+    image: 'https://notes.editors.one/content/images/promo/wolf.gif'
   };
 
   function buildUtmUrl() {
