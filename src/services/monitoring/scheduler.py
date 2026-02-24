@@ -17,15 +17,16 @@ class MonitoringScheduler:
     """
     Async scheduler for daily monitoring tasks.
 
+    Resolves serper_api_key per site's blog for full blog isolation.
+
     Usage:
-        scheduler = MonitoringScheduler(position_tracker, run_hour=6)
+        scheduler = MonitoringScheduler(db_session_factory, run_hour=6)
         await scheduler.start()  # starts background loop
         ...
         await scheduler.stop()
     """
 
-    def __init__(self, position_tracker: PositionTracker, db_session_factory, run_hour: int = 6):
-        self.tracker = position_tracker
+    def __init__(self, db_session_factory, run_hour: int = 6):
         self.db_session_factory = db_session_factory
         self.run_hour = run_hour
         self._task: asyncio.Task | None = None
@@ -73,8 +74,11 @@ class MonitoringScheduler:
         return (target - now).total_seconds()
 
     async def _run_check(self):
-        """Run position checks for all active sites."""
+        """Run position checks for all active sites, resolving serper key per blog."""
         from src.db import models
+        from src.config.settings import get_settings
+
+        settings = get_settings()
 
         logger.info("Starting scheduled monitoring check")
         db = self.db_session_factory()
@@ -85,12 +89,24 @@ class MonitoringScheduler:
             ).all()
 
             for site in sites:
+                # Resolve serper key from blog, fallback to env
+                blog = site.blog if site.blog_id else None
+                serper_key = (blog.serper_api_key if blog and blog.serper_api_key else None) or settings.serper_api_key
+                if not serper_key:
+                    logger.info(f"  Skipping site {site.name}: no serper key")
+                    continue
+
+                tracker = PositionTracker(
+                    db_session_factory=self.db_session_factory,
+                    serper_api_key=serper_key,
+                )
+
                 logger.info(f"Checking positions for site: {site.name} ({site.domain})")
                 try:
-                    summary = await self.tracker.run_daily_check(site.id)
+                    summary = await tracker.run_daily_check(site.id)
                     logger.info(f"  Result: {summary}")
 
-                    signals = await self.tracker.detect_decay(site.id)
+                    signals = await tracker.detect_decay(site.id)
                     if signals:
                         logger.warning(f"  Decay signals: {len(signals)}")
                         for s in signals:

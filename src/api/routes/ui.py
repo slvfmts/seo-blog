@@ -130,6 +130,85 @@ def get_blog_kb_folders(db: Session, current_blog):
     return query.all()
 
 
+def resolve_blog_settings(blog, settings) -> dict:
+    """Return effective settings for a blog. Blog values override env vars."""
+    return {
+        "anthropic_api_key": (blog.anthropic_api_key if blog and blog.anthropic_api_key else None) or settings.anthropic_api_key,
+        "anthropic_proxy_url": (blog.anthropic_proxy_url if blog and blog.anthropic_proxy_url else None) or settings.anthropic_proxy_url,
+        "anthropic_proxy_secret": (blog.anthropic_proxy_secret if blog and blog.anthropic_proxy_secret else None) or settings.anthropic_proxy_secret,
+        "serper_api_key": (blog.serper_api_key if blog and blog.serper_api_key else None) or settings.serper_api_key,
+        "jina_api_key": (blog.jina_api_key if blog and blog.jina_api_key else None) or settings.jina_api_key,
+        "yandex_wordstat_api_key": (blog.yandex_wordstat_api_key if blog and blog.yandex_wordstat_api_key else None) or settings.yandex_wordstat_api_key,
+        "yandex_cloud_folder_id": (blog.yandex_cloud_folder_id if blog and blog.yandex_cloud_folder_id else None) or settings.yandex_cloud_folder_id,
+        "rush_analytics_api_key": (blog.rush_analytics_api_key if blog and blog.rush_analytics_api_key else None) or settings.rush_analytics_api_key,
+        "openai_api_key": (blog.openai_api_key if blog and blog.openai_api_key else None) or settings.openai_api_key,
+        "openai_proxy_url": (blog.openai_proxy_url if blog and blog.openai_proxy_url else None) or settings.openai_proxy_url,
+        "residential_proxy_url": (blog.residential_proxy_url if blog and blog.residential_proxy_url else None) or settings.residential_proxy_url,
+        "ghost_url": blog.ghost_url if blog else settings.ghost_url,
+        "ghost_admin_key": blog.ghost_admin_key if blog else settings.ghost_admin_key,
+        "database_url": settings.database_url,
+    }
+
+
+def _resolve_blog(request, db, draft=None, site=None, cluster=None):
+    """Resolve blog from draft/site/cluster chain, fall back to session."""
+    blog = None
+    if draft and draft.site and draft.site.blog:
+        blog = draft.site.blog
+    elif site and site.blog:
+        blog = site.blog
+    elif cluster and cluster.site and cluster.site.blog:
+        blog = cluster.site.blog
+    if not blog:
+        blog = get_current_blog(request, db)
+    return blog
+
+
+def _check_blog_ownership(request, db, site=None, draft=None, cluster=None, brief=None):
+    """Raise 404 if entity belongs to a different blog than the session blog."""
+    current_blog = get_current_blog(request, db)
+    if not current_blog:
+        return
+    # Resolve entity's blog_id
+    entity_blog_id = None
+    if site:
+        entity_blog_id = site.blog_id
+    elif draft and draft.site:
+        entity_blog_id = draft.site.blog_id
+    elif cluster and cluster.site:
+        entity_blog_id = cluster.site.blog_id
+    elif brief and brief.site:
+        entity_blog_id = brief.site.blog_id
+    if entity_blog_id and entity_blog_id != current_blog.id:
+        raise HTTPException(status_code=404)
+
+
+def _make_anthropic_client(bs: dict):
+    """Create an Anthropic client from resolved blog settings."""
+    import anthropic
+    if bs["anthropic_proxy_url"] and bs["anthropic_proxy_secret"]:
+        return anthropic.Anthropic(
+            api_key=bs["anthropic_api_key"],
+            base_url=bs["anthropic_proxy_url"],
+            default_headers={"x-proxy-token": bs["anthropic_proxy_secret"]},
+        )
+    return anthropic.Anthropic(api_key=bs["anthropic_api_key"])
+
+
+def _make_volume_provider(bs: dict, region: str = "ru"):
+    """Create a volume provider from resolved blog settings."""
+    from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
+
+    class _S:
+        pass
+
+    s = _S()
+    s.yandex_wordstat_api_key = bs.get("yandex_wordstat_api_key", "")
+    s.yandex_cloud_folder_id = bs.get("yandex_cloud_folder_id", "")
+    s.rush_analytics_api_key = bs.get("rush_analytics_api_key", "")
+    return get_volume_provider(region, s)
+
+
 def _render(request: Request, db: Session, template: str, ctx: dict):
     """Render template with blog context injected."""
     blog_id = request.session.get("blog_id")
@@ -198,9 +277,25 @@ async def create_blog(
     domain: str = Form(""),
     ghost_url: str = Form(...),
     ghost_admin_key: str = Form(...),
+    anthropic_api_key: str = Form(""),
+    anthropic_proxy_url: str = Form(""),
+    anthropic_proxy_secret: str = Form(""),
+    serper_api_key: str = Form(""),
+    jina_api_key: str = Form(""),
+    yandex_wordstat_api_key: str = Form(""),
+    yandex_cloud_folder_id: str = Form(""),
+    rush_analytics_api_key: str = Form(""),
+    openai_api_key: str = Form(""),
+    openai_proxy_url: str = Form(""),
+    residential_proxy_url: str = Form(""),
     db: Session = Depends(get_db),
 ):
     """Create a new blog."""
+    # Strip /ghost suffix from ghost_url (common mistake)
+    ghost_url = ghost_url.strip().rstrip("/")
+    if ghost_url.endswith("/ghost"):
+        ghost_url = ghost_url[:-6]
+
     # Validate slug uniqueness
     existing = db.query(models.Blog).filter(models.Blog.slug == slug.strip().lower()).first()
     if existing:
@@ -214,8 +309,19 @@ async def create_blog(
         name=name.strip(),
         slug=slug.strip().lower(),
         domain=domain.strip() or None,
-        ghost_url=ghost_url.strip(),
+        ghost_url=ghost_url,
         ghost_admin_key=ghost_admin_key.strip(),
+        anthropic_api_key=anthropic_api_key.strip() or None,
+        anthropic_proxy_url=anthropic_proxy_url.strip() or None,
+        anthropic_proxy_secret=anthropic_proxy_secret.strip() or None,
+        serper_api_key=serper_api_key.strip() or None,
+        jina_api_key=jina_api_key.strip() or None,
+        yandex_wordstat_api_key=yandex_wordstat_api_key.strip() or None,
+        yandex_cloud_folder_id=yandex_cloud_folder_id.strip() or None,
+        rush_analytics_api_key=rush_analytics_api_key.strip() or None,
+        openai_api_key=openai_api_key.strip() or None,
+        openai_proxy_url=openai_proxy_url.strip() or None,
+        residential_proxy_url=residential_proxy_url.strip() or None,
     )
     db.add(blog)
     db.commit()
@@ -245,12 +351,28 @@ async def update_blog(
     ghost_url: str = Form(...),
     ghost_admin_key: str = Form(...),
     status: str = Form("active"),
+    anthropic_api_key: str = Form(""),
+    anthropic_proxy_url: str = Form(""),
+    anthropic_proxy_secret: str = Form(""),
+    serper_api_key: str = Form(""),
+    jina_api_key: str = Form(""),
+    yandex_wordstat_api_key: str = Form(""),
+    yandex_cloud_folder_id: str = Form(""),
+    rush_analytics_api_key: str = Form(""),
+    openai_api_key: str = Form(""),
+    openai_proxy_url: str = Form(""),
+    residential_proxy_url: str = Form(""),
     db: Session = Depends(get_db),
 ):
     """Update a blog."""
     blog = db.query(models.Blog).filter(models.Blog.id == blog_id).first()
     if not blog:
         return RedirectResponse(url="/ui/blogs?error=Blog not found", status_code=302)
+
+    # Strip /ghost suffix from ghost_url (common mistake)
+    ghost_url = ghost_url.strip().rstrip("/")
+    if ghost_url.endswith("/ghost"):
+        ghost_url = ghost_url[:-6]
 
     # Validate slug uniqueness (excluding current)
     existing = db.query(models.Blog).filter(
@@ -266,9 +388,20 @@ async def update_blog(
     blog.name = name.strip()
     blog.slug = slug.strip().lower()
     blog.domain = domain.strip() or None
-    blog.ghost_url = ghost_url.strip()
+    blog.ghost_url = ghost_url
     blog.ghost_admin_key = ghost_admin_key.strip()
     blog.status = status
+    blog.anthropic_api_key = anthropic_api_key.strip() or None
+    blog.anthropic_proxy_url = anthropic_proxy_url.strip() or None
+    blog.anthropic_proxy_secret = anthropic_proxy_secret.strip() or None
+    blog.serper_api_key = serper_api_key.strip() or None
+    blog.jina_api_key = jina_api_key.strip() or None
+    blog.yandex_wordstat_api_key = yandex_wordstat_api_key.strip() or None
+    blog.yandex_cloud_folder_id = yandex_cloud_folder_id.strip() or None
+    blog.rush_analytics_api_key = rush_analytics_api_key.strip() or None
+    blog.openai_api_key = openai_api_key.strip() or None
+    blog.openai_proxy_url = openai_proxy_url.strip() or None
+    blog.residential_proxy_url = residential_proxy_url.strip() or None
     db.commit()
 
     return RedirectResponse(url="/ui/blogs", status_code=303)
@@ -324,14 +457,16 @@ async def create_topic(
 ):
     """Create a new topic by running Discovery Agent."""
     settings = get_settings()
+    current_blog = get_current_blog(request, db)
+    bs = resolve_blog_settings(current_blog, settings)
 
-    if not settings.serper_api_key:
+    if not bs["serper_api_key"]:
         return _render(request, db, "topics/create.html", {
             "error": "SERPER_API_KEY not configured",
             "niche": niche, "domain": domain, "country": country, "language": language,
         })
 
-    if not settings.anthropic_api_key:
+    if not bs["anthropic_api_key"]:
         return _render(request, db, "topics/create.html", {
             "error": "ANTHROPIC_API_KEY not configured",
             "niche": niche, "domain": domain, "country": country, "language": language,
@@ -340,10 +475,10 @@ async def create_topic(
     try:
         # Run Discovery Agent
         discovery = DiscoveryAgent(
-            serper_api_key=settings.serper_api_key,
-            anthropic_api_key=settings.anthropic_api_key,
-            proxy_url=settings.anthropic_proxy_url or None,
-            proxy_secret=settings.anthropic_proxy_secret or None,
+            serper_api_key=bs["serper_api_key"],
+            anthropic_api_key=bs["anthropic_api_key"],
+            proxy_url=bs["anthropic_proxy_url"] or None,
+            proxy_secret=bs["anthropic_proxy_secret"] or None,
         )
 
         result = await discovery.discover(
@@ -410,6 +545,7 @@ async def topic_detail(
     topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
+    _check_blog_ownership(request, db, site=topic)
 
     # Get clusters for this topic (top-level only)
     clusters = db.query(models.Cluster).filter(
@@ -463,6 +599,11 @@ async def select_keywords(
     db: Session = Depends(get_db),
 ):
     """Mark selected keywords as 'selected'."""
+    topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=404)
+    _check_blog_ownership(request, db, site=topic)
+
     if not keyword_ids:
         return RedirectResponse(
             url=f"/ui/topics/{topic_id}?error=Не выбраны ключевые слова",
@@ -496,6 +637,11 @@ async def reject_keywords(
     db: Session = Depends(get_db),
 ):
     """Mark selected keywords as 'rejected'."""
+    topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=404)
+    _check_blog_ownership(request, db, site=topic)
+
     if not keyword_ids:
         return RedirectResponse(
             url=f"/ui/topics/{topic_id}?error=Не выбраны ключевые слова",
@@ -533,6 +679,10 @@ async def fetch_keyword_volume(
     topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
+    _check_blog_ownership(request, db, site=topic)
+
+    blog = _resolve_blog(request, db, site=topic)
+    bs = resolve_blog_settings(blog, settings)
 
     keywords = db.query(models.Keyword).filter(
         models.Keyword.site_id == topic_id,
@@ -545,10 +695,8 @@ async def fetch_keyword_volume(
         )
 
     try:
-        from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
-
         region = topic.country or "ru"
-        provider = get_volume_provider(region, settings)
+        provider = _make_volume_provider(bs, region)
 
         if provider.source_name == "none":
             return RedirectResponse(
@@ -599,6 +747,10 @@ async def expand_keywords(
     topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
+    _check_blog_ownership(request, db, site=topic)
+
+    blog = _resolve_blog(request, db, site=topic)
+    bs = resolve_blog_settings(blog, settings)
 
     all_keywords = db.query(models.Keyword).filter(
         models.Keyword.site_id == topic_id,
@@ -610,7 +762,7 @@ async def expand_keywords(
             status_code=303,
         )
 
-    if not settings.serper_api_key:
+    if not bs["serper_api_key"]:
         return RedirectResponse(
             url=f"/ui/topics/{topic_id}?error=SERPER_API_KEY not configured (needed for keyword discovery)",
             status_code=303,
@@ -641,7 +793,7 @@ async def expand_keywords(
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
                         "https://google.serper.dev/search",
-                        headers={"X-API-KEY": settings.serper_api_key, "Content-Type": "application/json"},
+                        headers={"X-API-KEY": bs["serper_api_key"], "Content-Type": "application/json"},
                         json={"q": query, "gl": gl, "hl": hl, "num": 10},
                         timeout=30.0,
                     )
@@ -653,7 +805,7 @@ async def expand_keywords(
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
                         "https://google.serper.dev/autocomplete",
-                        headers={"X-API-KEY": settings.serper_api_key, "Content-Type": "application/json"},
+                        headers={"X-API-KEY": bs["serper_api_key"], "Content-Type": "application/json"},
                         json={"q": query, "gl": gl, "hl": hl},
                         timeout=30.0,
                     )
@@ -688,7 +840,7 @@ async def expand_keywords(
                         discovered_keywords.add(q)
 
         # Step 1b: Get provider suggestions (Wordstat related queries)
-        provider = get_volume_provider(region, settings)
+        provider = _make_volume_provider(bs, region)
         if provider.source_name != "none":
             for seed in seeds[:5]:
                 try:
@@ -751,8 +903,12 @@ async def generate_articles_for_topic(
     topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
+    _check_blog_ownership(request, db, site=topic)
 
-    if not settings.anthropic_api_key:
+    blog = _resolve_blog(request, db, site=topic)
+    bs = resolve_blog_settings(blog, settings)
+
+    if not bs["anthropic_api_key"]:
         return RedirectResponse(
             url=f"/ui/topics/{topic_id}?error=ANTHROPIC_API_KEY not configured",
             status_code=303,
@@ -774,10 +930,8 @@ async def generate_articles_for_topic(
         count = 0
         region = topic.language or "ru"
 
-        # Resolve Ghost creds from Blog
-        blog = topic.blog if topic.blog_id else get_current_blog(request, db)
-        blog_ghost_url = blog.ghost_url if blog else None
-        blog_ghost_admin_key = blog.ghost_admin_key if blog else None
+        blog_ghost_url = bs["ghost_url"]
+        blog_ghost_admin_key = bs["ghost_admin_key"]
 
         # Load KB docs from attached folders
         kb_docs = []
@@ -1078,6 +1232,7 @@ async def update_topic_kb(
     topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
+    _check_blog_ownership(request, db, site=topic)
 
     # Clear existing and re-add
     topic.knowledge_folders.clear()
@@ -1106,34 +1261,27 @@ async def discover_clusters_for_topic(
     topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
+    _check_blog_ownership(request, db, site=topic)
 
-    if not settings.anthropic_api_key or not settings.serper_api_key:
+    blog = _resolve_blog(request, db, site=topic)
+    bs = resolve_blog_settings(blog, settings)
+
+    if not bs["anthropic_api_key"] or not bs["serper_api_key"]:
         return RedirectResponse(
             url=f"/ui/topics/{topic_id}?error=ANTHROPIC_API_KEY and SERPER_API_KEY required",
             status_code=303,
         )
 
     try:
-        import anthropic
         from src.services.cluster_planner import ClusterPlanner
 
-        if settings.anthropic_proxy_url and settings.anthropic_proxy_secret:
-            client = anthropic.Anthropic(
-                api_key=settings.anthropic_api_key,
-                base_url=settings.anthropic_proxy_url,
-                default_headers={"x-proxy-token": settings.anthropic_proxy_secret},
-            )
-        else:
-            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
+        client = _make_anthropic_client(bs)
         region = topic.country or "ru"
-
-        from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
-        volume_provider = get_volume_provider(region=region, settings=settings)
+        volume_provider = _make_volume_provider(bs, region)
 
         planner = ClusterPlanner(
             anthropic_client=client,
-            serper_api_key=settings.serper_api_key,
+            serper_api_key=bs["serper_api_key"],
             volume_provider=volume_provider,
         )
 
@@ -1180,6 +1328,10 @@ async def plan_discovered_cluster(
     cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster not found")
+    _check_blog_ownership(request, db, cluster=cluster)
+
+    blog = _resolve_blog(request, db, cluster=cluster)
+    bs = resolve_blog_settings(blog, settings)
 
     topic_id = cluster.site_id
     if cluster.status != "discovered":
@@ -1188,33 +1340,22 @@ async def plan_discovered_cluster(
             status_code=303,
         )
 
-    if not settings.anthropic_api_key or not settings.serper_api_key:
+    if not bs["anthropic_api_key"] or not bs["serper_api_key"]:
         return RedirectResponse(
             url=f"/ui/topics/{topic_id}?error=ANTHROPIC_API_KEY and SERPER_API_KEY required",
             status_code=303,
         )
 
     try:
-        import anthropic
         from src.services.cluster_planner import ClusterPlanner
 
-        if settings.anthropic_proxy_url and settings.anthropic_proxy_secret:
-            client = anthropic.Anthropic(
-                api_key=settings.anthropic_api_key,
-                base_url=settings.anthropic_proxy_url,
-                default_headers={"x-proxy-token": settings.anthropic_proxy_secret},
-            )
-        else:
-            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
+        client = _make_anthropic_client(bs)
         region = cluster.region or "ru"
-
-        from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
-        volume_provider = get_volume_provider(region=region, settings=settings)
+        volume_provider = _make_volume_provider(bs, region)
 
         planner = ClusterPlanner(
             anthropic_client=client,
-            serper_api_key=settings.serper_api_key,
+            serper_api_key=bs["serper_api_key"],
             volume_provider=volume_provider,
         )
 
@@ -1291,14 +1432,16 @@ async def create_brief(
 ):
     """Generate a new brief from topic."""
     settings = get_settings()
+    blog = get_current_blog(request, db)
+    bs = resolve_blog_settings(blog, settings)
 
-    if not settings.serper_api_key:
+    if not bs["serper_api_key"]:
         return _render(request, db, "briefs/create.html", {
             "error": "SERPER_API_KEY not configured",
             "topic": topic, "country": country, "language": language,
         })
 
-    if not settings.anthropic_api_key:
+    if not bs["anthropic_api_key"]:
         return _render(request, db, "briefs/create.html", {
             "error": "ANTHROPIC_API_KEY not configured",
             "topic": topic, "country": country, "language": language,
@@ -1306,10 +1449,10 @@ async def create_brief(
 
     try:
         generator = BriefGenerator(
-            serper_api_key=settings.serper_api_key,
-            anthropic_api_key=settings.anthropic_api_key,
-            proxy_url=settings.anthropic_proxy_url or None,
-            proxy_secret=settings.anthropic_proxy_secret or None,
+            serper_api_key=bs["serper_api_key"],
+            anthropic_api_key=bs["anthropic_api_key"],
+            proxy_url=bs["anthropic_proxy_url"] or None,
+            proxy_secret=bs["anthropic_proxy_secret"] or None,
         )
 
         brief_data = await generator.generate(
@@ -1351,6 +1494,7 @@ async def brief_detail(request: Request, brief_id: UUID, db: Session = Depends(g
     brief = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
     if not brief:
         raise HTTPException(status_code=404, detail="Brief not found")
+    _check_blog_ownership(request, db, brief=brief)
 
     # Get associated draft if exists
     draft = db.query(models.Draft).filter(models.Draft.brief_id == brief_id).first()
@@ -1369,6 +1513,7 @@ async def approve_brief(request: Request, brief_id: UUID, db: Session = Depends(
     brief = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
     if not brief:
         raise HTTPException(status_code=404, detail="Brief not found")
+    _check_blog_ownership(request, db, brief=brief)
 
     if brief.status == "draft":
         brief.status = "approved"
@@ -1382,10 +1527,13 @@ async def approve_brief(request: Request, brief_id: UUID, db: Session = Depends(
 async def generate_draft(request: Request, brief_id: UUID, db: Session = Depends(get_db)):
     """Generate draft from brief."""
     settings = get_settings()
+    blog = get_current_blog(request, db)
+    bs = resolve_blog_settings(blog, settings)
 
     brief = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
     if not brief:
         raise HTTPException(status_code=404, detail="Brief not found")
+    _check_blog_ownership(request, db, brief=brief)
 
     if brief.status != "approved":
         return RedirectResponse(url=f"/ui/briefs/{brief_id}", status_code=303)
@@ -1406,9 +1554,9 @@ async def generate_draft(request: Request, brief_id: UUID, db: Session = Depends
 
     # Run generation synchronously
     generator = ArticleGenerator(
-        api_key=settings.anthropic_api_key,
-        proxy_url=settings.anthropic_proxy_url or None,
-        proxy_secret=settings.anthropic_proxy_secret or None,
+        api_key=bs["anthropic_api_key"],
+        proxy_url=bs["anthropic_proxy_url"] or None,
+        proxy_secret=bs["anthropic_proxy_secret"] or None,
     )
 
     try:
@@ -1513,6 +1661,7 @@ async def article_detail(request: Request, draft_id: UUID, db: Session = Depends
     draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
     if not draft:
         raise HTTPException(status_code=404, detail="Article not found")
+    _check_blog_ownership(request, db, draft=draft)
 
     # Load brief and cluster for breadcrumbs/context
     brief = None
@@ -1631,6 +1780,7 @@ async def validate_draft(request: Request, draft_id: UUID, db: Session = Depends
     draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
+    _check_blog_ownership(request, db, draft=draft)
 
     if draft.status not in ("generated", "validated", "validation_failed", "pipeline_completed"):
         return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=303)
@@ -1652,6 +1802,7 @@ async def approve_draft(request: Request, draft_id: UUID, db: Session = Depends(
     draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
+    _check_blog_ownership(request, db, draft=draft)
 
     # Allow approve from any post-generation status
     if draft.status in ("generated", "validated", "validation_failed", "pipeline_completed"):
@@ -1671,25 +1822,17 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
     draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
     if not draft or draft.status != "approved":
         return RedirectResponse(url=f"/ui/articles/{draft_id}", status_code=303)
+    _check_blog_ownership(request, db, draft=draft)
+
+    blog = _resolve_blog(request, db, draft=draft)
+    bs = resolve_blog_settings(blog, settings)
 
     # Atomically mark as publishing to prevent double-submit
     draft.status = "publishing"
     db.commit()
 
     try:
-        # Resolve Ghost creds from Blog model, fallback to env vars
-        ghost_url = settings.ghost_url
-        ghost_admin_key = settings.ghost_admin_key
-        if draft.site and draft.site.blog:
-            ghost_url = draft.site.blog.ghost_url
-            ghost_admin_key = draft.site.blog.ghost_admin_key
-        elif not ghost_url:
-            blog = get_current_blog(request, db)
-            if blog:
-                ghost_url = blog.ghost_url
-                ghost_admin_key = blog.ghost_admin_key
-
-        publisher = GhostPublisher(ghost_url, ghost_admin_key)
+        publisher = GhostPublisher(bs["ghost_url"], bs["ghost_admin_key"])
         result = publisher.publish(
             title=draft.title,
             content=draft.content_md,
@@ -1737,10 +1880,9 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
             # Register article in internal linker DB + run backward linking
             try:
                 from src.services.internal_linker import InternalLinker
-                import anthropic
 
-                if settings.database_url:
-                    linker = InternalLinker(settings.database_url)
+                if bs["database_url"]:
+                    linker = InternalLinker(bs["database_url"])
                     published_url = result["post"]["url"]
 
                     # Build keywords list: [(keyword, type)]
@@ -1763,14 +1905,8 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
                     )
 
                     # Backward linking (update old articles)
-                    if settings.anthropic_api_key and keywords:
-                        client = anthropic.Anthropic(
-                            api_key=settings.anthropic_api_key,
-                            **({"base_url": settings.anthropic_proxy_url,
-                                "default_headers": {"x-proxy-token": settings.anthropic_proxy_secret}}
-                               if settings.anthropic_proxy_url and settings.anthropic_proxy_secret
-                               else {}),
-                        )
+                    if bs["anthropic_api_key"] and keywords:
+                        client = _make_anthropic_client(bs)
                         await linker.update_backlinks(
                             new_url=published_url,
                             new_title=draft.title,
@@ -1808,13 +1944,10 @@ def _resume_pipeline_for_draft(draft_id: str, settings, paused_at: str):
                 return
             brief = db.query(models.Brief).filter(models.Brief.id == draft.brief_id).first() if draft.brief_id else None
 
-            # Resolve Ghost creds from Blog
-            _ghost_url = None
-            _ghost_admin_key = None
-            if draft.site and draft.site.blog:
-                _ghost_url = draft.site.blog.ghost_url
-                _ghost_admin_key = draft.site.blog.ghost_admin_key
-            runner = _create_runner(settings, ghost_url=_ghost_url, ghost_admin_key=_ghost_admin_key)
+            # Resolve all settings from Blog
+            blog = draft.site.blog if (draft.site and draft.site.blog) else None
+            bs = resolve_blog_settings(blog, settings)
+            runner = _create_runner_from_bs(bs)
 
             # Rebuild config from brief
             config = {
@@ -1859,12 +1992,10 @@ def _resume_pipeline_for_draft(draft_id: str, settings, paused_at: str):
 
             # Rebuild context from stage_results
             existing_posts = []
-            _gu = _ghost_url or settings.ghost_url
-            _gk = _ghost_admin_key or settings.ghost_admin_key
-            if _gu and _gk:
+            if bs["ghost_url"] and bs["ghost_admin_key"]:
                 try:
                     from src.services.publisher import GhostPublisher
-                    publisher = GhostPublisher(ghost_url=_gu, admin_key=_gk)
+                    publisher = GhostPublisher(ghost_url=bs["ghost_url"], admin_key=bs["ghost_admin_key"])
                     existing_posts = publisher.get_posts()
                 except Exception:
                     pass
@@ -2015,6 +2146,7 @@ def _resume_pipeline_for_draft(draft_id: str, settings, paused_at: str):
 
 @router.post("/articles/{draft_id}/next-step", response_class=HTMLResponse)
 async def article_next_step(
+    request: Request,
     draft_id: UUID,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -2024,6 +2156,7 @@ async def article_next_step(
     draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
     if not draft:
         raise HTTPException(status_code=404, detail="Article not found")
+    _check_blog_ownership(request, db, draft=draft)
 
     if not draft.pipeline_status or not draft.pipeline_status.startswith("paused"):
         return RedirectResponse(
@@ -2061,6 +2194,7 @@ async def article_edit_stage(
     draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
     if not draft:
         raise HTTPException(status_code=404, detail="Article not found")
+    _check_blog_ownership(request, db, draft=draft)
 
     form = await request.form()
     stage = form.get("stage", "")
@@ -2093,6 +2227,7 @@ async def article_edit_stage(
 
 @router.post("/articles/{draft_id}/enrich-from-kb", response_class=HTMLResponse)
 async def article_enrich_from_kb(
+    request: Request,
     draft_id: UUID,
     db: Session = Depends(get_db),
 ):
@@ -2103,6 +2238,7 @@ async def article_enrich_from_kb(
     draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
     if not draft:
         raise HTTPException(status_code=404, detail="Article not found")
+    _check_blog_ownership(request, db, draft=draft)
 
     # Load KB docs from brief's cluster
     kb_docs = []
@@ -2163,14 +2299,9 @@ async def article_enrich_from_kb(
 Если новых фактов нет — верни пустой массив []."""
 
     try:
-        if settings.anthropic_proxy_url and settings.anthropic_proxy_secret:
-            client = anthropic_module.Anthropic(
-                api_key=settings.anthropic_api_key,
-                base_url=settings.anthropic_proxy_url,
-                default_headers={"x-proxy-token": settings.anthropic_proxy_secret},
-            )
-        else:
-            client = anthropic_module.Anthropic(api_key=settings.anthropic_api_key)
+        blog = _resolve_blog(None, db, draft=draft)
+        bs = resolve_blog_settings(blog, settings)
+        client = _make_anthropic_client(bs)
 
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
@@ -2216,13 +2347,20 @@ async def article_enrich_from_kb(
 
 # ============ Pipeline Pages ============
 
-def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, knowledge_base_docs: list = None, factual_mode: str = "default", ghost_url: str = None, ghost_admin_key: str = None):
+def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, knowledge_base_docs: list = None, factual_mode: str = "default", ghost_url: str = None, ghost_admin_key: str = None, blog_settings: dict = None):
     """
     Run writing pipeline synchronously.
     Called from background task.
     """
     settings = get_settings()
     db = SessionLocal()
+
+    # Use blog_settings if provided, else build from ghost_url/ghost_admin_key args + global settings
+    bs = blog_settings or resolve_blog_settings(None, settings)
+    if ghost_url and not blog_settings:
+        bs["ghost_url"] = ghost_url
+    if ghost_admin_key and not blog_settings:
+        bs["ghost_admin_key"] = ghost_admin_key
 
     try:
         # Get draft
@@ -2247,20 +2385,8 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
         }
         db.commit()
 
-        # Initialize pipeline runner (use Blog ghost creds if provided)
-        runner = PipelineRunner(
-            anthropic_api_key=settings.anthropic_api_key,
-            serper_api_key=settings.serper_api_key or None,
-            jina_api_key=getattr(settings, 'jina_api_key', None),
-            proxy_url=settings.anthropic_proxy_url or None,
-            proxy_secret=settings.anthropic_proxy_secret or None,
-            ghost_url=ghost_url or settings.ghost_url or None,
-            ghost_admin_key=ghost_admin_key or settings.ghost_admin_key or None,
-            database_url=settings.database_url or None,
-            openai_api_key=getattr(settings, 'openai_api_key', None),
-            openai_proxy_url=getattr(settings, 'openai_proxy_url', None),
-            residential_proxy_url=getattr(settings, 'residential_proxy_url', None),
-        )
+        # Initialize pipeline runner from resolved blog settings
+        runner = _create_runner_from_bs(bs)
 
         # Stage progress callback — updates DB after each stage
         def on_stage_complete(stage_name: str, status: str):
@@ -2389,7 +2515,8 @@ async def create_pipeline(
     folder_ids = form.getlist("folder_ids")
 
     current_blog = get_current_blog(request, db)
-    if not settings.anthropic_api_key:
+    bs = resolve_blog_settings(current_blog, settings)
+    if not bs["anthropic_api_key"]:
         folders = get_blog_kb_folders(db, current_blog)
         return _render(request, db, "pipeline/new.html", {
             "error": "ANTHROPIC_API_KEY not configured",
@@ -2465,10 +2592,8 @@ async def create_pipeline(
         db.commit()
         db.refresh(draft)
 
-        # Resolve Ghost creds from current blog
-        blog = get_current_blog(request, db)
-        pipeline_ghost_url = blog.ghost_url if blog else None
-        pipeline_ghost_admin_key = blog.ghost_admin_key if blog else None
+        pipeline_ghost_url = bs["ghost_url"]
+        pipeline_ghost_admin_key = bs["ghost_admin_key"]
 
         # Start background task
         background_tasks.add_task(
@@ -2612,12 +2737,6 @@ async def trigger_monitoring_check(
     if not site_id:
         return RedirectResponse(url="/ui/monitoring?error=No site selected", status_code=303)
 
-    if not settings.serper_api_key:
-        return RedirectResponse(
-            url=f"/ui/monitoring?site_id={site_id}&error=SERPER_API_KEY not configured",
-            status_code=303,
-        )
-
     site = db.query(models.Site).filter(models.Site.id == site_id).first()
     if not site or not site.domain:
         return RedirectResponse(
@@ -2625,10 +2744,19 @@ async def trigger_monitoring_check(
             status_code=303,
         )
 
+    blog = _resolve_blog(request, db, site=site)
+    bs = resolve_blog_settings(blog, settings)
+
+    if not bs["serper_api_key"]:
+        return RedirectResponse(
+            url=f"/ui/monitoring?site_id={site_id}&error=SERPER_API_KEY not configured",
+            status_code=303,
+        )
+
     try:
         tracker = PositionTracker(
             db_session_factory=SessionLocal,
-            serper_api_key=settings.serper_api_key,
+            serper_api_key=bs["serper_api_key"],
         )
 
         summary = await tracker.run_daily_check(site_id)
@@ -2824,7 +2952,10 @@ async def cluster_plan_submit(
     form = await request.form()
     folder_ids = form.getlist("folder_ids")
 
-    if not settings.anthropic_api_key:
+    blog = get_current_blog(request, db)
+    bs = resolve_blog_settings(blog, settings)
+
+    if not bs["anthropic_api_key"]:
         return RedirectResponse(
             url="/ui/clusters/plan?error=ANTHROPIC_API_KEY not configured",
             status_code=303,
@@ -2836,25 +2967,14 @@ async def cluster_plan_submit(
         resolved_site_id = site_id.strip()
 
     try:
-        import anthropic
         from src.services.cluster_planner import ClusterPlanner
 
-        # Init Anthropic client
-        if settings.anthropic_proxy_url and settings.anthropic_proxy_secret:
-            client = anthropic.Anthropic(
-                api_key=settings.anthropic_api_key,
-                base_url=settings.anthropic_proxy_url,
-                default_headers={"x-proxy-token": settings.anthropic_proxy_secret},
-            )
-        else:
-            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
-        from src.services.writing_pipeline.data_sources.volume_provider import get_volume_provider
-        volume_provider = get_volume_provider(region=region, settings=settings)
+        client = _make_anthropic_client(bs)
+        volume_provider = _make_volume_provider(bs, region)
 
         planner = ClusterPlanner(
             anthropic_client=client,
-            serper_api_key=settings.serper_api_key,
+            serper_api_key=bs["serper_api_key"],
             volume_provider=volume_provider,
         )
 
@@ -2928,6 +3048,7 @@ async def cluster_detail(
     cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster not found")
+    _check_blog_ownership(request, db, cluster=cluster)
 
     # All briefs in this cluster (flat model — no child clusters)
     all_briefs_raw = db.query(models.Brief).filter(
@@ -3009,10 +3130,16 @@ async def cluster_detail(
 
 @router.post("/clusters/{cluster_id}/approve-all", response_class=HTMLResponse)
 async def approve_all_briefs(
+    request: Request,
     cluster_id: UUID,
     db: Session = Depends(get_db),
 ):
     """Approve all draft briefs in the cluster."""
+    cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404)
+    _check_blog_ownership(request, db, cluster=cluster)
+
     count = db.query(models.Brief).filter(
         models.Brief.cluster_id == cluster_id,
         models.Brief.status == "draft",
@@ -3035,6 +3162,7 @@ async def update_cluster_kb(
     cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster not found")
+    _check_blog_ownership(request, db, cluster=cluster)
 
     form = await request.form()
     folder_ids = form.getlist("folder_ids")
@@ -3055,12 +3183,18 @@ async def update_cluster_kb(
 
 
 @router.post("/clusters/{cluster_id}/briefs/{brief_id}/approve", response_class=HTMLResponse)
-async def approve_brief(
+async def approve_cluster_brief(
+    request: Request,
     cluster_id: UUID,
     brief_id: UUID,
     db: Session = Depends(get_db),
 ):
     """Approve a brief for generation."""
+    cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404)
+    _check_blog_ownership(request, db, cluster=cluster)
+
     brief = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
     if brief:
         brief.status = "approved"
@@ -3073,12 +3207,18 @@ async def approve_brief(
 
 
 @router.post("/clusters/{cluster_id}/briefs/{brief_id}/delete", response_class=HTMLResponse)
-async def delete_brief(
+async def delete_cluster_brief(
+    request: Request,
     cluster_id: UUID,
     brief_id: UUID,
     db: Session = Depends(get_db),
 ):
     """Delete a brief."""
+    cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404)
+    _check_blog_ownership(request, db, cluster=cluster)
+
     brief = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
     if brief:
         db.delete(brief)
@@ -3100,13 +3240,16 @@ async def generate_single_brief(
 ):
     """Generate article for a single brief."""
     settings = get_settings()
-    brief = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
-    if not brief:
-        raise HTTPException(status_code=404, detail="Brief not found")
-
     cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster not found")
+    _check_blog_ownership(request, db, cluster=cluster)
+
+    blog = _resolve_blog(request, db, cluster=cluster)
+    bs = resolve_blog_settings(blog, settings)
+    brief = db.query(models.Brief).filter(models.Brief.id == brief_id).first()
+    if not brief:
+        raise HTTPException(status_code=404, detail="Brief not found")
 
     # Auto-approve if still draft
     if brief.status == "draft":
@@ -3147,17 +3290,6 @@ async def generate_single_brief(
     brief.status = "in_writing"
     db.commit()
 
-    # Resolve Ghost creds from Blog
-    blog = None
-    if cluster.site_id:
-        site = cluster.site
-        if site and site.blog:
-            blog = site.blog
-    if not blog:
-        blog = get_current_blog(request, db)
-    brief_ghost_url = blog.ghost_url if blog else None
-    brief_ghost_admin_key = blog.ghost_admin_key if blog else None
-
     background_tasks.add_task(
         _run_pipeline_for_brief,
         str(brief.id),
@@ -3170,8 +3302,7 @@ async def generate_single_brief(
         str(cluster_id),
         step_by_step.lower() in ("true", "1", "yes"),
         cluster.factual_mode or "default",
-        ghost_url=brief_ghost_url,
-        ghost_admin_key=brief_ghost_admin_key,
+        blog_settings=bs,
     )
 
     return RedirectResponse(
@@ -3181,11 +3312,12 @@ async def generate_single_brief(
 
 
 @router.post("/articles/{draft_id}/cancel", response_class=HTMLResponse)
-async def cancel_article(draft_id: UUID, db: Session = Depends(get_db)):
+async def cancel_article(request: Request, draft_id: UUID, db: Session = Depends(get_db)):
     """Cancel a running pipeline."""
     draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
+    _check_blog_ownership(request, db, draft=draft)
 
     if draft.status in ("pipeline_running", "generating"):
         draft.status = "cancelled"
@@ -3269,19 +3401,32 @@ def _serialize_stage_result(context, stage_name: str) -> dict:
 
 def _create_runner(settings, ghost_url=None, ghost_admin_key=None):
     """Create a PipelineRunner from settings. Optional ghost creds override env."""
+    bs = resolve_blog_settings(None, settings)
+    if ghost_url:
+        bs["ghost_url"] = ghost_url
+    if ghost_admin_key:
+        bs["ghost_admin_key"] = ghost_admin_key
+    return _create_runner_from_bs(bs)
+
+
+def _create_runner_from_bs(bs: dict):
+    """Create a PipelineRunner from resolved blog settings dict."""
     from src.services.writing_pipeline import PipelineRunner
     return PipelineRunner(
-        anthropic_api_key=settings.anthropic_api_key,
-        serper_api_key=settings.serper_api_key,
-        jina_api_key=settings.jina_api_key,
-        proxy_url=settings.anthropic_proxy_url,
-        proxy_secret=settings.anthropic_proxy_secret,
-        ghost_url=ghost_url or settings.ghost_url,
-        ghost_admin_key=ghost_admin_key or settings.ghost_admin_key,
-        database_url=settings.database_url,
-        openai_api_key=settings.openai_api_key,
-        openai_proxy_url=settings.openai_proxy_url,
-        residential_proxy_url=getattr(settings, 'residential_proxy_url', None),
+        anthropic_api_key=bs["anthropic_api_key"],
+        serper_api_key=bs["serper_api_key"],
+        jina_api_key=bs["jina_api_key"],
+        proxy_url=bs["anthropic_proxy_url"],
+        proxy_secret=bs["anthropic_proxy_secret"],
+        ghost_url=bs["ghost_url"],
+        ghost_admin_key=bs["ghost_admin_key"],
+        database_url=bs["database_url"],
+        openai_api_key=bs["openai_api_key"],
+        openai_proxy_url=bs["openai_proxy_url"],
+        residential_proxy_url=bs["residential_proxy_url"],
+        yandex_wordstat_api_key=bs.get("yandex_wordstat_api_key", ""),
+        yandex_cloud_folder_id=bs.get("yandex_cloud_folder_id", ""),
+        rush_analytics_api_key=bs.get("rush_analytics_api_key", ""),
     )
 
 
@@ -3298,6 +3443,7 @@ def _run_pipeline_for_brief(
     factual_mode: str = "default",
     ghost_url: str = None,
     ghost_admin_key: str = None,
+    blog_settings: dict = None,
 ):
     """Background task: run pipeline for a single brief."""
     import asyncio
@@ -3328,9 +3474,12 @@ def _run_pipeline_for_brief(
             db.commit()
             local_draft_id = str(draft.id)
 
-            _ghost_url = ghost_url or settings.ghost_url
-            _ghost_admin_key = ghost_admin_key or settings.ghost_admin_key
-            runner = _create_runner(settings, ghost_url=_ghost_url, ghost_admin_key=_ghost_admin_key)
+            bs = blog_settings or resolve_blog_settings(None, settings)
+            if ghost_url and not blog_settings:
+                bs["ghost_url"] = ghost_url
+            if ghost_admin_key and not blog_settings:
+                bs["ghost_admin_key"] = ghost_admin_key
+            runner = _create_runner_from_bs(bs)
 
             config = {}
             if knowledge_base_docs:
@@ -3352,10 +3501,10 @@ def _run_pipeline_for_brief(
 
             # Fetch existing posts for overlap analysis
             existing_posts = []
-            if _ghost_url and _ghost_admin_key:
+            if bs["ghost_url"] and bs["ghost_admin_key"]:
                 try:
                     from src.services.publisher import GhostPublisher
-                    publisher = GhostPublisher(ghost_url=_ghost_url, admin_key=_ghost_admin_key)
+                    publisher = GhostPublisher(ghost_url=bs["ghost_url"], admin_key=bs["ghost_admin_key"])
                     existing_posts = publisher.get_posts()
                 except Exception:
                     pass
@@ -3468,6 +3617,7 @@ def _run_cluster_pipeline_sequential(
     factual_mode: str,
     ghost_url: str = None,
     ghost_admin_key: str = None,
+    blog_settings: dict = None,
 ):
     """Background task: run pipeline for briefs SEQUENTIALLY, pillar first."""
     for brief_id, topic, brief_data in brief_queue:
@@ -3495,7 +3645,7 @@ def _run_cluster_pipeline_sequential(
             brief_id, site_id, topic, region, brief_data,
             settings, knowledge_base_docs, cluster_id,
             step_by_step, factual_mode,
-            ghost_url=ghost_url, ghost_admin_key=ghost_admin_key,
+            blog_settings=blog_settings,
         )
 
         # If step_by_step, the first brief will pause — stop processing queue
@@ -3522,11 +3672,14 @@ async def generate_cluster_articles(
 ):
     """Generate articles for all approved briefs in the cluster (sequentially, pillar first)."""
     settings = get_settings()
-    is_step_by_step = step_by_step.lower() == "true"
-
     cluster = db.query(models.Cluster).filter(models.Cluster.id == cluster_id).first()
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster not found")
+    _check_blog_ownership(request, db, cluster=cluster)
+
+    blog = _resolve_blog(request, db, cluster=cluster)
+    bs = resolve_blog_settings(blog, settings)
+    is_step_by_step = step_by_step.lower() == "true"
 
     # Guard: don't allow double-generation
     if cluster.status == "in_progress":
@@ -3635,17 +3788,6 @@ async def generate_cluster_articles(
     cluster.status = "in_progress"
     db.commit()
 
-    # Resolve Ghost creds from Blog
-    blog = None
-    if cluster.site_id:
-        site = db.query(models.Site).filter(models.Site.id == cluster.site_id).first()
-        if site and site.blog:
-            blog = site.blog
-    if not blog:
-        blog = get_current_blog(request, db)
-    cluster_ghost_url = blog.ghost_url if blog else None
-    cluster_ghost_admin_key = blog.ghost_admin_key if blog else None
-
     # One background task processes ALL briefs sequentially
     background_tasks.add_task(
         _run_cluster_pipeline_sequential,
@@ -3657,8 +3799,7 @@ async def generate_cluster_articles(
         str(cluster_id),
         is_step_by_step,
         factual_mode,
-        ghost_url=cluster_ghost_url,
-        ghost_admin_key=cluster_ghost_admin_key,
+        blog_settings=bs,
     )
 
     return RedirectResponse(

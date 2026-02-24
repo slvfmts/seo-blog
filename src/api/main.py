@@ -51,26 +51,17 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     print(f"Starting SEO Blog API (debug={settings.debug})")
 
-    # Start monitoring scheduler if Serper API key is configured
+    # Start monitoring scheduler — resolves serper key per blog at runtime
     scheduler = None
-    if settings.serper_api_key:
-        from src.db.session import SessionLocal
-        from src.services.monitoring.position_tracker import PositionTracker
-        from src.services.monitoring.scheduler import MonitoringScheduler
+    from src.db.session import SessionLocal
+    from src.services.monitoring.scheduler import MonitoringScheduler
 
-        tracker = PositionTracker(
-            db_session_factory=SessionLocal,
-            serper_api_key=settings.serper_api_key,
-        )
-        scheduler = MonitoringScheduler(
-            position_tracker=tracker,
-            db_session_factory=SessionLocal,
-            run_hour=6,  # 6 UTC = 9 MSK
-        )
-        await scheduler.start()
-        print("Monitoring scheduler started (daily at 06:00 UTC)")
-    else:
-        print("Monitoring scheduler skipped (SERPER_API_KEY not configured)")
+    scheduler = MonitoringScheduler(
+        db_session_factory=SessionLocal,
+        run_hour=6,  # 6 UTC = 9 MSK
+    )
+    await scheduler.start()
+    print("Monitoring scheduler started (daily at 06:00 UTC, per-blog key resolution)")
 
     yield
 

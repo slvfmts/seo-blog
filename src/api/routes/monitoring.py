@@ -81,18 +81,22 @@ async def trigger_check(
     """Manually trigger position check for a site."""
     settings = get_settings()
 
-    if not settings.serper_api_key:
-        raise HTTPException(status_code=400, detail="SERPER_API_KEY not configured")
-
     site = db.query(models.Site).filter(models.Site.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
+
+    # Resolve serper key from blog
+    blog = site.blog if site.blog_id else None
+    serper_key = (blog.serper_api_key if blog and blog.serper_api_key else None) or settings.serper_api_key
+
+    if not serper_key:
+        raise HTTPException(status_code=400, detail="SERPER_API_KEY not configured")
 
     from src.services.monitoring.position_tracker import PositionTracker
 
     tracker = PositionTracker(
         db_session_factory=SessionLocal,
-        serper_api_key=settings.serper_api_key,
+        serper_api_key=serper_key,
     )
 
     summary = await tracker.run_daily_check(site_id)

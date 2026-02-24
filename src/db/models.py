@@ -26,6 +26,24 @@ class Blog(Base):
     domain = Column(String(255))
     ghost_url = Column(String(500), nullable=False)
     ghost_admin_key = Column(String(500), nullable=False)
+
+    # LLM
+    anthropic_api_key = Column(String(500), nullable=True)
+    anthropic_proxy_url = Column(String(500), nullable=True)
+    anthropic_proxy_secret = Column(String(500), nullable=True)
+    # Search & SEO
+    serper_api_key = Column(String(500), nullable=True)
+    jina_api_key = Column(String(500), nullable=True)
+    # Volume providers (RU)
+    yandex_wordstat_api_key = Column(String(500), nullable=True)
+    yandex_cloud_folder_id = Column(String(500), nullable=True)
+    rush_analytics_api_key = Column(String(500), nullable=True)
+    # Image generation
+    openai_api_key = Column(String(500), nullable=True)
+    openai_proxy_url = Column(String(500), nullable=True)
+    # Proxy
+    residential_proxy_url = Column(String(500), nullable=True)
+
     status = Column(String(50), default="active")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

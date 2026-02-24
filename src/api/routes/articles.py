@@ -113,9 +113,6 @@ async def publish_article(draft_id: UUID, db: Session = Depends(get_db)):
     """Публикует статью в Ghost."""
     settings = get_settings()
 
-    if not settings.ghost_admin_key:
-        raise HTTPException(status_code=500, detail="GHOST_ADMIN_KEY not configured")
-
     draft = db.query(models.Draft).filter(models.Draft.id == draft_id).first()
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
@@ -123,7 +120,15 @@ async def publish_article(draft_id: UUID, db: Session = Depends(get_db)):
     if draft.status != "approved":
         raise HTTPException(status_code=400, detail=f"Draft status is '{draft.status}', expected 'approved'")
 
-    publisher = GhostPublisher(settings.ghost_url, settings.ghost_admin_key)
+    # Resolve Ghost creds from blog
+    blog = draft.site.blog if (draft.site and draft.site.blog) else None
+    ghost_url = blog.ghost_url if blog else settings.ghost_url
+    ghost_admin_key = blog.ghost_admin_key if blog else settings.ghost_admin_key
+
+    if not ghost_admin_key:
+        raise HTTPException(status_code=500, detail="GHOST_ADMIN_KEY not configured")
+
+    publisher = GhostPublisher(ghost_url, ghost_admin_key)
     result = publisher.publish(
         title=draft.title,
         content=draft.content_md,

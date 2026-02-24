@@ -56,6 +56,9 @@ class PipelineRunner:
         openai_api_key: Optional[str] = None,
         openai_proxy_url: Optional[str] = None,
         residential_proxy_url: Optional[str] = None,
+        yandex_wordstat_api_key: Optional[str] = None,
+        yandex_cloud_folder_id: Optional[str] = None,
+        rush_analytics_api_key: Optional[str] = None,
     ):
         """
         Initialize the pipeline runner.
@@ -91,6 +94,9 @@ class PipelineRunner:
         self.openai_proxy_url = openai_proxy_url or ""
         self.openai_proxy_secret = proxy_secret or ""  # reuse Anthropic proxy secret
         self.residential_proxy_url = residential_proxy_url or ""
+        self.yandex_wordstat_api_key = yandex_wordstat_api_key or ""
+        self.yandex_cloud_folder_id = yandex_cloud_folder_id or ""
+        self.rush_analytics_api_key = rush_analytics_api_key or ""
 
         # Initialize internal linker if database_url is provided
         self.linker = None
@@ -123,27 +129,17 @@ class PipelineRunner:
         ]
 
     def _init_volume_provider(self):
-        """Initialize the best available volume provider based on env config."""
+        """Initialize the best available volume provider from instance params."""
         try:
             from ..data_sources.volume_provider import get_volume_provider
 
-            # Build a lightweight settings-like object from runner params
             class _ProviderSettings:
                 pass
 
             s = _ProviderSettings()
-
-            # Load Yandex/Rush keys from real settings
-            try:
-                from ....config.settings import get_settings
-                real = get_settings()
-                s.yandex_wordstat_api_key = real.yandex_wordstat_api_key
-                s.yandex_cloud_folder_id = real.yandex_cloud_folder_id
-                s.rush_analytics_api_key = real.rush_analytics_api_key
-            except Exception:
-                s.yandex_wordstat_api_key = ""
-                s.yandex_cloud_folder_id = ""
-                s.rush_analytics_api_key = ""
+            s.yandex_wordstat_api_key = self.yandex_wordstat_api_key
+            s.yandex_cloud_folder_id = self.yandex_cloud_folder_id
+            s.rush_analytics_api_key = self.rush_analytics_api_key
 
             # Default to "ru" — actual region is applied per-run in research stage
             return get_volume_provider("ru", s)

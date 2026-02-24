@@ -101,30 +101,38 @@ async def generate_brief(request: GenerateBriefRequest, db: Session = Depends(ge
     """
     settings = get_settings()
 
-    if not settings.serper_api_key:
+    # Resolve keys from blog if site_id provided
+    site = None
+    blog = None
+    if request.site_id:
+        site = db.query(models.Site).filter(models.Site.id == request.site_id).first()
+        if not site:
+            raise HTTPException(status_code=404, detail="Site not found")
+        blog = site.blog
+
+    serper_key = (blog.serper_api_key if blog and blog.serper_api_key else None) or settings.serper_api_key
+    anthropic_key = (blog.anthropic_api_key if blog and blog.anthropic_api_key else None) or settings.anthropic_api_key
+    proxy_url = (blog.anthropic_proxy_url if blog and blog.anthropic_proxy_url else None) or settings.anthropic_proxy_url
+    proxy_secret = (blog.anthropic_proxy_secret if blog and blog.anthropic_proxy_secret else None) or settings.anthropic_proxy_secret
+
+    if not serper_key:
         raise HTTPException(
             status_code=500,
             detail="SERPER_API_KEY not configured. Required for brief generation."
         )
 
-    if not settings.anthropic_api_key:
+    if not anthropic_key:
         raise HTTPException(
             status_code=500,
             detail="ANTHROPIC_API_KEY not configured. Required for brief generation."
         )
 
-    # Проверяем site_id если указан
-    if request.site_id:
-        site = db.query(models.Site).filter(models.Site.id == request.site_id).first()
-        if not site:
-            raise HTTPException(status_code=404, detail="Site not found")
-
     # Создаём генератор
     generator = BriefGenerator(
-        serper_api_key=settings.serper_api_key,
-        anthropic_api_key=settings.anthropic_api_key,
-        proxy_url=settings.anthropic_proxy_url or None,
-        proxy_secret=settings.anthropic_proxy_secret or None,
+        serper_api_key=serper_key,
+        anthropic_api_key=anthropic_key,
+        proxy_url=proxy_url or None,
+        proxy_secret=proxy_secret or None,
     )
 
     try:
