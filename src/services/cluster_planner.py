@@ -473,7 +473,7 @@ class ClusterPlanner:
                 try:
                     response = self.client.messages.create(
                         model=self.model,
-                        max_tokens=8192,
+                        max_tokens=16384,
                         temperature=0.5,
                         messages=[{"role": "user", "content": prompt}],
                     )
@@ -491,6 +491,20 @@ class ClusterPlanner:
                 raise last_error
 
             text = response.content[0].text.strip()
+
+            # Retry with larger limit if response was truncated
+            if response.stop_reason == "max_tokens":
+                logger.warning("Clustering LLM hit max_tokens (16384) — retrying with 24576")
+                response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=24576,
+                    temperature=0.5,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = response.content[0].text.strip()
+                if response.stop_reason == "max_tokens":
+                    logger.error("Clustering LLM still truncated at 24576 tokens")
+
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0]
             data = json.loads(text)

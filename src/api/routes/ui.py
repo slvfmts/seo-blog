@@ -582,9 +582,10 @@ async def topic_detail(
     competitors = db.query(models.Competitor).filter(
         models.Competitor.site_id == topic_id,
     ).all()
-    seed_keyword_count = db.query(models.Keyword).filter(
+    seed_keywords = db.query(models.Keyword).filter(
         models.Keyword.site_id == topic_id,
-    ).count()
+    ).order_by(models.Keyword.search_volume.desc().nullslast()).all()
+    seed_keyword_count = len(seed_keywords)
 
     return _render(request, db, "topics/detail.html", {
         "topic": topic,
@@ -595,6 +596,7 @@ async def topic_detail(
         "all_folders": all_folders,
         "attached_folder_ids": attached_folder_ids,
         "competitors": competitors,
+        "seed_keywords": seed_keywords,
         "seed_keyword_count": seed_keyword_count,
         "error": request.query_params.get("error"),
         "success": request.query_params.get("success"),
