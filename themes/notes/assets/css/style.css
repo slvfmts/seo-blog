@@ -319,6 +319,117 @@ img {
 }
 
 /* ========================
+   Post Author
+   ======================== */
+.post-author {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    margin-top: 48px;
+    padding-top: 32px;
+    border-top: 1px solid #eee;
+}
+
+.post-author-image {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.post-author-info {
+    flex: 1;
+}
+
+.post-author-name {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.post-author-name a {
+    color: inherit;
+    text-decoration: none;
+    transition: color 0.15s;
+}
+
+.post-author-name a:hover {
+    color: #555;
+}
+
+.post-author-bio {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #666;
+    margin-top: 4px;
+}
+
+/* ========================
+   Related Posts
+   ======================== */
+.related-posts {
+    max-width: 1200px;
+    margin: 48px auto 0;
+    padding: 32px 24px 64px;
+    border-top: 1px solid #eee;
+}
+
+.related-posts-title {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 24px;
+}
+
+.related-posts-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+}
+
+.related-card {
+    display: flex;
+    flex-direction: column;
+    text-decoration: none;
+    color: inherit;
+}
+
+.related-card-image-link {
+    overflow: hidden;
+    border-radius: 10px;
+    margin-bottom: 12px;
+    aspect-ratio: 16 / 10;
+}
+
+.related-card-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.related-card:hover .related-card-image {
+    transform: scale(1.03);
+}
+
+.related-card-title {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    transition: color 0.15s;
+}
+
+.related-card:hover .related-card-title {
+    color: #555;
+}
+
+/* ========================
    Footer
    ======================== */
 .site-footer {
@@ -390,6 +501,10 @@ img {
 
     .post-content {
         font-size: 17px;
+    }
+
+    .related-posts-grid {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -599,6 +714,116 @@ img {
 
 .meta-disclaimer-asterisk {
     font-weight: 700;
+}
+
+/* ========================
+   TOC — Desktop Sidebar
+   ======================== */
+.toc-sidebar {
+    display: none;
+}
+
+@media (min-width: 1100px) {
+    .post-full {
+        position: relative;
+    }
+
+    .toc-sidebar {
+        display: block;
+        position: absolute;
+        left: -220px;
+        width: 200px;
+    }
+
+    .toc-nav {
+        position: sticky;
+        top: 100px;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        max-height: calc(100vh - 140px);
+        overflow-y: auto;
+    }
+
+    .toc-link {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 13px;
+        line-height: 1.35;
+        color: #999;
+        text-decoration: none;
+        padding: 4px 0;
+        border-left: 2px solid transparent;
+        padding-left: 12px;
+        transition: color 0.15s, border-color 0.15s;
+    }
+
+    .toc-link:hover {
+        color: #555;
+    }
+
+    .toc-link.is-active {
+        color: #1a1a1a;
+        border-left-color: #1a1a1a;
+    }
+}
+
+/* ========================
+   TOC — Mobile Collapsible
+   ======================== */
+.toc-mobile {
+    margin-bottom: 32px;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.toc-mobile summary {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1a1a1a;
+    cursor: pointer;
+    padding: 12px 0;
+    list-style: none;
+}
+
+.toc-mobile summary::-webkit-details-marker {
+    display: none;
+}
+
+.toc-mobile summary::before {
+    content: '+ ';
+    font-weight: 400;
+    color: #999;
+}
+
+.toc-mobile[open] summary::before {
+    content: '- ';
+}
+
+.toc-mobile-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 4px 0 8px;
+    border-left: 2px solid #eee;
+    margin-left: 2px;
+}
+
+.toc-mobile-link {
+    font-size: 14px;
+    line-height: 1.4;
+    color: #666;
+    text-decoration: none;
+    padding: 4px 0 4px 14px;
+    transition: color 0.15s;
+}
+
+.toc-mobile-link:hover {
+    color: #1a1a1a;
+}
+
+@media (min-width: 1100px) {
+    .toc-mobile {
+        display: none;
+    }
 }
 
 /* ========================
