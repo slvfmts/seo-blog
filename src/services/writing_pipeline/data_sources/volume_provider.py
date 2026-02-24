@@ -76,7 +76,7 @@ def get_volume_provider(region: str, settings) -> VolumeProvider:
 
         if rush_key:
             from .rush_provider import RushAnalyticsProvider
-            rush_provider = RushAnalyticsProvider(api_key=rush_key)
+            rush_provider = RushAnalyticsProvider(api_key=rush_key, region_id=225)
 
         # Both available → composite
         if wordstat_provider and rush_provider:

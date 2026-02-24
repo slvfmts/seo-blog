@@ -43,7 +43,7 @@ class RushAnalyticsProvider(VolumeProvider):
     def __init__(
         self,
         api_key: str,
-        region_id: int = 213,  # 213 = Moscow; 225 = all Russia
+        region_id: int = 225,  # 225 = all Russia (default)
         timeout: float = 180.0,
     ):
         self.api_key = api_key
@@ -51,6 +51,7 @@ class RushAnalyticsProvider(VolumeProvider):
         self.timeout = timeout
         self._semaphore = asyncio.Semaphore(1)  # 1 req/sec
         self._api_exhausted = False  # circuit breaker for 403 "No more free API threads"
+        self._balance_checked = False
 
     @property
     def source_name(self) -> str:
@@ -64,6 +65,15 @@ class RushAnalyticsProvider(VolumeProvider):
         """
         if not keywords:
             return []
+
+        # Log balance once per instance lifecycle for diagnostics
+        if not self._balance_checked:
+            self._balance_checked = True
+            try:
+                balance = await self.check_balance()
+                logger.info(f"Rush Analytics balance: {balance}")
+            except Exception:
+                logger.debug("Rush Analytics: could not check balance")
 
         if self._api_exhausted:
             return [VolumeResult(keyword=kw, volume=0, source="rush") for kw in keywords]
@@ -112,11 +122,35 @@ class RushAnalyticsProvider(VolumeProvider):
 
                 if resp.status_code not in (200, 201):
                     if resp.status_code == 403 and "no more free" in resp.text.lower():
-                        self._api_exhausted = True
-                        logger.warning("Rush Analytics: API exhausted (403 'No more free API threads') — circuit breaker ON, skipping further requests")
+                        if not self._api_exhausted:
+                            logger.warning("Rush: threads busy, waiting 30s before retry...")
+                            await asyncio.sleep(30)
+                            resp = await client.post(
+                                f"{BASE_URL}/create/wordstat",
+                                json={
+                                    "apikey": self.api_key,
+                                    "name": f"seo-blog-vol-{len(keywords)}kw",
+                                    "regionid": self.region_id,
+                                    "projecttype": "SearchVolume",
+                                    "normal": True,
+                                    "parenthesis": False,
+                                    "exclamation": True,
+                                    "wordorder": False,
+                                    "minimumwordstat": 0,
+                                    "keywords": keywords,
+                                    "stopwords": ["xxx_placeholder"],
+                                },
+                                timeout=self.timeout,
+                            )
+                            if resp.status_code not in (200, 201):
+                                self._api_exhausted = True
+                                logger.warning("Rush: API exhausted after retry — circuit breaker ON")
+                                return None
+                        else:
+                            return None
+                    else:
+                        logger.error(f"Rush create wordstat HTTP {resp.status_code}: {resp.text[:500]}")
                         return None
-                    logger.error(f"Rush create wordstat HTTP {resp.status_code}: {resp.text[:500]}")
-                    return None
 
                 data = resp.json()
                 project_id = data.get("id")
@@ -239,11 +273,30 @@ class RushAnalyticsProvider(VolumeProvider):
 
                 if resp.status_code not in (200, 201):
                     if resp.status_code == 403 and "no more free" in resp.text.lower():
-                        self._api_exhausted = True
-                        logger.warning("Rush Analytics: API exhausted (403 suggest) — circuit breaker ON")
+                        if not self._api_exhausted:
+                            logger.warning("Rush: suggest threads busy, waiting 30s before retry...")
+                            await asyncio.sleep(30)
+                            resp = await client.post(
+                                f"{BASE_URL}/create/suggest",
+                                json={
+                                    "apikey": self.api_key,
+                                    "name": f"seo-blog-suggest",
+                                    "yandexRegionId": self.region_id,
+                                    "depth": 1,
+                                    "keywords": [keyword],
+                                    "stopwords": ["xxx_placeholder"],
+                                },
+                                timeout=self.timeout,
+                            )
+                            if resp.status_code not in (200, 201):
+                                self._api_exhausted = True
+                                logger.warning("Rush: suggest API exhausted after retry — circuit breaker ON")
+                                return None
+                        else:
+                            return None
+                    else:
+                        logger.error(f"Rush suggest create HTTP {resp.status_code}: {resp.text[:300]}")
                         return None
-                    logger.error(f"Rush suggest create HTTP {resp.status_code}: {resp.text[:300]}")
-                    return None
 
                 data = resp.json()
                 return data.get("id")
