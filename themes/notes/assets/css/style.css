@@ -125,6 +125,48 @@ img {
     gap: 40px 32px;
 }
 
+/* ========================
+   Grid Banner (course promo)
+   ======================== */
+.grid-banner {
+    grid-column: span 2;
+    background: #ededfa;
+    border-radius: 16px;
+    padding: 28px 32px;
+    display: flex;
+    align-items: center;
+}
+
+@media (max-width: 900px) {
+    .post-grid > :nth-child(n+3) {
+        order: 2;
+    }
+    .grid-banner {
+        order: 1;
+    }
+}
+
+@media (max-width: 560px) {
+    .grid-banner {
+        grid-column: span 1;
+        padding: 20px;
+    }
+
+    .grid-banner .promo-banner-inner {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .grid-banner .promo-banner-image {
+        width: 80px;
+    }
+
+    .grid-banner .promo-banner-btn {
+        width: 100%;
+        text-align: center;
+    }
+}
+
 .post-card {
     display: flex;
     flex-direction: column;
