@@ -95,6 +95,19 @@ def get_volume_provider(region: str, settings) -> VolumeProvider:
             logger.info("Using RushAnalyticsProvider for RU region")
             return rush_provider
 
+        # Try Topvisor
+        tv_token = getattr(settings, "topvisor_access_token", "")
+        tv_user = getattr(settings, "topvisor_user_id", "")
+        tv_project = getattr(settings, "topvisor_project_id", 0)
+        if tv_token and tv_user and tv_project:
+            from .topvisor_provider import TopvisorProvider
+            logger.info("Using TopvisorProvider for RU region")
+            return TopvisorProvider(
+                user_id=tv_user,
+                access_token=tv_token,
+                project_id=tv_project,
+            )
+
     # No provider available
     logger.warning("No volume provider available — returning NullProvider")
     return NullVolumeProvider()

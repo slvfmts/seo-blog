@@ -1,0 +1,53 @@
+Ты SEO-стратег. Тема: "{{big_topic}}" (регион: {{region}}).
+
+Тебе предоставлены готовые группы ключевых слов, полученные через SERP-кластеризацию (ключи в одной группе ранжируются по одинаковым страницам в выдаче).
+
+## Группы ключевых слов:
+{{groups_json}}
+
+## Задача:
+1. Выбери 1 pillar-группу (самая широкая тема, наибольший суммарный объём)
+2. Выбери {{target_count}} cluster-групп (узкие подтемы)
+3. Объедини слишком мелкие группы (менее 3 ключей) с ближайшими по смыслу
+4. Для каждой выбранной группы создай brief
+
+## Формат ответа (строго JSON):
+{
+  "pillar": {
+    "title_candidate": "...",
+    "role": "pillar",
+    "primary_intent": "informational|transactional|commercial|navigational",
+    "topic_boundaries": {"in_scope": ["..."], "out_of_scope": ["..."]},
+    "must_answer_questions": ["вопрос 1", "вопрос 2", ...],
+    "target_terms": ["keyword1", "keyword2", ...],
+    "unique_angle": {"differentiators": ["..."], "must_not_cover": ["..."]},
+    "internal_links_plan": [{"target_slug": "cluster-article-slug", "anchor_hint": "текст"}],
+    "seed_queries": ["запрос 1", "запрос 2"],
+    "estimated_volume": 12345,
+    "priority": 1
+  },
+  "cluster_articles": [
+    {
+      "title_candidate": "...",
+      "role": "cluster",
+      "primary_intent": "...",
+      "topic_boundaries": {"in_scope": ["..."], "out_of_scope": ["..."]},
+      "must_answer_questions": ["..."],
+      "target_terms": ["..."],
+      "unique_angle": {"differentiators": ["..."], "must_not_cover": ["..."]},
+      "internal_links_plan": [{"target_slug": "pillar-slug", "anchor_hint": "текст"}],
+      "seed_queries": ["..."],
+      "estimated_volume": 5000,
+      "priority": 2
+    }
+  ]
+}
+
+## Правила:
+- target_terms: бери из ключей группы (уже проверены по выдаче)
+- У каждой статьи уникальные topic_boundaries
+- must_answer_questions: 5-10 конкретных вопросов
+- internal_links_plan: каждый cluster → pillar, pillar → все clusters
+- Приоритет по объёму: больше объём → выше приоритет (меньше число)
+- Не создавай briefs для мусорных/нерелевантных групп
+- Ответь ТОЛЬКО JSON, без markdown-обёртки

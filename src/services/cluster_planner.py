@@ -49,11 +49,15 @@ class ClusterPlanner:
         serper_api_key: str = "",
         proxy_url: str = "",
         proxy_secret: str = "",
+        topvisor_client=None,
+        use_serp_clustering: bool = False,
     ):
         self.client = anthropic_client
         self.model = model
         self.serper_api_key = serper_api_key
         self.volume_provider = volume_provider  # VolumeProvider instance (Wordstat/Rush)
+        self.topvisor_client = topvisor_client  # TopvisorClient instance (optional)
+        self.use_serp_clustering = use_serp_clustering
 
     async def plan(
         self,
@@ -113,6 +117,68 @@ class ClusterPlanner:
                     logger.warning(f"VolumeProvider suggestions error for '{seed}': {e}")
 
             logger.info(f"Step 2c: {len(all_keywords)} keywords after suggestions")
+
+        # Step 2d: Topvisor keyword research (deep expansion)
+        if self.topvisor_client:
+            try:
+                top_seeds = [big_topic] + list(list(search_data["keywords"] - {big_topic})[:2])
+                logger.info(f"Topvisor research: expanding {len(top_seeds)} seeds")
+                await self.topvisor_client.import_keywords(
+                    keywords=top_seeds,
+                    group_name="cluster-plan-seeds",
+                )
+                is_ru = region.lower() in ("ru", "russia", "kz")
+                await self.topvisor_client.research_keywords(
+                    seed_keywords=top_seeds,
+                    region_key=213 if is_ru else 2840,
+                    searcher_key=0 if is_ru else 1,
+                )
+                await asyncio.sleep(30)
+                kw_data = await self.topvisor_client.get_keywords(
+                    fields=["name"],
+                    limit=3000,
+                )
+                before = len(all_keywords)
+                for kw in kw_data:
+                    name = kw.get("name", "").strip()
+                    if name:
+                        all_keywords.add(name.lower())
+                logger.info(f"Topvisor research: +{len(all_keywords) - before} keywords (total: {len(all_keywords)})")
+
+                # Also get suggestions (autocomplete) as PAA replacement for RU
+                if is_ru:
+                    await self.topvisor_client.get_suggestions(
+                        seed_keywords=top_seeds[:2],
+                        region_key=213,
+                        searcher_keys=[100, 101],
+                    )
+                    await asyncio.sleep(15)
+                    suggest_data = await self.topvisor_client.get_keywords(
+                        fields=["name"],
+                        limit=5000,
+                    )
+                    before = len(all_keywords)
+                    for kw in suggest_data:
+                        name = kw.get("name", "").strip()
+                        if name:
+                            all_keywords.add(name.lower())
+                    logger.info(f"Topvisor suggestions: +{len(all_keywords) - before} keywords")
+            except Exception as e:
+                logger.warning(f"Topvisor keyword research failed: {e}")
+
+        # Step 2.5: Filter junk keywords + fuzzy dedup
+        from .writing_pipeline.stages.keyword_filter import KeywordFilter
+        kw_filter = KeywordFilter(client=self.client, model=self.model)
+        lang = "ru" if region.lower() in ("ru", "russia", "kz") else "en"
+        filtered_list = kw_filter.filter(
+            keywords=list(all_keywords),
+            topic=big_topic,
+            language=lang,
+            use_llm=True,
+            llm_threshold=50,
+        )
+        all_keywords = set(filtered_list)
+        logger.info(f"Step 2.5: filtered to {len(all_keywords)} keywords")
 
         # Step 3: Volume enrichment via VolumeProvider (Wordstat + Rush for RU)
         kw_with_volumes = await self._enrich_volumes(
@@ -364,6 +430,19 @@ class ClusterPlanner:
         knowledge_base_docs: Optional[List[dict]] = None,
     ) -> ClusterPlan:
         """Step 4: LLM clusters REAL keywords and generates briefs."""
+
+        # ── Try SERP-based clustering via Topvisor (if enabled + available + enough keywords) ──
+        if self.use_serp_clustering and self.topvisor_client and len(kw_with_volumes) > 50:
+            try:
+                plan = await self._serp_cluster_and_brief(
+                    big_topic, region, kw_with_volumes, target_count,
+                )
+                if plan and plan.cluster_articles:
+                    return plan
+            except Exception as e:
+                logger.warning(f"SERP clustering failed, falling back to LLM: {e}")
+
+        # ── Default: pure LLM clustering ──
 
         # Sort by volume, take top 300 (increased from 200)
         kw_with_volumes.sort(key=lambda x: x["volume"], reverse=True)
@@ -816,6 +895,134 @@ class ClusterPlanner:
         db_session.commit()
         logger.info(f"Saved plan to existing cluster {cluster.id}: 1 pillar + {len(plan.cluster_articles)} briefs")
         return str(cluster.id)
+
+    async def _serp_cluster_and_brief(
+        self,
+        big_topic: str,
+        region: str,
+        kw_with_volumes: list[dict],
+        target_count: int,
+    ) -> Optional[ClusterPlan]:
+        """
+        SERP-based clustering via Topvisor + LLM brief generation.
+
+        Steps:
+        1. Import keywords into Topvisor project
+        2. Start SERP clustering (by top-10 overlap)
+        3. Wait for completion
+        4. Get clustered keywords (group_id = cluster)
+        5. Pass groups to LLM for brief generation
+        """
+        all_kw_names = [kw["keyword"] for kw in kw_with_volumes]
+        logger.info(f"Starting SERP-based clustering for {len(all_kw_names)} keywords")
+
+        is_ru = region.lower() in ("ru", "russia", "kz")
+
+        # Step 1: Import keywords
+        await self.topvisor_client.import_keywords(
+            keywords=all_kw_names,
+            group_name="serp-cluster-import",
+        )
+
+        # Step 2: Start SERP clustering
+        task_id = await self.topvisor_client.start_clustering(
+            region_key=213 if is_ru else 2840,
+            searcher_key=0 if is_ru else 1,
+            region_lang="ru" if is_ru else "en",
+            count=[3],
+            cluster_type=1,  # moderate
+        )
+        if not task_id:
+            logger.warning("Topvisor clustering: no task_id returned")
+            return None
+
+        # Step 3: Wait for completion
+        completed = await self.topvisor_client.wait_for_clustering(
+            timeout=600, poll_interval=15,
+        )
+        if not completed:
+            logger.warning("Topvisor clustering did not complete in time")
+            return None
+
+        # Step 4: Get clustered keywords
+        vol_type = 1
+        clustered = await self.topvisor_client.get_clustered_keywords(
+            region_key=213 if is_ru else 2840,
+            searcher_key=0 if is_ru else 1,
+            volume_type=vol_type,
+        )
+
+        # Build volume map from input data
+        vol_map = {kw["keyword"].lower().strip(): kw.get("volume", 0) for kw in kw_with_volumes}
+
+        # Build groups
+        groups: dict[str, list[dict]] = {}
+        for kw in clustered:
+            group_name = kw.get("group_name", "ungrouped")
+            groups.setdefault(group_name, []).append({
+                "keyword": kw["name"],
+                "volume": kw.get("volume", 0) or vol_map.get(kw["name"].lower().strip(), 0),
+            })
+
+        sorted_groups = sorted(
+            groups.items(),
+            key=lambda g: sum(k["volume"] for k in g[1]),
+            reverse=True,
+        )
+
+        groups_for_prompt = []
+        for name, keywords in sorted_groups[:50]:
+            total_vol = sum(k["volume"] for k in keywords)
+            keywords.sort(key=lambda x: x["volume"], reverse=True)
+            groups_for_prompt.append({
+                "group": name,
+                "total_volume": total_vol,
+                "keywords": keywords[:20],
+            })
+
+        logger.info(f"SERP clustering: {len(groups)} groups, sending top {len(groups_for_prompt)} to LLM")
+
+        # Step 5: Load prompt and generate briefs
+        import os
+        prompt_dir = os.path.join(
+            os.path.dirname(__file__),
+            "writing_pipeline", "prompts",
+        )
+        prompt_path = os.path.join(prompt_dir, "cluster_brief_from_groups_v1.txt")
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            template = f.read()
+
+        prompt = template.replace("{{big_topic}}", big_topic)
+        prompt = prompt.replace("{{region}}", region)
+        prompt = prompt.replace("{{target_count}}", str(target_count))
+        prompt = prompt.replace(
+            "{{groups_json}}",
+            json.dumps(groups_for_prompt, ensure_ascii=False, indent=2),
+        )
+
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=8192,
+            temperature=0.5,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+        data = json.loads(text)
+
+        pillar = ArticleBrief.from_dict(data["pillar"])
+        cluster_articles = [
+            ArticleBrief.from_dict(a) for a in data.get("cluster_articles", [])
+        ]
+
+        return ClusterPlan(
+            big_topic=big_topic,
+            region=region,
+            pillar=pillar,
+            cluster_articles=cluster_articles,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
 
     async def save_to_db(self, plan: ClusterPlan, site_id: Optional[str], db_session, factual_mode: str = "default", region: str = "ru") -> str:
         """

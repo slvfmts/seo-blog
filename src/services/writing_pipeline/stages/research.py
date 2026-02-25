@@ -1015,14 +1015,70 @@ class ResearchStage(WritingStage):
                     if question:
                         all_keywords.add(question)
 
+        # ── Topvisor deep research for pillar articles ──
+        is_pillar = context.config.get("brief", {}).get("role") == "pillar"
+        topvisor_client = context.config.get("_topvisor_client")
+        if is_pillar and topvisor_client:
+            try:
+                import asyncio as _asyncio
+                logger.info("Pillar article: running Topvisor keyword research")
+                await topvisor_client.import_keywords(
+                    keywords=[context.topic],
+                    group_name="pillar-research",
+                )
+                is_ru = context.region.lower() in ("ru", "russia", "kz")
+                await topvisor_client.research_keywords(
+                    seed_keywords=[context.topic],
+                    region_key=213 if is_ru else 2840,
+                    searcher_key=0 if is_ru else 1,
+                )
+                await _asyncio.sleep(20)
+                kw_data = await topvisor_client.get_keywords(
+                    fields=["name"],
+                    limit=2000,
+                )
+                for kw in kw_data:
+                    name = kw.get("name", "").strip()
+                    if name:
+                        all_keywords.add(name)
+                logger.info(f"Topvisor pillar research: {len(all_keywords)} total keywords")
+            except Exception as e:
+                logger.warning(f"Topvisor pillar research failed: {e}")
+
         # Skip if too few keywords
         if len(all_keywords) < 5:
             logger.info(f"Skipping keyword clustering: only {len(all_keywords)} keywords")
             return None, 0, 0, 0
 
+        # ── Keyword filter: rules + fuzzy dedup + optional LLM ──
+        from .keyword_filter import KeywordFilter
+
+        volume_map = {}
+        if context.keyword_metrics:
+            for kw in all_keywords:
+                vol = context.keyword_metrics.get_volume(kw)
+                if vol > 0:
+                    volume_map[kw.lower().strip()] = vol
+
+        lang = "ru" if context.region.lower() in ("ru", "russia", "kz") else "en"
+        use_llm_filter = context.config.get("keyword_filter_llm", True)
+
+        kw_filter = KeywordFilter(client=self.client, model=self.model)
+        filtered_keywords = kw_filter.filter(
+            keywords=all_keywords,
+            topic=context.topic,
+            language=lang,
+            volume_map=volume_map,
+            use_llm=use_llm_filter,
+        )
+
+        if len(filtered_keywords) < 5:
+            logger.info(f"Too few keywords after filter ({len(filtered_keywords)}), using unfiltered")
+            filtered_keywords = list(all_keywords)
+
         # Build keywords list with volume if available
         keywords_data = []
-        for kw in all_keywords:
+        for kw in filtered_keywords:
             entry = {"keyword": kw}
             if context.keyword_metrics:
                 vol = context.keyword_metrics.get_volume(kw)

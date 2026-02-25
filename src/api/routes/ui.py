@@ -206,7 +206,24 @@ def _make_volume_provider(bs: dict, region: str = "ru"):
     s.yandex_wordstat_api_key = bs.get("yandex_wordstat_api_key", "")
     s.yandex_cloud_folder_id = bs.get("yandex_cloud_folder_id", "")
     s.rush_analytics_api_key = bs.get("rush_analytics_api_key", "")
+    s.topvisor_user_id = bs.get("topvisor_user_id", "")
+    s.topvisor_access_token = bs.get("topvisor_access_token", "")
+    s.topvisor_project_id = bs.get("topvisor_project_id", 0)
     return get_volume_provider(region, s)
+
+
+def _make_topvisor_client():
+    """Create a TopvisorClient from global settings, or None if not configured."""
+    from src.config.settings import get_settings
+    settings = get_settings()
+    if settings.topvisor_access_token and settings.topvisor_user_id and settings.topvisor_project_id:
+        from src.services.writing_pipeline.data_sources.topvisor_client import TopvisorClient
+        return TopvisorClient(
+            user_id=settings.topvisor_user_id,
+            access_token=settings.topvisor_access_token,
+            project_id=settings.topvisor_project_id,
+        )
+    return None
 
 
 def _render(request: Request, db: Session, template: str, ctx: dict):
@@ -1352,10 +1369,13 @@ async def discover_clusters_for_topic(
         region = topic.country or "ru"
         volume_provider = _make_volume_provider(bs, region)
 
+        tv_client = _make_topvisor_client()
         planner = ClusterPlanner(
             anthropic_client=client,
             serper_api_key=bs["serper_api_key"],
             volume_provider=volume_provider,
+            topvisor_client=tv_client,
+            use_serp_clustering=bool(tv_client),
         )
 
         niche_boundaries = topic.niche_boundaries if topic.niche_boundaries else None
@@ -1426,10 +1446,13 @@ async def plan_discovered_cluster(
         region = cluster.region or "ru"
         volume_provider = _make_volume_provider(bs, region)
 
+        tv_client = _make_topvisor_client()
         planner = ClusterPlanner(
             anthropic_client=client,
             serper_api_key=bs["serper_api_key"],
             volume_provider=volume_provider,
+            topvisor_client=tv_client,
+            use_serp_clustering=bool(tv_client),
         )
 
         # Load KB docs from topic
@@ -3065,10 +3088,13 @@ async def cluster_plan_submit(
         client = _make_anthropic_client(bs)
         volume_provider = _make_volume_provider(bs, region)
 
+        tv_client = _make_topvisor_client()
         planner = ClusterPlanner(
             anthropic_client=client,
             serper_api_key=bs["serper_api_key"],
             volume_provider=volume_provider,
+            topvisor_client=tv_client,
+            use_serp_clustering=bool(tv_client),
         )
 
         # Load KB docs: from selected folders first, fallback to site's folders

@@ -142,6 +142,18 @@ class PipelineRunner:
             s.yandex_cloud_folder_id = self.yandex_cloud_folder_id
             s.rush_analytics_api_key = self.rush_analytics_api_key
 
+            # Try to load Topvisor settings
+            try:
+                from ....config.settings import get_settings
+                real = get_settings()
+                s.topvisor_user_id = real.topvisor_user_id
+                s.topvisor_access_token = real.topvisor_access_token
+                s.topvisor_project_id = real.topvisor_project_id
+            except Exception:
+                s.topvisor_user_id = ""
+                s.topvisor_access_token = ""
+                s.topvisor_project_id = 0
+
             # Default to "ru" — actual region is applied per-run in research stage
             return get_volume_provider("ru", s)
         except Exception as e:
@@ -194,6 +206,20 @@ class PipelineRunner:
         # Pass brief into config for stages to consume
         if brief:
             pipeline_config["brief"] = brief
+
+        # Initialize Topvisor client if configured
+        try:
+            from ....config.settings import get_settings
+            _s = get_settings()
+            if _s.topvisor_access_token and _s.topvisor_user_id and _s.topvisor_project_id:
+                from ..data_sources.topvisor_client import TopvisorClient
+                pipeline_config["_topvisor_client"] = TopvisorClient(
+                    user_id=_s.topvisor_user_id,
+                    access_token=_s.topvisor_access_token,
+                    project_id=_s.topvisor_project_id,
+                )
+        except Exception:
+            pass
 
         # Fetch existing posts from Ghost for cluster overlap analysis
         existing_posts = []

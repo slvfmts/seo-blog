@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # Rush Analytics (alternative RU volumes, Pro+ plan)
     rush_analytics_api_key: str = ""
 
+    # Topvisor (volume checking, keyword research, SERP clustering)
+    topvisor_user_id: str = ""
+    topvisor_access_token: str = ""
+    topvisor_project_id: int = 0
+
     # OpenAI (DALL-E covers)
     openai_api_key: str = ""
     openai_proxy_url: str = ""  # Cloudflare Worker URL для обхода geo-блокировки OpenAI
