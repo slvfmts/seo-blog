@@ -243,7 +243,7 @@ img {
     .post-grid > :nth-child(n+3) {
         order: 2;
     }
-    .grid-banner {
+    .post-grid > .grid-banner {
         order: 1;
     }
 }
