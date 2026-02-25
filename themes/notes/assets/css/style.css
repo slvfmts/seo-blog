@@ -130,7 +130,8 @@ img {
    ======================== */
 .grid-banner {
     grid-column: span 2;
-    background: #eef0f1;
+    background: #fff;
+    border: 1px solid #e5e5e5;
     border-radius: 16px;
     overflow: hidden;
     display: flex;
@@ -188,7 +189,7 @@ img {
 }
 
 .grid-banner-btn {
-    padding: 10px 20px;
+    padding: 12px 32px;
     background: #1a1a1a;
     color: #fff;
     border: none;
