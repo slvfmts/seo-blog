@@ -424,7 +424,7 @@ class TopvisorClient:
             }],
         }
         result = await self._post("get/keywords_2/volumes/price", body)
-        return float(result.get("result", 0) if isinstance(result, dict) else result or 0)
+        return self._extract_price(result)
 
     async def get_collection_price(
         self,
@@ -442,7 +442,24 @@ class TopvisorClient:
             }],
         }
         result = await self._post("get/keywords_2/collect/price", body)
-        return float(result.get("result", 0) if isinstance(result, dict) else result or 0)
+        return self._extract_price(result)
+
+    @staticmethod
+    def _extract_price(response: dict) -> float:
+        """Extract price from Topvisor price API response.
+
+        Response format: {"result": {"pricesByUsers": {"<user_id>": {"price": 0.02, ...}}}}
+        """
+        try:
+            inner = response.get("result", {})
+            if isinstance(inner, dict):
+                by_users = inner.get("pricesByUsers", {})
+                if by_users:
+                    first_user = next(iter(by_users.values()))
+                    return float(first_user.get("price", 0))
+            return float(inner) if inner else 0.0
+        except (TypeError, ValueError, StopIteration):
+            return 0.0
 
 
 class TopvisorError(Exception):
