@@ -11,7 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import RedirectResponse as StarletteRedirect
 
 from src.config import get_settings
-from src.api.routes import health, sites, articles, briefs, ui, discovery, monitoring, iterations
+from src.api.routes import health, sites, articles, briefs, ui, discovery, monitoring, iterations, subscribe
 
 
 # Paths that don't require authentication
@@ -106,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(discovery.router, prefix="/api/v1/discovery", tags=["discovery"])
     app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"])
     app.include_router(iterations.router, prefix="/api/v1/iterations", tags=["iterations"])
+    app.include_router(subscribe.router, tags=["subscribe"])
 
     # UI Роуты
     app.include_router(ui.router, prefix="/ui", tags=["ui"])

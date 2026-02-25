@@ -126,15 +126,122 @@ img {
 }
 
 /* ========================
-   Grid Banner (course promo)
+   Grid Banner (lead magnet)
    ======================== */
 .grid-banner {
     grid-column: span 2;
-    background: #ededfa;
+    background: #f5f5f5;
     border-radius: 16px;
     padding: 28px 32px;
     display: flex;
     align-items: center;
+}
+
+.grid-banner-inner {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    width: 100%;
+}
+
+.grid-banner-image {
+    width: 140px;
+    height: auto;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.grid-banner-content {
+    flex: 1;
+}
+
+.grid-banner-title {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+}
+
+.grid-banner-text {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    color: #555;
+    margin: 0 0 16px;
+}
+
+.grid-banner-form-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.grid-banner-input {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    background: #fff;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.grid-banner-input:focus {
+    border-color: #999;
+}
+
+.grid-banner-btn {
+    padding: 10px 20px;
+    background: #1a1a1a;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+}
+
+.grid-banner-btn:hover {
+    background: #333;
+}
+
+.grid-banner-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.grid-banner-consent {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    color: #888;
+    cursor: pointer;
+}
+
+.grid-banner-consent input {
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.grid-banner-consent a {
+    color: #555;
+    text-decoration: underline;
+}
+
+.grid-banner-success p {
+    font-family: 'Inter', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a1a;
 }
 
 @media (max-width: 900px) {
@@ -152,18 +259,25 @@ img {
         padding: 20px;
     }
 
-    .grid-banner .promo-banner-inner {
+    .grid-banner-inner {
         flex-direction: column;
         text-align: center;
     }
 
-    .grid-banner .promo-banner-image {
-        width: 80px;
+    .grid-banner-image {
+        width: 100px;
     }
 
-    .grid-banner .promo-banner-btn {
+    .grid-banner-form-row {
+        flex-direction: column;
+    }
+
+    .grid-banner-btn {
         width: 100%;
-        text-align: center;
+    }
+
+    .grid-banner-consent {
+        justify-content: center;
     }
 }
 

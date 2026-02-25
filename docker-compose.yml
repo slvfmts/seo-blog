@@ -18,6 +18,7 @@ services:
     depends_on:
       - ghost
       - ghost-2
+      - api
     networks:
       - internal
 
