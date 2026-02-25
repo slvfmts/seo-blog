@@ -143,6 +143,7 @@ img {
     height: 180px;
     object-fit: contain;
     object-position: left center;
+    background: #eceef0;
 }
 
 .grid-banner-content {
