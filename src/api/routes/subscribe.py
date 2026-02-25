@@ -2,10 +2,11 @@
 Email subscription endpoint — adds contact to Unisender list.
 """
 
+import re
 import httpx
 import logging
-from fastapi import APIRouter, Request
-from pydantic import BaseModel, EmailStr
+from fastapi import APIRouter
+from pydantic import BaseModel, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +15,19 @@ router = APIRouter()
 UNISENDER_API_KEY = "***REDACTED***"
 UNISENDER_LIST_ID = "606"
 
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+
 
 class SubscribeRequest(BaseModel):
-    email: EmailStr
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not _EMAIL_RE.match(v):
+            raise ValueError("invalid email")
+        return v
 
 
 @router.post("/api/subscribe")
