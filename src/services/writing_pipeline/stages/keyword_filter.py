@@ -65,6 +65,7 @@ class KeywordFilter:
         volume_map: Optional[dict[str, int]] = None,
         use_llm: bool = True,
         llm_threshold: int = 50,
+        niche_context: Optional[dict] = None,
     ) -> list[str]:
         """
         Full filter pipeline: rules → dedup → optional LLM.
@@ -94,7 +95,7 @@ class KeywordFilter:
         # Level 3: LLM relevance filter (optional)
         after_llm = after_dedup
         if use_llm and self.client and len(kw_list) > llm_threshold:
-            kw_list = self._llm_filter(kw_list, topic, language)
+            kw_list = self._llm_filter(kw_list, topic, language, niche_context)
             after_llm = len(kw_list)
 
         logger.info(
@@ -239,7 +240,7 @@ class KeywordFilter:
 
     # ── Level 3: LLM batch filter ────────────────────────────────────
 
-    def _llm_filter(self, keywords: list[str], topic: str, language: str) -> list[str]:
+    def _llm_filter(self, keywords: list[str], topic: str, language: str, niche_context: Optional[dict] = None) -> list[str]:
         """
         Send numbered list to LLM, get back indices of relevant keywords.
 
@@ -259,11 +260,25 @@ class KeywordFilter:
             logger.warning("keyword_relevance_filter_v1.txt not found, skipping LLM filter")
             return keywords
 
+        # Build niche context block for prompt
+        niche_block = ""
+        if niche_context:
+            parts = [f"## Контекст ниши: {niche_context.get('site_name', '')}"]
+            if niche_context.get("include"):
+                parts.append(f"Ниша включает: {', '.join(niche_context['include'])}")
+            if niche_context.get("exclude"):
+                parts.append(f"НЕ включает: {', '.join(niche_context['exclude'])}")
+            if niche_context.get("target_audience"):
+                parts.append(f"ЦА: {niche_context['target_audience']}")
+            parts.append("ВАЖНО: Оставляй ТОЛЬКО ключевые слова, релевантные этой нише.")
+            niche_block = "\n".join(parts)
+
         # Build numbered list
         numbered = "\n".join(f"{i+1}. {kw}" for i, kw in enumerate(keywords))
 
         prompt = template.replace("{{topic}}", topic)
         prompt = prompt.replace("{{language}}", language)
+        prompt = prompt.replace("{{niche_context}}", niche_block)
         prompt = prompt.replace("{{numbered_keywords}}", numbered)
 
         try:

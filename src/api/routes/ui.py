@@ -1440,7 +1440,7 @@ async def plan_discovered_cluster(
         )
 
     try:
-        from src.services.cluster_planner import ClusterPlanner
+        from src.services.cluster_planner import ClusterPlanner, NicheContext
 
         client = _make_anthropic_client(bs)
         region = cluster.region or "ru"
@@ -1455,8 +1455,9 @@ async def plan_discovered_cluster(
             use_serp_clustering=bool(tv_client),
         )
 
-        # Load KB docs from topic
+        # Load KB docs from topic + build niche context
         kb_docs = []
+        niche_ctx = None
         if topic_id:
             topic = db.query(models.Site).filter(models.Site.id == topic_id).first()
             if topic:
@@ -1469,12 +1470,22 @@ async def plan_discovered_cluster(
                                 "content_text": doc.content_text,
                                 "word_count": doc.word_count or 0,
                             })
+                # Build niche context
+                boundaries = topic.niche_boundaries or {}
+                niche_ctx = NicheContext(
+                    site_name=topic.name,
+                    cluster_description=cluster.description or "",
+                    include_topics=boundaries.get("include", []),
+                    exclude_topics=boundaries.get("exclude", []),
+                    target_audience=boundaries.get("target_audience", ""),
+                )
 
         plan = await planner.plan(
             big_topic=cluster.name,
             region=region,
             target_count=10,
             knowledge_base_docs=kb_docs if kb_docs else None,
+            niche_context=niche_ctx,
         )
 
         if not plan.cluster_articles:
@@ -3083,7 +3094,7 @@ async def cluster_plan_submit(
         resolved_site_id = site_id.strip()
 
     try:
-        from src.services.cluster_planner import ClusterPlanner
+        from src.services.cluster_planner import ClusterPlanner, NicheContext
 
         client = _make_anthropic_client(bs)
         volume_provider = _make_volume_provider(bs, region)
@@ -3100,6 +3111,7 @@ async def cluster_plan_submit(
         # Load KB docs: from selected folders first, fallback to site's folders
         kb_docs = []
         selected_folders = []
+        niche_ctx = None
         if folder_ids:
             selected_folders = db.query(models.KnowledgeFolder).filter(
                 models.KnowledgeFolder.id.in_(folder_ids),
@@ -3113,24 +3125,35 @@ async def cluster_plan_submit(
                             "content_text": doc.content_text,
                             "word_count": doc.word_count or 0,
                         })
-        elif resolved_site_id:
+        if resolved_site_id:
             site = db.query(models.Site).filter(models.Site.id == resolved_site_id).first()
             if site:
-                for folder in site.knowledge_folders:
-                    for doc in folder.documents:
-                        if doc.content_text:
-                            kb_docs.append({
-                                "id": str(doc.id),
-                                "title": doc.original_filename,
-                                "content_text": doc.content_text,
-                                "word_count": doc.word_count or 0,
-                            })
+                if not kb_docs:
+                    for folder in site.knowledge_folders:
+                        for doc in folder.documents:
+                            if doc.content_text:
+                                kb_docs.append({
+                                    "id": str(doc.id),
+                                    "title": doc.original_filename,
+                                    "content_text": doc.content_text,
+                                    "word_count": doc.word_count or 0,
+                                })
+                # Build niche context from site boundaries
+                boundaries = site.niche_boundaries or {}
+                niche_ctx = NicheContext(
+                    site_name=site.name,
+                    cluster_description="",
+                    include_topics=boundaries.get("include", []),
+                    exclude_topics=boundaries.get("exclude", []),
+                    target_audience=boundaries.get("target_audience", ""),
+                )
 
         plan = await planner.plan(
             big_topic=big_topic,
             region=region,
             target_count=target_count,
             knowledge_base_docs=kb_docs if kb_docs else None,
+            niche_context=niche_ctx,
         )
 
         # Save to DB (site_id can be None)

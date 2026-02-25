@@ -23,6 +23,7 @@ import json
 import logging
 import asyncio
 import re
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import uuid4
@@ -33,6 +34,31 @@ import httpx
 from .writing_pipeline.contracts import ArticleBrief, ClusterPlan
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class NicheContext:
+    site_name: str
+    cluster_description: str = ""
+    include_topics: list[str] = field(default_factory=list)
+    exclude_topics: list[str] = field(default_factory=list)
+    target_audience: str = ""
+
+    def to_prompt_block(self) -> str:
+        """Build a Russian-language niche context block for LLM prompts."""
+        lines = [f"## Контекст ниши: {self.site_name}"]
+        if self.cluster_description:
+            lines.append(f"Описание кластера: {self.cluster_description}")
+        if self.include_topics:
+            lines.append(f"Ниша включает: {', '.join(self.include_topics)}")
+        if self.exclude_topics:
+            lines.append(f"НЕ включает: {', '.join(self.exclude_topics)}")
+        if self.target_audience:
+            lines.append(f"ЦА: {self.target_audience}")
+        lines.append(
+            "ВАЖНО: Все подтемы и ключевые слова ДОЛЖНЫ быть в контексте этой ниши."
+        )
+        return "\n".join(lines)
 
 
 class ClusterPlanner:
@@ -66,6 +92,7 @@ class ClusterPlanner:
         target_count: int = 15,
         site_id: Optional[str] = None,
         knowledge_base_docs: Optional[List[dict]] = None,
+        niche_context: Optional["NicheContext"] = None,
     ) -> ClusterPlan:
         """
         Generate a full cluster plan using search-first approach.
@@ -170,12 +197,21 @@ class ClusterPlanner:
         from .writing_pipeline.stages.keyword_filter import KeywordFilter
         kw_filter = KeywordFilter(client=self.client, model=self.model)
         lang = "ru" if region.lower() in ("ru", "russia", "kz") else "en"
+        kw_filter_niche = None
+        if niche_context:
+            kw_filter_niche = {
+                "site_name": niche_context.site_name,
+                "include": niche_context.include_topics,
+                "exclude": niche_context.exclude_topics,
+                "target_audience": niche_context.target_audience,
+            }
         filtered_list = kw_filter.filter(
             keywords=list(all_keywords),
             topic=big_topic,
             language=lang,
             use_llm=True,
             llm_threshold=50,
+            niche_context=kw_filter_niche,
         )
         all_keywords = set(filtered_list)
         logger.info(f"Step 2.5: filtered to {len(all_keywords)} keywords")
@@ -190,6 +226,7 @@ class ClusterPlanner:
         plan = await self._cluster_and_brief(
             big_topic, region, kw_with_volumes, competitor_headings,
             search_data["paa_questions"], target_count, knowledge_base_docs,
+            niche_context,
         )
 
         # Attach all discovered keywords with volumes to plan
@@ -428,6 +465,7 @@ class ClusterPlanner:
         paa_questions: list[str],
         target_count: int,
         knowledge_base_docs: Optional[List[dict]] = None,
+        niche_context: Optional["NicheContext"] = None,
     ) -> ClusterPlan:
         """Step 4: LLM clusters REAL keywords and generates briefs."""
 
@@ -435,7 +473,7 @@ class ClusterPlanner:
         if self.use_serp_clustering and self.topvisor_client and len(kw_with_volumes) > 50:
             try:
                 plan = await self._serp_cluster_and_brief(
-                    big_topic, region, kw_with_volumes, target_count,
+                    big_topic, region, kw_with_volumes, target_count, niche_context,
                 )
                 if plan and plan.cluster_articles:
                     return plan
@@ -485,11 +523,15 @@ class ClusterPlanner:
 {chr(10).join(kb_snippets)}
 """
 
+        niche_block = ""
+        if niche_context:
+            niche_block = "\n" + niche_context.to_prompt_block() + "\n"
+
         today = datetime.now().strftime("%Y-%m-%d")
         prompt = f"""Ты SEO-стратег. На основе РЕАЛЬНЫХ данных из поиска создай кластерный план для темы "{big_topic}" (регион: {region}).
 
 Сегодня: {today}
-
+{niche_block}
 ## Реальные ключевые слова с объёмами из поиска ({len(top_keywords)} шт.):
 {json.dumps(top_keywords[:200], ensure_ascii=False, indent=2)}
 {competitor_section}{paa_section}{kb_section}
@@ -798,8 +840,18 @@ class ClusterPlanner:
         )
         db_session.add(pillar_brief)
 
-        # Create briefs for cluster articles
+        # Create briefs for cluster articles (skip duplicates by target_keyword)
+        seen_target_kw = set()
+        pillar_target = (plan.pillar.target_terms[0] if plan.pillar.target_terms else plan.big_topic).lower().strip()
+        seen_target_kw.add(pillar_target)
+
         for article in plan.cluster_articles:
+            target_kw = (article.target_terms[0] if article.target_terms else article.title_candidate).lower().strip()
+            if target_kw in seen_target_kw:
+                logger.warning(f"Skipping duplicate brief: {target_kw}")
+                continue
+            seen_target_kw.add(target_kw)
+
             brief = Brief(
                 id=uuid4(),
                 site_id=site_id,
@@ -902,6 +954,7 @@ class ClusterPlanner:
         region: str,
         kw_with_volumes: list[dict],
         target_count: int,
+        niche_context: Optional["NicheContext"] = None,
     ) -> Optional[ClusterPlan]:
         """
         SERP-based clustering via Topvisor + LLM brief generation.
@@ -995,6 +1048,10 @@ class ClusterPlanner:
         prompt = template.replace("{{big_topic}}", big_topic)
         prompt = prompt.replace("{{region}}", region)
         prompt = prompt.replace("{{target_count}}", str(target_count))
+        prompt = prompt.replace(
+            "{{niche_context}}",
+            niche_context.to_prompt_block() if niche_context else "",
+        )
         prompt = prompt.replace(
             "{{groups_json}}",
             json.dumps(groups_for_prompt, ensure_ascii=False, indent=2),
