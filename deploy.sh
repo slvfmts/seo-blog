@@ -10,7 +10,7 @@ case "${1:-prod}" in
     ;;
   staging)
     echo "=== Deploying STAGING (dev) ==="
-    ssh $SERVER "cd /opt/seo-blog-staging && git pull origin dev && docker compose build api-staging && docker compose up -d api-staging"
+    ssh $SERVER "cd /opt/seo-blog-staging && git pull origin dev && docker compose -f docker-compose.staging.yml build api-staging && docker compose -f docker-compose.staging.yml up -d api-staging"
     ;;
   *)
     echo "Usage: ./deploy.sh [prod|staging]"
