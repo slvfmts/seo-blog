@@ -339,25 +339,36 @@ img {
 }
 
 /* ========================
-   Pagination
+   Load More
    ======================== */
-.pagination {
+.load-more-wrap {
     max-width: 1200px;
     margin: 0 auto;
     padding: 0 24px 64px;
-    display: flex;
-    justify-content: space-between;
+    text-align: center;
 }
 
-.pagination a {
+.load-more-btn {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 15px;
     font-weight: 600;
     color: #555;
-    transition: color 0.15s;
+    background: none;
+    border: 1px solid #ddd;
+    padding: 12px 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
 }
 
-.pagination a:hover {
+.load-more-btn:hover {
     color: #1a1a1a;
+    border-color: #999;
+}
+
+.load-more-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
 }
 
 /* ========================

@@ -57,13 +57,45 @@
     {{/foreach}}
 </div>
 
-{{#if pagination.pages}}
-<nav class="pagination">
-    {{#if pagination.prev}}
-        <a href="{{pagination.prev}}" class="pagination-prev">&larr; Новее</a>
-    {{/if}}
-    {{#if pagination.next}}
-        <a href="{{pagination.next}}" class="pagination-next">Старее &rarr;</a>
-    {{/if}}
-</nav>
+{{#if pagination.next}}
+<div class="load-more-wrap">
+    <button class="load-more-btn" data-next="{{page_url pagination.next}}">Ещё статьи</button>
+</div>
 {{/if}}
+
+<script>
+(function() {
+    var btn = document.querySelector('.load-more-btn');
+    if (!btn) return;
+    var grid = document.querySelector('.post-grid');
+
+    btn.addEventListener('click', function() {
+        var url = btn.getAttribute('data-next');
+        if (!url) return;
+
+        btn.textContent = 'Загрузка…';
+        btn.disabled = true;
+
+        fetch(url)
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                var doc = new DOMParser().parseFromString(html, 'text/html');
+                var cards = doc.querySelectorAll('.post-grid .post-card');
+                cards.forEach(function(card) { grid.appendChild(card); });
+
+                var nextBtn = doc.querySelector('.load-more-btn');
+                if (nextBtn) {
+                    btn.setAttribute('data-next', nextBtn.getAttribute('data-next'));
+                    btn.textContent = 'Ещё статьи';
+                    btn.disabled = false;
+                } else {
+                    btn.parentElement.remove();
+                }
+            })
+            .catch(function() {
+                btn.textContent = 'Ошибка, попробуйте снова';
+                btn.disabled = false;
+            });
+    });
+})();
+</script>
