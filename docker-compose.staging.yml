@@ -1,0 +1,43 @@
+services:
+  api-staging:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    shm_size: '256m'
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql://seo:seopass@postgres:5432/seoblog_staging
+      REDIS_URL: redis://redis:6379/1
+      GHOST_URL: http://ghost:2368
+      GHOST_ADMIN_KEY: ${GHOST_ADMIN_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_PROXY_URL: ${ANTHROPIC_PROXY_URL}
+      ANTHROPIC_PROXY_SECRET: ${ANTHROPIC_PROXY_SECRET}
+      SERPER_API_KEY: ${SERPER_API_KEY}
+      DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN}
+      DATAFORSEO_PASSWORD: ${DATAFORSEO_PASSWORD}
+      SECRET_KEY: ${SECRET_KEY}
+      AUTH_EMAIL: ${AUTH_EMAIL}
+      AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_PROXY_URL: ${OPENAI_PROXY_URL}
+      YANDEX_WORDSTAT_API_KEY: ${YANDEX_WORDSTAT_API_KEY:-}
+      YANDEX_CLOUD_FOLDER_ID: ${YANDEX_CLOUD_FOLDER_ID:-}
+      RUSH_ANALYTICS_API_KEY: ${RUSH_ANALYTICS_API_KEY:-}
+      JINA_API_KEY: ${JINA_API_KEY:-}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
+    volumes:
+      - ./src:/app/src
+      - uploads-staging:/data/uploads
+    networks:
+      - seo-blog
+
+networks:
+  seo-blog:
+    external: true
+    name: seo-blog_internal
+
+volumes:
+  uploads-staging:
