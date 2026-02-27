@@ -34,7 +34,7 @@
 **Команды деплоя:**
 - `./deploy.sh staging` — деплой staging (dev → /opt/seo-blog-staging)
 - `./deploy.sh prod` — деплой прод (main → /opt/seo-blog)
-- `./deploy-theme.sh` — деплой темы Ghost
+- `./deploy-theme.sh` — деплой темы Ghost (сразу в prod, Ghost-инстанс один, staging нет)
 
 **Runtime:**
 - Volume mount `./src:/app/src` — `git pull` обновляет код без рестарта контейнера
