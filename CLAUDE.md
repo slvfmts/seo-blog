@@ -17,12 +17,26 @@
 
 ---
 
-## Сервер и деплой
+## Git workflow и деплой
 
-- **Сервер:** `root@95.163.230.43`
-- **Путь:** `/opt/seo-blog`
-- **Деплой:** `ssh root@95.163.230.43 "cd /opt/seo-blog && git pull && docker compose build && docker compose up -d"`
-- **Claude деплоит самостоятельно, без вопросов и уточнений.**
+**Сервер:** `root@95.163.230.43`
+
+**Серверная схема:**
+- `/opt/seo-blog` — **prod** (ветка `main`)
+- `/opt/seo-blog-staging` — **staging** (ветка `dev`)
+
+**Git workflow:**
+- **По умолчанию работаю на `dev`**, не на `main`
+- Коммичу и пушу в `dev` (или feature branch → merge в `dev`)
+- В `main` — только merge из `dev` по команде пользователя ("кати в прод", "деплой прод")
+- Claude деплоит самостоятельно, без вопросов и уточнений
+
+**Команды деплоя:**
+- `./deploy.sh staging` — деплой staging (dev → /opt/seo-blog-staging)
+- `./deploy.sh prod` — деплой прод (main → /opt/seo-blog)
+- `./deploy-theme.sh` — деплой темы Ghost
+
+**Runtime:**
 - Volume mount `./src:/app/src` — `git pull` обновляет код без рестарта контейнера
 - НО: уже импортированные Python-модули не перезагружаются до рестарта uvicorn
 - Полный рестарт: `docker compose down && docker compose up -d` (убивает фоновые задачи!)
