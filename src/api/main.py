@@ -15,15 +15,23 @@ from src.api.routes import health, sites, articles, briefs, ui, discovery, monit
 
 
 # Paths that don't require authentication
-_PUBLIC_PREFIXES = ("/ui/login", "/health", "/docs", "/openapi.json", "/api/", "/redoc")
+_PUBLIC_PREFIXES = ("/ui/login", "/health", "/docs", "/openapi.json", "/api/subscribe", "/redoc")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Redirect unauthenticated /ui/ requests to login page. Enforce blog selection."""
+    """Redirect unauthenticated /ui/ requests to login page. Reject unauthenticated /api/v1/ requests."""
 
     async def dispatch(self, request, call_next):
         path = request.url.path
-        # Only protect /ui/* paths (except login itself)
+
+        # Protect /api/v1/* paths with session auth (return 401 instead of redirect)
+        if path.startswith("/api/v1/"):
+            user = request.session.get("user")
+            if not user:
+                from starlette.responses import JSONResponse
+                return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+        # Protect /ui/* paths (except login itself)
         if path.startswith("/ui/") or path == "/ui":
             if not any(path.startswith(p) for p in _PUBLIC_PREFIXES):
                 user = request.session.get("user")
@@ -92,8 +100,8 @@ def create_app() -> FastAPI:
     # CORS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=[],  # Same-origin app (Jinja2 UI + API), no cross-origin needed
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )

@@ -2,6 +2,7 @@
 Email subscription endpoint — adds contact to Unisender list.
 """
 
+import os
 import re
 import httpx
 import logging
@@ -12,8 +13,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-UNISENDER_API_KEY = "***REDACTED***"
-UNISENDER_LIST_ID = "606"
+UNISENDER_API_KEY = os.getenv("UNISENDER_API_KEY", "")
+UNISENDER_LIST_ID = os.getenv("UNISENDER_LIST_ID", "606")
 
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 
