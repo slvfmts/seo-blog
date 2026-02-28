@@ -1,0 +1,4 @@
+#!/bin/sh
+# Gitleaks pre-commit hook — prevents committing secrets
+gitleaks git --pre-commit --staged --verbose 2>&1
+exit $?
