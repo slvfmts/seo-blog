@@ -5,6 +5,8 @@
 > Читай его когда нужны: схема БД, контракты агентов, валидационные гейты,
 > диаграммы потоков, конфигурации, план развития, оценка стоимости.
 
+> Полная документация проекта: `/dev/knowledge-base/scripts/seo-blog/README.md`
+
 ---
 
 ## Суть проекта
@@ -137,6 +139,15 @@ AUTH_EMAIL=<email>                 # Login email
 AUTH_PASSWORD_HASH=<bcrypt_hash>   # bcrypt password hash
 SECRET_KEY=<key>                   # Session secret
 ```
+
+---
+
+## Клиентские проекты
+
+- **Veyra** (AI voice-ассистенты для корпораций):
+  - Скрипты keyword research: `veyra/research.py`, `veyra/rush_research.py`
+  - Документация и стратегия: `~/wip/veyra/seo/`
+  - Контекст проекта: `~/wip/veyra/` (CLAUDE.md, case-angles.md, расшифровки)
 
 ---
 
