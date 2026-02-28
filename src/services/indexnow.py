@@ -4,11 +4,13 @@ IndexNow — мгновенное уведомление поисковиков 
 """
 
 import logging
+import os
+
 import httpx
 
 logger = logging.getLogger(__name__)
 
-INDEXNOW_KEY = "***REDACTED***"
+INDEXNOW_KEY = os.getenv("INDEXNOW_KEY", "")
 INDEXNOW_ENDPOINTS = [
     "https://yandex.com/indexnow",
     "https://www.bing.com/indexnow",

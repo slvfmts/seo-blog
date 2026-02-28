@@ -10,14 +10,17 @@ import json
 import hmac
 import hashlib
 import base64
+import os
 import requests
 from datetime import datetime
 from pathlib import Path
 
 
 # Ghost конфигурация
-GHOST_URL = "http://95.163.230.43"
-GHOST_ADMIN_KEY = "***REDACTED***"
+GHOST_URL = os.getenv("GHOST_URL", "http://95.163.230.43")
+GHOST_ADMIN_KEY = os.getenv("GHOST_ADMIN_KEY", "")
+if not GHOST_ADMIN_KEY:
+    raise ValueError("GHOST_ADMIN_KEY env var is required (format: key_id:secret)")
 
 
 def base64url_encode(data: bytes) -> str:

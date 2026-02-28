@@ -19,8 +19,10 @@ import httpx
 import anthropic
 
 # Ghost-2 via HTTPS (ghost redirects HTTP→HTTPS, admin API needs direct HTTPS)
-GHOST_URL = "https://notes.editors.one"
-GHOST_ADMIN_KEY = "***REDACTED***"
+GHOST_URL = os.environ.get("GHOST_URL_PROD", "https://notes.editors.one")
+GHOST_ADMIN_KEY = os.environ.get("GHOST_ADMIN_KEY_PROD", "")
+if not GHOST_ADMIN_KEY:
+    raise ValueError("GHOST_ADMIN_KEY_PROD env var is required (format: key_id:secret)")
 
 # LLM / Image — from env
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
