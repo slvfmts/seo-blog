@@ -108,6 +108,8 @@ services:
       YANDEX_CLOUD_FOLDER_ID: ${YANDEX_CLOUD_FOLDER_ID:-}
       RUSH_ANALYTICS_API_KEY: ${RUSH_ANALYTICS_API_KEY:-}
       JINA_API_KEY: ${JINA_API_KEY:-}
+      INDEXNOW_KEY: ${INDEXNOW_KEY:-}
+      UNISENDER_API_KEY: ${UNISENDER_API_KEY:-}
       UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
     volumes:
       - ./src:/app/src
