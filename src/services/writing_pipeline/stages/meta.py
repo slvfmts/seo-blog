@@ -74,6 +74,11 @@ class MetaStage(WritingStage):
             if len(meta.meta_description) > 160:
                 meta.meta_description = meta.meta_description[:157] + "..."
 
+            # Derive OG/excerpt from meta (no extra LLM call)
+            meta.og_title = meta.meta_title
+            meta.og_description = meta.meta_description
+            meta.custom_excerpt = meta.meta_description
+
             # Step 2: Build Schema.org JSON-LD (programmatic, no LLM)
             schema_json_ld = self._build_schema_jsonld(context, meta)
             meta.schema_json_ld = schema_json_ld

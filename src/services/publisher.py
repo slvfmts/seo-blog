@@ -301,6 +301,9 @@ class GhostPublisher:
         status: str = "published",
         feature_image: str = None,
         feature_image_alt: str = None,
+        og_title: str = None,
+        og_description: str = None,
+        custom_excerpt: str = None,
     ) -> dict:
         """Публикует статью в Ghost."""
 
@@ -336,6 +339,17 @@ class GhostPublisher:
             post_data["posts"][0]["feature_image"] = feature_image
         if feature_image_alt:
             post_data["posts"][0]["feature_image_alt"] = feature_image_alt
+        # OG fields with fallback to meta (so non-pipeline drafts also get OG).
+        # Use `is not None` to allow intentional empty-string clearing.
+        effective_og_title = og_title if og_title is not None else meta_title
+        effective_og_description = og_description if og_description is not None else meta_description
+        effective_excerpt = custom_excerpt if custom_excerpt is not None else meta_description
+        if effective_og_title:
+            post_data["posts"][0]["og_title"] = effective_og_title
+        if effective_og_description:
+            post_data["posts"][0]["og_description"] = effective_og_description
+        if effective_excerpt:
+            post_data["posts"][0]["custom_excerpt"] = effective_excerpt
         # JSON-LD and other scripts go to Ghost's code injection footer
         all_scripts = '\n'.join(filter(None, [schema_json_ld, extracted_scripts]))
         if all_scripts.strip():

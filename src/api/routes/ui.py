@@ -1940,6 +1940,12 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
     blog = _resolve_blog(request, db, draft=draft)
     bs = resolve_blog_settings(blog, settings)
 
+    # Warn-only meta validation
+    from src.services.validators.meta import validate_meta_before_publish
+    meta_warnings = validate_meta_before_publish(draft)
+    if meta_warnings:
+        logger.warning("Pre-publish meta warnings for draft %s: %s", draft_id, "; ".join(meta_warnings))
+
     # Atomically mark as publishing to prevent double-submit
     draft.status = "publishing"
     db.commit()
@@ -1955,6 +1961,9 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
             status="published",
             feature_image=draft.cover_image_url or None,
             feature_image_alt=draft.cover_image_alt or None,
+            og_title=draft.og_title,
+            og_description=draft.og_description,
+            custom_excerpt=draft.custom_excerpt,
         )
 
         if result["success"]:
@@ -2237,6 +2246,9 @@ def _resume_pipeline_for_draft(draft_id: str, settings, paused_at: str):
                 d.word_count = len(context.edited_md.split()) if context.edited_md else 0
                 d.meta_title = context.meta.meta_title if context.meta else None
                 d.meta_description = context.meta.meta_description if context.meta else None
+                d.og_title = context.meta.og_title if context.meta else None
+                d.og_description = context.meta.og_description if context.meta else None
+                d.custom_excerpt = context.meta.custom_excerpt if context.meta else None
                 if context.formatting_result:
                     d.cover_image_url = getattr(context.formatting_result, 'cover_ghost_url', '') or ''
                     d.cover_image_alt = getattr(context.formatting_result, 'cover_image_alt', '') or ''
@@ -2570,6 +2582,9 @@ def run_pipeline_sync(draft_id: str, topic: str, region: str, output_dir: str, k
             draft.meta_title = result.meta.meta_title
             draft.meta_description = result.meta.meta_description
             draft.slug = result.meta.slug
+            draft.og_title = result.meta.og_title
+            draft.og_description = result.meta.og_description
+            draft.custom_excerpt = result.meta.custom_excerpt
 
         # Save token usage
         draft.total_input_tokens = result.total_input_tokens
@@ -3719,6 +3734,9 @@ def _run_pipeline_for_brief(
                 d.word_count = len(context.edited_md.split()) if context.edited_md else 0
                 d.meta_title = context.meta.meta_title if context.meta else None
                 d.meta_description = context.meta.meta_description if context.meta else None
+                d.og_title = context.meta.og_title if context.meta else None
+                d.og_description = context.meta.og_description if context.meta else None
+                d.custom_excerpt = context.meta.custom_excerpt if context.meta else None
                 if context.formatting_result:
                     d.cover_image_url = getattr(context.formatting_result, 'cover_ghost_url', '') or ''
                     d.cover_image_alt = getattr(context.formatting_result, 'cover_image_alt', '') or ''

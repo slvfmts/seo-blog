@@ -1353,6 +1353,9 @@ class MetaResult:
     meta_description: str  # ≤160 chars, contains keyword + CTA
     slug: str  # lowercase, hyphens, 3-5 words
     schema_json_ld: Optional[str] = None  # JSON-LD structured data
+    og_title: Optional[str] = None  # ≤95 chars, OG title for social sharing
+    og_description: Optional[str] = None  # ≤200 chars, OG description
+    custom_excerpt: Optional[str] = None  # ≤300 chars, Ghost custom excerpt
 
     @classmethod
     def from_dict(cls, data: dict) -> "MetaResult":
@@ -1361,6 +1364,9 @@ class MetaResult:
             meta_description=data["meta_description"],
             slug=data["slug"],
             schema_json_ld=data.get("schema_json_ld"),
+            og_title=data.get("og_title"),
+            og_description=data.get("og_description"),
+            custom_excerpt=data.get("custom_excerpt"),
         )
 
     def to_dict(self) -> dict:
@@ -1369,6 +1375,9 @@ class MetaResult:
             "meta_description": self.meta_description,
             "slug": self.slug,
             "schema_json_ld": self.schema_json_ld,
+            "og_title": self.og_title,
+            "og_description": self.og_description,
+            "custom_excerpt": self.custom_excerpt,
         }
 
 

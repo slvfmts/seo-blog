@@ -2,6 +2,7 @@
 API endpoints для генерации и публикации статей.
 """
 
+import logging
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -12,6 +13,8 @@ from src.db import models
 from src.services.generator import ArticleGenerator
 from src.services.publisher import GhostPublisher
 from src.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -128,6 +131,12 @@ async def publish_article(draft_id: UUID, db: Session = Depends(get_db)):
     if not ghost_admin_key:
         raise HTTPException(status_code=500, detail="GHOST_ADMIN_KEY not configured")
 
+    # Warn-only meta validation
+    from src.services.validators.meta import validate_meta_before_publish
+    meta_warnings = validate_meta_before_publish(draft)
+    if meta_warnings:
+        logger.warning("Pre-publish meta warnings for draft %s: %s", draft_id, "; ".join(meta_warnings))
+
     publisher = GhostPublisher(ghost_url, ghost_admin_key)
     result = publisher.publish(
         title=draft.title,
@@ -136,6 +145,9 @@ async def publish_article(draft_id: UUID, db: Session = Depends(get_db)):
         meta_title=draft.meta_title,
         meta_description=draft.meta_description,
         status="published",
+        og_title=draft.og_title,
+        og_description=draft.og_description,
+        custom_excerpt=draft.custom_excerpt,
     )
 
     if result["success"]:

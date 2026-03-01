@@ -190,17 +190,81 @@ class TestMetaResult:
             meta_description="A complete guide to SEO optimization.",
             slug="seo-guide",
             schema_json_ld='{"@type":"Article"}',
+            og_title="OG SEO Guide",
+            og_description="OG description for social sharing.",
+            custom_excerpt="Custom excerpt for Ghost CMS.",
         )
         data = original.to_dict()
         restored = MetaResult.from_dict(data)
         assert restored.meta_title == original.meta_title
         assert restored.slug == original.slug
         assert restored.schema_json_ld == original.schema_json_ld
+        assert restored.og_title == original.og_title
+        assert restored.og_description == original.og_description
+        assert restored.custom_excerpt == original.custom_excerpt
 
     def test_from_dict_no_schema(self):
         data = {"meta_title": "T", "meta_description": "D", "slug": "t"}
         result = MetaResult.from_dict(data)
         assert result.schema_json_ld is None
+
+    def test_from_dict_backward_compat(self):
+        """Old MetaResult dicts without og/excerpt fields deserialize without errors."""
+        data = {"meta_title": "T", "meta_description": "D", "slug": "s", "schema_json_ld": None}
+        result = MetaResult.from_dict(data)
+        assert result.og_title is None
+        assert result.og_description is None
+        assert result.custom_excerpt is None
+
+
+# =============================================================================
+# Meta Validation
+# =============================================================================
+
+class TestValidateMetaBeforePublish:
+    """Tests for pre-publish meta validation."""
+
+    def _make_draft(self, **kwargs):
+        """Helper: create a simple namespace with draft-like attrs."""
+        from types import SimpleNamespace
+        defaults = {"meta_title": "A" * 45, "meta_description": "B" * 120, "slug": "valid-slug"}
+        defaults.update(kwargs)
+        return SimpleNamespace(**defaults)
+
+    def _validate(self, draft):
+        from src.services.validators.meta import validate_meta_before_publish
+        return validate_meta_before_publish(draft)
+
+    def test_all_valid(self):
+        assert self._validate(self._make_draft()) == []
+
+    def test_missing_meta_title(self):
+        w = self._validate(self._make_draft(meta_title=None))
+        assert len(w) == 1 and "meta_title is missing" in w[0]
+
+    def test_meta_title_too_short(self):
+        w = self._validate(self._make_draft(meta_title="Short"))
+        assert "outside 30-60" in w[0]
+
+    def test_meta_title_too_long(self):
+        w = self._validate(self._make_draft(meta_title="X" * 65))
+        assert "outside 30-60" in w[0]
+
+    def test_missing_meta_description(self):
+        w = self._validate(self._make_draft(meta_description=None))
+        assert "meta_description is missing" in w[0]
+
+    def test_meta_description_too_short(self):
+        w = self._validate(self._make_draft(meta_description="Short"))
+        assert "outside 80-160" in w[0]
+
+    def test_missing_slug(self):
+        w = self._validate(self._make_draft(slug=None))
+        assert "slug is missing" in w[0]
+
+    def test_all_missing(self):
+        w = self._validate(self._make_draft(meta_title=None, meta_description=None, slug=None))
+        assert len(w) == 3
 
 
 # =============================================================================

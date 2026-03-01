@@ -161,6 +161,9 @@ class Draft(Base):
 
     meta_title = Column(String(70))
     meta_description = Column(String(160))
+    og_title = Column(String(95), nullable=True)
+    og_description = Column(String(200), nullable=True)
+    custom_excerpt = Column(String(300), nullable=True)
 
     # Генерация
     topic = Column(String(500))
