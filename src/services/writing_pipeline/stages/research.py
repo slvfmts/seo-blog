@@ -386,8 +386,11 @@ class ResearchStage(WritingStage):
         import httpx
 
         results = []
-        gl = "ru" if context.region.lower() in ["ru", "россия", "russia"] else "us"
-        hl = "ru" if context.region.lower() in ["ru", "россия", "russia"] else "en"
+        is_russian = context.region.lower() in ["ru", "россия", "russia"]
+        # Use gl=us even for Russian queries: gl=ru returns 0 PAA/Related.
+        # gl=us + hl=ru returns Russian-language PAA and Related Searches.
+        gl = "us"
+        hl = "ru" if is_russian else "en"
 
         async with httpx.AsyncClient() as client:
             for query in context.queries.queries:
@@ -409,12 +412,16 @@ class ResearchStage(WritingStage):
                     response.raise_for_status()
                     serp_data = response.json()
 
+                    paa = serp_data.get("peopleAlsoAsk", []) or []
+                    related = serp_data.get("relatedSearches", []) or []
+                    logger.info(f"Serper PAA={len(paa)}, Related={len(related)} for '{query.query}'")
+
                     results.append({
                         "query": query.query,
                         "purpose": query.purpose,
                         "organic": serp_data.get("organic", []),
-                        "peopleAlsoAsk": serp_data.get("peopleAlsoAsk", []),
-                        "relatedSearches": serp_data.get("relatedSearches", []),
+                        "peopleAlsoAsk": paa,
+                        "relatedSearches": related,
                     })
                 except Exception as e:
                     logger.error(f"Search error for '{query.query}': {e}")
@@ -463,7 +470,8 @@ class ResearchStage(WritingStage):
 
         # Execute PAA searches
         results = []
-        gl = "ru" if context.region.lower() in ["ru", "россия", "russia"] else "us"
+        # gl=us + hl=ru for Russian PAA (gl=ru returns 0 PAA/Related)
+        gl = "us"
         hl = "ru" if context.region.lower() in ["ru", "россия", "russia"] else "en"
 
         async with httpx.AsyncClient() as client:
