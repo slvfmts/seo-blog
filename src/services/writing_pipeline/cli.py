@@ -126,6 +126,12 @@ async def main():
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         openai_proxy_url=os.getenv("OPENAI_PROXY_URL", ""),
         residential_proxy_url=os.getenv("RESIDENTIAL_PROXY_URL", ""),
+        yandex_wordstat_api_key=os.getenv("YANDEX_WORDSTAT_API_KEY", ""),
+        yandex_cloud_folder_id=os.getenv("YANDEX_CLOUD_FOLDER_ID", ""),
+        rush_analytics_api_key=os.getenv("RUSH_ANALYTICS_API_KEY", ""),
+        topvisor_user_id=os.getenv("TOPVISOR_USER_ID", ""),
+        topvisor_access_token=os.getenv("TOPVISOR_ACCESS_TOKEN", ""),
+        topvisor_project_id=int(os.getenv("TOPVISOR_PROJECT_ID", "0") or "0"),
     )
 
     # Pipeline configuration

@@ -64,7 +64,7 @@ class TestVolumeProviderRouting:
         )
         provider = get_volume_provider("ru", settings)
         # Composite with topvisor as secondary
-        assert "wordstat" in provider.source_name
+        assert provider.source_name == "wordstat+topvisor"
 
     def test_ru_all_three_prefers_topvisor_over_rush(self):
         """When all 3 available, Wordstat+Topvisor wins (Rush ignored)."""
@@ -78,7 +78,7 @@ class TestVolumeProviderRouting:
         )
         provider = get_volume_provider("ru", settings)
         # Should be composite with topvisor, not rush
-        assert "wordstat" in provider.source_name
+        assert provider.source_name == "wordstat+topvisor"
 
     def test_us_returns_null_provider(self):
         settings = _settings(yandex_wordstat_api_key="test-key")

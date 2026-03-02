@@ -1,7 +1,10 @@
 """
-CompositeVolumeProvider — queries Yandex Wordstat + Rush Analytics in parallel, merges results.
+CompositeVolumeProvider — queries two volume providers in parallel, merges results.
 
-- volume = max(yandex_volume, google_volume) for sorting/filtering
+Primary: Yandex Wordstat (broad-match) → stored as yandex_volume
+Secondary: Topvisor or Rush Analytics → stored as google_volume
+
+- volume = max(yandex_volume, secondary_volume) for sorting/filtering
 - yandex_volume / google_volume stored separately
 - If one provider fails, data from the other is still returned
 - get_suggestions() collects from both, deduplicates
@@ -18,10 +21,11 @@ logger = logging.getLogger(__name__)
 
 class CompositeVolumeProvider(VolumeProvider):
     """
-    Merges Yandex Wordstat (yandex_volume) + Rush Analytics (google_volume).
+    Merges primary (Wordstat) + secondary (Topvisor or Rush) volume data.
 
-    Rush returns Yandex Wordstat data too, but with exact-match frequency.
-    Yandex gives broad-match. Both are useful — we keep both and use max for sorting.
+    Primary gives broad-match Yandex volume.
+    Secondary gives additional volume data (stored as google_volume for backwards compat).
+    Both are useful — we keep both and use max for sorting.
     """
 
     def __init__(
@@ -30,9 +34,9 @@ class CompositeVolumeProvider(VolumeProvider):
         rush_provider: Optional[VolumeProvider] = None,
     ):
         self.wordstat = wordstat_provider
-        self.rush = rush_provider
+        self.secondary = rush_provider  # Topvisor or Rush
 
-        if not self.wordstat and not self.rush:
+        if not self.wordstat and not self.secondary:
             raise ValueError("CompositeVolumeProvider needs at least one sub-provider")
 
     @property
@@ -40,8 +44,8 @@ class CompositeVolumeProvider(VolumeProvider):
         parts = []
         if self.wordstat:
             parts.append(self.wordstat.source_name)
-        if self.rush:
-            parts.append(self.rush.source_name)
+        if self.secondary:
+            parts.append(self.secondary.source_name)
         return "+".join(parts)
 
     async def get_volumes(self, keywords: list[str], language_code: str = "ru") -> list[VolumeResult]:
@@ -51,9 +55,10 @@ class CompositeVolumeProvider(VolumeProvider):
         # Run both providers in parallel
         tasks = {}
         if self.wordstat:
-            tasks["wordstat"] = self.wordstat.get_volumes(keywords, language_code)
-        if self.rush:
-            tasks["rush"] = self.rush.get_volumes(keywords, language_code)
+            tasks["primary"] = self.wordstat.get_volumes(keywords, language_code)
+        if self.secondary:
+            secondary_name = self.secondary.source_name
+            tasks[secondary_name] = self.secondary.get_volumes(keywords, language_code)
 
         results_map = {}
         gathered = await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -65,49 +70,49 @@ class CompositeVolumeProvider(VolumeProvider):
             else:
                 results_map[name] = result
 
-        wordstat_results = results_map.get("wordstat")
-        rush_results = results_map.get("rush")
+        primary_results = results_map.get("primary")
+        secondary_name = self.secondary.source_name if self.secondary else None
+        secondary_results = results_map.get(secondary_name) if secondary_name else None
 
         # Merge into composite VolumeResult
         merged = []
         for i, kw in enumerate(keywords):
             ws_vol = 0
-            rush_vol = 0
+            sec_vol = 0
             difficulty = 0.0
             cpc = 0.0
             competition = 0.0
             competition_level = "LOW"
 
-            if wordstat_results and i < len(wordstat_results):
-                ws = wordstat_results[i]
+            if primary_results and i < len(primary_results):
+                ws = primary_results[i]
                 ws_vol = ws.volume
 
-            if rush_results and i < len(rush_results):
-                rs = rush_results[i]
-                rush_vol = rs.volume
-                # Rush may provide difficulty/cpc from its data
-                difficulty = rs.difficulty
-                cpc = rs.cpc
-                competition = rs.competition
-                competition_level = rs.competition_level
+            if secondary_results and i < len(secondary_results):
+                sr = secondary_results[i]
+                sec_vol = sr.volume
+                difficulty = sr.difficulty
+                cpc = sr.cpc
+                competition = sr.competition
+                competition_level = sr.competition_level
 
             merged.append(VolumeResult(
                 keyword=kw,
-                volume=max(ws_vol, rush_vol),  # use max for sorting/filtering
+                volume=max(ws_vol, sec_vol),  # use max for sorting/filtering
                 source=self.source_name,
                 difficulty=difficulty,
                 cpc=cpc,
                 competition=competition,
                 competition_level=competition_level,
                 yandex_volume=ws_vol,
-                google_volume=rush_vol,
+                google_volume=sec_vol,
             ))
 
         found = sum(1 for r in merged if r.volume > 0)
         logger.info(
             f"CompositeVolumeProvider: {found}/{len(merged)} keywords with volume "
-            f"(wordstat: {'OK' if wordstat_results else 'FAIL'}, "
-            f"rush: {'OK' if rush_results else 'FAIL'})"
+            f"(primary: {'OK' if primary_results else 'FAIL'}, "
+            f"{secondary_name or 'secondary'}: {'OK' if secondary_results else 'FAIL'})"
         )
         return merged
 
@@ -116,8 +121,8 @@ class CompositeVolumeProvider(VolumeProvider):
         tasks = []
         if self.wordstat:
             tasks.append(self.wordstat.get_suggestions(keyword))
-        if self.rush:
-            tasks.append(self.rush.get_suggestions(keyword))
+        if self.secondary:
+            tasks.append(self.secondary.get_suggestions(keyword))
 
         if not tasks:
             return []

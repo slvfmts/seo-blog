@@ -171,7 +171,7 @@ class TestTopvisorRouting:
 
         provider = get_volume_provider("ru", settings)
         # Wordstat + Topvisor both available → composite
-        assert "wordstat" in provider.source_name
+        assert provider.source_name == "wordstat+topvisor"
 
     def test_topvisor_not_used_without_creds(self):
         settings = MagicMock()

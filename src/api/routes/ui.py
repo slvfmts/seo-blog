@@ -11,7 +11,7 @@ import traceback
 import uuid as uuid_lib
 from uuid import UUID
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, BackgroundTasks, UploadFile, File
@@ -315,7 +315,7 @@ async def create_blog(
     rush_analytics_api_key: str = Form(""),
     topvisor_user_id: str = Form(""),
     topvisor_access_token: str = Form(""),
-    topvisor_project_id: int = Form(0),
+    topvisor_project_id: Optional[int] = Form(None),
     openai_api_key: str = Form(""),
     openai_proxy_url: str = Form(""),
     residential_proxy_url: str = Form(""),
@@ -395,7 +395,7 @@ async def update_blog(
     rush_analytics_api_key: str = Form(""),
     topvisor_user_id: str = Form(""),
     topvisor_access_token: str = Form(""),
-    topvisor_project_id: int = Form(0),
+    topvisor_project_id: Optional[int] = Form(None),
     openai_api_key: str = Form(""),
     openai_proxy_url: str = Form(""),
     residential_proxy_url: str = Form(""),
