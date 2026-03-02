@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     # OpenAI (DALL-E covers)
     openai_api_key: str = ""
     openai_proxy_url: str = ""  # Cloudflare Worker URL для обхода geo-блокировки OpenAI
+    openai_proxy_secret: str = ""  # x-proxy-token for OpenAI proxy (same as Anthropic proxy secret)
 
     # Residential SOCKS5 proxy (Mac Mini via SSH tunnel)
     residential_proxy_url: str = ""
