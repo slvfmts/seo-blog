@@ -60,6 +60,9 @@ class PipelineRunner:
         yandex_wordstat_api_key: Optional[str] = None,
         yandex_cloud_folder_id: Optional[str] = None,
         rush_analytics_api_key: Optional[str] = None,
+        topvisor_user_id: Optional[str] = None,
+        topvisor_access_token: Optional[str] = None,
+        topvisor_project_id: Optional[int] = None,
     ):
         """
         Initialize the pipeline runner.
@@ -98,6 +101,9 @@ class PipelineRunner:
         self.yandex_wordstat_api_key = yandex_wordstat_api_key or ""
         self.yandex_cloud_folder_id = yandex_cloud_folder_id or ""
         self.rush_analytics_api_key = rush_analytics_api_key or ""
+        self.topvisor_user_id = topvisor_user_id or ""
+        self.topvisor_access_token = topvisor_access_token or ""
+        self.topvisor_project_id = topvisor_project_id or 0
 
         # Initialize internal linker if database_url is provided
         self.linker = None
@@ -141,18 +147,9 @@ class PipelineRunner:
             s.yandex_wordstat_api_key = self.yandex_wordstat_api_key
             s.yandex_cloud_folder_id = self.yandex_cloud_folder_id
             s.rush_analytics_api_key = self.rush_analytics_api_key
-
-            # Try to load Topvisor settings
-            try:
-                from ....config.settings import get_settings
-                real = get_settings()
-                s.topvisor_user_id = real.topvisor_user_id
-                s.topvisor_access_token = real.topvisor_access_token
-                s.topvisor_project_id = real.topvisor_project_id
-            except Exception:
-                s.topvisor_user_id = ""
-                s.topvisor_access_token = ""
-                s.topvisor_project_id = 0
+            s.topvisor_user_id = self.topvisor_user_id
+            s.topvisor_access_token = self.topvisor_access_token
+            s.topvisor_project_id = self.topvisor_project_id
 
             # Default to "ru" — actual region is applied per-run in research stage
             return get_volume_provider("ru", s)
@@ -208,18 +205,16 @@ class PipelineRunner:
             pipeline_config["brief"] = brief
 
         # Initialize Topvisor client if configured
-        try:
-            from ....config.settings import get_settings
-            _s = get_settings()
-            if _s.topvisor_access_token and _s.topvisor_user_id and _s.topvisor_project_id:
+        if self.topvisor_access_token and self.topvisor_user_id and self.topvisor_project_id:
+            try:
                 from ..data_sources.topvisor_client import TopvisorClient
                 pipeline_config["_topvisor_client"] = TopvisorClient(
-                    user_id=_s.topvisor_user_id,
-                    access_token=_s.topvisor_access_token,
-                    project_id=_s.topvisor_project_id,
+                    user_id=self.topvisor_user_id,
+                    access_token=self.topvisor_access_token,
+                    project_id=self.topvisor_project_id,
                 )
-        except Exception:
-            pass
+            except Exception:
+                pass
 
         # Fetch existing posts from Ghost for cluster overlap analysis
         existing_posts = []

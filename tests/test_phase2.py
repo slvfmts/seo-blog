@@ -55,7 +55,7 @@ class TestMetaResult(unittest.TestCase):
         self.assertEqual(d["meta_title"], "Title")
         self.assertEqual(d["meta_description"], "Desc")
         self.assertEqual(d["slug"], "test-slug")
-        self.assertEqual(set(d.keys()), {"meta_title", "meta_description", "slug", "schema_json_ld"})
+        self.assertEqual(set(d.keys()), {"meta_title", "meta_description", "slug", "schema_json_ld", "og_title", "og_description", "custom_excerpt"})
 
     def test_from_dict(self):
         data = {
@@ -224,6 +224,7 @@ class TestMetaPromptTemplate(unittest.TestCase):
         filled = filled.replace("{{audience_role}}", "freelancer")
         filled = filled.replace("{{article_title}}", "Заголовок статьи")
         filled = filled.replace("{{article_md}}", "# Заголовок\n\nТекст статьи.")
+        filled = filled.replace("{{target_keyword}}", "тестовое ключевое слово")
 
         self.assertNotIn("{{", filled)
         self.assertIn("Тестовая тема", filled)

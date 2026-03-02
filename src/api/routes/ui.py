@@ -141,6 +141,9 @@ def resolve_blog_settings(blog, settings) -> dict:
         "yandex_wordstat_api_key": (blog.yandex_wordstat_api_key if blog and blog.yandex_wordstat_api_key else None) or settings.yandex_wordstat_api_key,
         "yandex_cloud_folder_id": (blog.yandex_cloud_folder_id if blog and blog.yandex_cloud_folder_id else None) or settings.yandex_cloud_folder_id,
         "rush_analytics_api_key": (blog.rush_analytics_api_key if blog and blog.rush_analytics_api_key else None) or settings.rush_analytics_api_key,
+        "topvisor_user_id": (blog.topvisor_user_id if blog and blog.topvisor_user_id else None) or settings.topvisor_user_id,
+        "topvisor_access_token": (blog.topvisor_access_token if blog and blog.topvisor_access_token else None) or settings.topvisor_access_token,
+        "topvisor_project_id": (blog.topvisor_project_id if blog and blog.topvisor_project_id else None) or settings.topvisor_project_id,
         "openai_api_key": (blog.openai_api_key if blog and blog.openai_api_key else None) or settings.openai_api_key,
         "openai_proxy_url": (blog.openai_proxy_url if blog and blog.openai_proxy_url else None) or settings.openai_proxy_url,
         "residential_proxy_url": (blog.residential_proxy_url if blog and blog.residential_proxy_url else None) or settings.residential_proxy_url,
@@ -212,16 +215,24 @@ def _make_volume_provider(bs: dict, region: str = "ru"):
     return get_volume_provider(region, s)
 
 
-def _make_topvisor_client():
-    """Create a TopvisorClient from global settings, or None if not configured."""
-    from src.config.settings import get_settings
-    settings = get_settings()
-    if settings.topvisor_access_token and settings.topvisor_user_id and settings.topvisor_project_id:
+def _make_topvisor_client(bs: dict = None):
+    """Create a TopvisorClient from blog settings (with global fallback), or None."""
+    if bs:
+        token = bs.get("topvisor_access_token", "")
+        user_id = bs.get("topvisor_user_id", "")
+        project_id = bs.get("topvisor_project_id", 0)
+    else:
+        from src.config.settings import get_settings
+        settings = get_settings()
+        token = settings.topvisor_access_token
+        user_id = settings.topvisor_user_id
+        project_id = settings.topvisor_project_id
+    if token and user_id and project_id:
         from src.services.writing_pipeline.data_sources.topvisor_client import TopvisorClient
         return TopvisorClient(
-            user_id=settings.topvisor_user_id,
-            access_token=settings.topvisor_access_token,
-            project_id=settings.topvisor_project_id,
+            user_id=user_id,
+            access_token=token,
+            project_id=project_id,
         )
     return None
 
@@ -302,6 +313,9 @@ async def create_blog(
     yandex_wordstat_api_key: str = Form(""),
     yandex_cloud_folder_id: str = Form(""),
     rush_analytics_api_key: str = Form(""),
+    topvisor_user_id: str = Form(""),
+    topvisor_access_token: str = Form(""),
+    topvisor_project_id: int = Form(0),
     openai_api_key: str = Form(""),
     openai_proxy_url: str = Form(""),
     residential_proxy_url: str = Form(""),
@@ -336,6 +350,9 @@ async def create_blog(
         yandex_wordstat_api_key=yandex_wordstat_api_key.strip() or None,
         yandex_cloud_folder_id=yandex_cloud_folder_id.strip() or None,
         rush_analytics_api_key=rush_analytics_api_key.strip() or None,
+        topvisor_user_id=topvisor_user_id.strip() or None,
+        topvisor_access_token=topvisor_access_token.strip() or None,
+        topvisor_project_id=topvisor_project_id or None,
         openai_api_key=openai_api_key.strip() or None,
         openai_proxy_url=openai_proxy_url.strip() or None,
         residential_proxy_url=residential_proxy_url.strip() or None,
@@ -376,6 +393,9 @@ async def update_blog(
     yandex_wordstat_api_key: str = Form(""),
     yandex_cloud_folder_id: str = Form(""),
     rush_analytics_api_key: str = Form(""),
+    topvisor_user_id: str = Form(""),
+    topvisor_access_token: str = Form(""),
+    topvisor_project_id: int = Form(0),
     openai_api_key: str = Form(""),
     openai_proxy_url: str = Form(""),
     residential_proxy_url: str = Form(""),
@@ -416,6 +436,9 @@ async def update_blog(
     blog.yandex_wordstat_api_key = yandex_wordstat_api_key.strip() or None
     blog.yandex_cloud_folder_id = yandex_cloud_folder_id.strip() or None
     blog.rush_analytics_api_key = rush_analytics_api_key.strip() or None
+    blog.topvisor_user_id = topvisor_user_id.strip() or None
+    blog.topvisor_access_token = topvisor_access_token.strip() or None
+    blog.topvisor_project_id = topvisor_project_id or None
     blog.openai_api_key = openai_api_key.strip() or None
     blog.openai_proxy_url = openai_proxy_url.strip() or None
     blog.residential_proxy_url = residential_proxy_url.strip() or None
@@ -1369,7 +1392,7 @@ async def discover_clusters_for_topic(
         region = topic.country or "ru"
         volume_provider = _make_volume_provider(bs, region)
 
-        tv_client = _make_topvisor_client()
+        tv_client = _make_topvisor_client(bs)
         planner = ClusterPlanner(
             anthropic_client=client,
             serper_api_key=bs["serper_api_key"],
@@ -1446,7 +1469,7 @@ async def plan_discovered_cluster(
         region = cluster.region or "ru"
         volume_provider = _make_volume_provider(bs, region)
 
-        tv_client = _make_topvisor_client()
+        tv_client = _make_topvisor_client(bs)
         planner = ClusterPlanner(
             anthropic_client=client,
             serper_api_key=bs["serper_api_key"],
@@ -3114,7 +3137,7 @@ async def cluster_plan_submit(
         client = _make_anthropic_client(bs)
         volume_provider = _make_volume_provider(bs, region)
 
-        tv_client = _make_topvisor_client()
+        tv_client = _make_topvisor_client(bs)
         planner = ClusterPlanner(
             anthropic_client=client,
             serper_api_key=bs["serper_api_key"],
@@ -3595,6 +3618,9 @@ def _create_runner_from_bs(bs: dict):
         yandex_wordstat_api_key=bs.get("yandex_wordstat_api_key", ""),
         yandex_cloud_folder_id=bs.get("yandex_cloud_folder_id", ""),
         rush_analytics_api_key=bs.get("rush_analytics_api_key", ""),
+        topvisor_user_id=bs.get("topvisor_user_id", ""),
+        topvisor_access_token=bs.get("topvisor_access_token", ""),
+        topvisor_project_id=bs.get("topvisor_project_id", 0),
     )
 
 

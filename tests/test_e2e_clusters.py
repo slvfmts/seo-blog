@@ -310,6 +310,9 @@ class TestVolumeProviderFactory:
         settings.yandex_wordstat_api_key = "fake-yandex-key"
         settings.yandex_cloud_folder_id = "fake-folder"
         settings.rush_analytics_api_key = ""
+        settings.topvisor_access_token = ""
+        settings.topvisor_user_id = ""
+        settings.topvisor_project_id = 0
 
         provider = get_volume_provider("ru", settings)
         assert provider.source_name == "wordstat"
@@ -319,6 +322,9 @@ class TestVolumeProviderFactory:
         settings.yandex_wordstat_api_key = ""
         settings.yandex_cloud_folder_id = ""
         settings.rush_analytics_api_key = "fake-rush-key"
+        settings.topvisor_access_token = ""
+        settings.topvisor_user_id = ""
+        settings.topvisor_project_id = 0
 
         provider = get_volume_provider("ru", settings)
         assert provider.source_name == "rush"
@@ -337,6 +343,9 @@ class TestVolumeProviderFactory:
         settings.yandex_wordstat_api_key = ""
         settings.yandex_cloud_folder_id = ""
         settings.rush_analytics_api_key = ""
+        settings.topvisor_access_token = ""
+        settings.topvisor_user_id = ""
+        settings.topvisor_project_id = 0
 
         provider = get_volume_provider("ru", settings)
         assert provider.source_name == "none"

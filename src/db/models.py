@@ -38,6 +38,10 @@ class Blog(Base):
     yandex_wordstat_api_key = Column(String(500), nullable=True)
     yandex_cloud_folder_id = Column(String(500), nullable=True)
     rush_analytics_api_key = Column(String(500), nullable=True)
+    # Topvisor (per-blog project isolation)
+    topvisor_user_id = Column(String(255), nullable=True)
+    topvisor_access_token = Column(String(500), nullable=True)
+    topvisor_project_id = Column(Integer, nullable=True)
     # Image generation
     openai_api_key = Column(String(500), nullable=True)
     openai_proxy_url = Column(String(500), nullable=True)

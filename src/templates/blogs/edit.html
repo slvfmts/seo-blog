@@ -105,6 +105,23 @@
                            class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm" placeholder="Inherits from env">
                 </div>
 
+                <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4">Topvisor</h4>
+                <div>
+                    <label class="block text-xs text-gray-600 mb-1">Topvisor User ID</label>
+                    <input type="text" name="topvisor_user_id" value="{{ blog.topvisor_user_id or '' }}"
+                           class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm" placeholder="Inherits from env">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-600 mb-1">Topvisor Access Token</label>
+                    <input type="text" name="topvisor_access_token" value="{{ blog.topvisor_access_token or '' }}"
+                           class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm" placeholder="Inherits from env">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-600 mb-1">Topvisor Project ID</label>
+                    <input type="number" name="topvisor_project_id" value="{{ blog.topvisor_project_id or '' }}"
+                           class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm" placeholder="Inherits from env">
+                </div>
+
                 <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4">Images</h4>
                 <div>
                     <label class="block text-xs text-gray-600 mb-1">OpenAI API Key</label>

@@ -425,8 +425,8 @@ class ClusterPlanner:
             # Batch in chunks of 10 with pause to avoid rate limits
             volume_map = {}
             batch_size = 10
-            for i in range(0, len(keywords), batch_size):
-                chunk = keywords[i:i + batch_size]
+            for i in range(0, len(valid_keywords), batch_size):
+                chunk = valid_keywords[i:i + batch_size]
                 try:
                     results = await self.volume_provider.get_volumes(chunk, language_code=language_code)
                     for vr in results:

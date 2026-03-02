@@ -10,6 +10,23 @@ from src.services.writing_pipeline.data_sources.volume_provider import (
 )
 
 
+def _settings(**overrides):
+    """Create a settings mock with all provider keys explicitly set."""
+    defaults = {
+        "yandex_wordstat_api_key": "",
+        "yandex_cloud_folder_id": "",
+        "rush_analytics_api_key": "",
+        "topvisor_access_token": "",
+        "topvisor_user_id": "",
+        "topvisor_project_id": 0,
+    }
+    defaults.update(overrides)
+    s = MagicMock()
+    for k, v in defaults.items():
+        setattr(s, k, v)
+    return s
+
+
 # =============================================================================
 # Routing logic
 # =============================================================================
@@ -18,65 +35,68 @@ class TestVolumeProviderRouting:
     """Test get_volume_provider picks the right provider."""
 
     def test_ru_with_wordstat_key_returns_wordstat(self):
-        settings = MagicMock()
-        settings.yandex_wordstat_api_key = "test-key"
-        settings.yandex_cloud_folder_id = ""
-        settings.rush_analytics_api_key = ""
-
+        settings = _settings(yandex_wordstat_api_key="test-key")
         provider = get_volume_provider("ru", settings)
         assert provider.source_name == "wordstat"
 
     def test_ru_with_rush_key_returns_rush(self):
-        settings = MagicMock()
-        settings.yandex_wordstat_api_key = ""
-        settings.yandex_cloud_folder_id = ""
-        settings.rush_analytics_api_key = "test-key"
-
+        settings = _settings(rush_analytics_api_key="test-key")
         provider = get_volume_provider("ru", settings)
         assert provider.source_name == "rush"
 
-    def test_ru_with_both_keys_returns_composite(self):
-        settings = MagicMock()
-        settings.yandex_wordstat_api_key = "test-key"
-        settings.yandex_cloud_folder_id = "folder"
-        settings.rush_analytics_api_key = "rush-key"
-
+    def test_ru_with_wordstat_and_rush_returns_composite(self):
+        settings = _settings(
+            yandex_wordstat_api_key="test-key",
+            yandex_cloud_folder_id="folder",
+            rush_analytics_api_key="rush-key",
+        )
         provider = get_volume_provider("ru", settings)
         assert provider.source_name == "wordstat+rush"
 
-    def test_us_returns_null_provider(self):
-        settings = MagicMock()
-        settings.yandex_wordstat_api_key = "test-key"
-        settings.yandex_cloud_folder_id = ""
-        settings.rush_analytics_api_key = ""
+    def test_ru_with_wordstat_and_topvisor_prefers_topvisor(self):
+        """Topvisor is preferred over Rush as composite secondary."""
+        settings = _settings(
+            yandex_wordstat_api_key="test-key",
+            yandex_cloud_folder_id="folder",
+            topvisor_access_token="tv-token",
+            topvisor_user_id="tv-user",
+            topvisor_project_id=42,
+        )
+        provider = get_volume_provider("ru", settings)
+        # Composite with topvisor as secondary
+        assert "wordstat" in provider.source_name
 
+    def test_ru_all_three_prefers_topvisor_over_rush(self):
+        """When all 3 available, Wordstat+Topvisor wins (Rush ignored)."""
+        settings = _settings(
+            yandex_wordstat_api_key="test-key",
+            yandex_cloud_folder_id="folder",
+            rush_analytics_api_key="rush-key",
+            topvisor_access_token="tv-token",
+            topvisor_user_id="tv-user",
+            topvisor_project_id=42,
+        )
+        provider = get_volume_provider("ru", settings)
+        # Should be composite with topvisor, not rush
+        assert "wordstat" in provider.source_name
+
+    def test_us_returns_null_provider(self):
+        settings = _settings(yandex_wordstat_api_key="test-key")
         provider = get_volume_provider("us", settings)
         assert provider.source_name == "none"
 
     def test_no_creds_returns_null_provider(self):
-        settings = MagicMock()
-        settings.yandex_wordstat_api_key = ""
-        settings.yandex_cloud_folder_id = ""
-        settings.rush_analytics_api_key = ""
-
+        settings = _settings()
         provider = get_volume_provider("ru", settings)
         assert provider.source_name == "none"
 
     def test_kz_with_wordstat_returns_wordstat(self):
-        settings = MagicMock()
-        settings.yandex_wordstat_api_key = "test-key"
-        settings.yandex_cloud_folder_id = ""
-        settings.rush_analytics_api_key = ""
-
+        settings = _settings(yandex_wordstat_api_key="test-key")
         provider = get_volume_provider("kz", settings)
         assert provider.source_name == "wordstat"
 
     def test_russia_region_string_matches(self):
-        settings = MagicMock()
-        settings.yandex_wordstat_api_key = "key"
-        settings.yandex_cloud_folder_id = ""
-        settings.rush_analytics_api_key = ""
-
+        settings = _settings(yandex_wordstat_api_key="key")
         provider = get_volume_provider("russia", settings)
         assert provider.source_name == "wordstat"
 

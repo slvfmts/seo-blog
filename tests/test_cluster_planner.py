@@ -154,7 +154,7 @@ class TestClusterPlannerService:
     async def test_enrich_volumes_no_provider(self):
         planner = self._make_planner("[]")
         planner.volume_provider = None
-        result = await planner._enrich_volumes(["kw1", "kw2"], "ru")
+        result = await planner._enrich_volumes(["seo оптимизация сайта", "контент маркетинг стратегия"], "ru")
         assert len(result) == 2
         assert result[0]["volume"] == 0
 
