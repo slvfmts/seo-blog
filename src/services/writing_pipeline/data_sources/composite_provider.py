@@ -39,9 +39,9 @@ class CompositeVolumeProvider(VolumeProvider):
     def source_name(self) -> str:
         parts = []
         if self.wordstat:
-            parts.append("wordstat")
+            parts.append(self.wordstat.source_name)
         if self.rush:
-            parts.append("rush")
+            parts.append(self.rush.source_name)
         return "+".join(parts)
 
     async def get_volumes(self, keywords: list[str], language_code: str = "ru") -> list[VolumeResult]:
