@@ -37,7 +37,7 @@ class YandexWordstatProvider(VolumeProvider):
         folder_id: str = "",
         region_id: int = 225,  # 225 = all Russia
         timeout: float = 60.0,
-        max_concurrent: int = 3,
+        max_concurrent: int = 3,  # Yandex limit: 10 rps; keep low to avoid 429
     ):
         self.api_key = api_key
         self.folder_id = folder_id
@@ -83,8 +83,10 @@ class YandexWordstatProvider(VolumeProvider):
     async def _fetch_single_volume(self, keyword: str) -> VolumeResult:
         """Fetch volume for a single keyword via topRequests."""
         async with self._semaphore:
+            # Wordstat API rejects queries with ? and some punctuation (HTTP 400)
+            clean_phrase = keyword.rstrip("?!.")
             body = {
-                "phrase": keyword,
+                "phrase": clean_phrase,
                 "regions": [str(self.region_id)],
                 "devices": ["DEVICE_ALL"],
             }
