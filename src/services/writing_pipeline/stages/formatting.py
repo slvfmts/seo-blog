@@ -226,35 +226,25 @@ class FormattingStage(WritingStage):
             logger.info(f"Cover scene description: {scene_description[:200]}")
 
             # Stage 2: gpt-image-1.5 renders the scene
-            # Use httpx directly — OpenAI SDK 2.24.0 has Pydantic serialization bug
-            # with gpt-image-1.5 model ("by_alias NoneType" error)
+            client_kwargs = {"api_key": self.openai_api_key}
+            if self.openai_proxy_url:
+                client_kwargs["base_url"] = self.openai_proxy_url
+                if self.openai_proxy_secret:
+                    client_kwargs["default_headers"] = {"x-proxy-token": self.openai_proxy_secret}
+            client = openai.OpenAI(**client_kwargs)
+
             image_prompt = COVER_STYLE_PREFIX + scene_description
 
-            base_url = self.openai_proxy_url or "https://api.openai.com/v1"
-            headers = {
-                "Authorization": f"Bearer {self.openai_api_key}",
-                "Content-Type": "application/json",
-            }
-            if self.openai_proxy_url and self.openai_proxy_secret:
-                headers["x-proxy-token"] = self.openai_proxy_secret
-
-            image_resp = httpx.post(
-                f"{base_url}/images/generations",
-                headers=headers,
-                json={
-                    "model": "gpt-image-1.5",
-                    "prompt": image_prompt,
-                    "size": "1536x1024",
-                    "quality": "medium",
-                    "n": 1,
-                },
-                timeout=120.0,
+            response = client.images.generate(
+                model="gpt-image-1.5",
+                prompt=image_prompt,
+                size="1536x1024",
+                quality="medium",
+                n=1,
             )
-            image_resp.raise_for_status()
-            image_data = image_resp.json()
 
             # gpt-image-1 returns base64 PNG → convert to WebP for smaller size
-            image_base64 = image_data["data"][0]["b64_json"]
+            image_base64 = response.data[0].b64_json
             raw_bytes = b64.b64decode(image_base64)
             logger.info(f"Cover raw PNG: {len(raw_bytes)} bytes")
 
