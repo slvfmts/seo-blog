@@ -1417,6 +1417,9 @@ class PipelineResult:
     # Internal linking data (for post-publication registration)
     linking_data: Optional[Dict[str, Any]] = None
 
+    # Keywords selected for SERP position monitoring
+    monitoring_keywords: List[str] = field(default_factory=list)
+
     # Token usage
     total_input_tokens: int = 0
     total_output_tokens: int = 0
@@ -1447,6 +1450,7 @@ class PipelineResult:
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
             "stage_tokens": self.stage_tokens,
+            "monitoring_keywords": self.monitoring_keywords,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "stages_completed": self.stages_completed,

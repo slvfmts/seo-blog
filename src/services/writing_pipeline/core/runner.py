@@ -300,6 +300,7 @@ class PipelineRunner:
             started_at=context.started_at.isoformat(),
             completed_at=context.completed_at.isoformat(),
             stages_completed=context.get_completed_stages(),
+            monitoring_keywords=context.monitoring_keywords,
         )
 
         # Save final result summary

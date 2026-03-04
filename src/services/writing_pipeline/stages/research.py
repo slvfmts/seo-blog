@@ -328,6 +328,16 @@ class ResearchStage(WritingStage):
                     with open(output_path, "w", encoding="utf-8") as f:
                         json.dump(clusters.to_dict(), f, ensure_ascii=False, indent=2)
 
+            # Step 8: Select monitoring keywords
+            context.monitoring_keywords = self._select_monitoring_keywords(
+                context, clusters,
+            )
+
+            if context.save_intermediate and context.output_dir:
+                output_path = os.path.join(context.output_dir, "04c_monitoring_keywords.json")
+                with open(output_path, "w", encoding="utf-8") as f:
+                    json.dump(context.monitoring_keywords, f, ensure_ascii=False, indent=2)
+
             # Calculate metadata
             pages_fetched = sum(
                 1 for r in search_results
@@ -346,6 +356,7 @@ class ResearchStage(WritingStage):
                     "paa_expanded": expand_paa,
                     "has_keyword_metrics": context.keyword_metrics is not None,
                     "has_keyword_clusters": context.research.keyword_clusters is not None,
+                    "monitoring_keywords_count": len(context.monitoring_keywords),
                 }
             )
 
@@ -689,27 +700,79 @@ class ResearchStage(WritingStage):
 
         return contents
 
-    async def _fetch_keyword_metrics(self, context: WritingContext) -> KeywordMetricsResult:
+    def _collect_volume_candidates(
+        self,
+        context: WritingContext,
+        search_results: Optional[List[Dict[str, Any]]] = None,
+        max_keywords: int = 80,
+    ) -> List[str]:
         """
-        Fetch keyword metrics via VolumeProvider (Wordstat / Rush / Composite).
+        Collect short keywords suitable for volume checking.
 
-        Args:
-            context: Pipeline context with queries
+        Shared between _fetch_keyword_metrics and _cluster_keywords to ensure
+        volume data matches what clustering consumes (EDI-120).
 
-        Returns:
-            KeywordMetricsResult with metrics for all queries
+        Sources: topic, queries (≤5 words), PAA questions (≤5 words),
+        Related Searches (≤5 words), brief.target_terms.
+
+        Note: Pillar Topvisor expansion keywords are NOT included here —
+        they are added inside _cluster_keywords after this step (known limitation,
+        pillar flow not yet in production).
         """
-        # Collect keywords from queries
-        keywords = [q.query for q in context.queries.queries]
-        keywords.insert(0, context.topic)
+        seen: Set[str] = set()
+        candidates: List[str] = []
 
-        # Add brief target_terms if available
+        def _add(kw: str) -> None:
+            key = kw.lower().strip()
+            if key and key not in seen and len(key) >= 2:
+                seen.add(key)
+                candidates.append(kw.strip())
+
+        # 1. Topic (always)
+        _add(context.topic)
+
+        # 2. Query planner phrases — only short ones (≤5 words)
+        if context.queries:
+            for q in context.queries.queries:
+                if len(q.query.split()) <= 5:
+                    _add(q.query)
+
+        # 3. PAA questions and Related Searches from Serper results
+        results = search_results or []
+        for result in results:
+            # Related Searches — often 2-4 word real queries
+            for rs in result.get("relatedSearches", []):
+                query = rs.get("query", "")
+                if query and len(query.split()) <= 5:
+                    _add(query)
+            # PAA questions — filter to short ones
+            for paa in result.get("peopleAlsoAsk", []):
+                question = paa.get("question", "")
+                if question and len(question.split()) <= 5:
+                    _add(question)
+
+        # 4. Brief target_terms (if available)
         brief = context.config.get("brief")
         if brief:
             brief_data = brief if isinstance(brief, dict) else brief.to_dict()
             for term in brief_data.get("target_terms", []):
-                if term.lower() not in {k.lower() for k in keywords}:
-                    keywords.append(term)
+                _add(term)
+
+        # Cap at max_keywords
+        if len(candidates) > max_keywords:
+            candidates = candidates[:max_keywords]
+
+        logger.info(f"Volume candidates: {len(candidates)} keywords collected")
+        return candidates
+
+    async def _fetch_keyword_metrics(self, context: WritingContext) -> KeywordMetricsResult:
+        """
+        Fetch keyword metrics via VolumeProvider (Wordstat / Rush / Composite).
+
+        Uses _collect_volume_candidates() for real short keywords instead of
+        synthetic LLM-generated research queries (EDI-120 fix).
+        """
+        keywords = self._collect_volume_candidates(context, context.search_results)
 
         location_name = context.region.lower()
         lang = "ru" if location_name in ["ru", "russia", "kz"] else "en"
@@ -996,28 +1059,28 @@ class ResearchStage(WritingStage):
         """
         Cluster keywords by semantic similarity using LLM.
 
-        Collects all keywords from: queries, related searches, PAA questions, topic.
-        Skips if fewer than 5 unique keywords.
+        Uses _collect_volume_candidates() as base (short keywords with volume data),
+        then adds longer phrases from PAA/Related/queries for clustering context.
 
         Returns:
             (KeywordClusteringResult or None, tokens_used)
         """
-        # Collect all keywords
-        all_keywords: Set[str] = set()
-        all_keywords.add(context.topic)
+        # Start with volume-checked candidates (short keywords, ≤5 words)
+        short_keywords = self._collect_volume_candidates(context, context.search_results)
+        all_keywords: Set[str] = set(short_keywords)
 
+        # Add longer phrases (>5 words) from queries, PAA, Related —
+        # these won't have volume data but are useful for clustering context
         if context.queries:
             for q in context.queries.queries:
                 all_keywords.add(q.query)
 
         if context.search_results:
             for result in context.search_results:
-                # Related searches
                 for rs in result.get("relatedSearches", []):
                     query = rs.get("query", "")
                     if query:
                         all_keywords.add(query)
-                # PAA questions
                 for paa in result.get("peopleAlsoAsk", []):
                     question = paa.get("question", "")
                     if question:
@@ -1122,3 +1185,61 @@ class ResearchStage(WritingStage):
         except Exception as e:
             logger.warning(f"Keyword clustering failed: {e}")
             return None, 0, 0, 0
+
+    def _select_monitoring_keywords(
+        self,
+        context: WritingContext,
+        clusters: Optional[KeywordClusteringResult],
+        max_keywords: int = 10,
+    ) -> List[str]:
+        """
+        Select keywords for SERP position monitoring after clustering.
+
+        Takes primary_keyword from each cluster + top by volume.
+        """
+        candidates: Dict[str, int] = {}  # keyword -> volume
+
+        def _safe_int(v) -> int:
+            try:
+                return int(v or 0)
+            except (ValueError, TypeError):
+                return 0
+
+        # candidates: normalized_key -> (display_form, volume)
+        norm_candidates: Dict[str, tuple] = {}
+
+        def _add_candidate(kw: str, vol: int) -> None:
+            key = kw.strip().lower()
+            if not key:
+                return
+            existing_vol = norm_candidates.get(key, ("", 0))[1]
+            if vol > existing_vol or key not in norm_candidates:
+                norm_candidates[key] = (kw.strip(), max(vol, existing_vol))
+
+        # From clusters: primary_keyword of each
+        if clusters:
+            pk = clusters.primary_cluster.primary_keyword
+            _add_candidate(pk, _safe_int(clusters.primary_cluster.total_volume))
+            for sc in clusters.secondary_clusters:
+                _add_candidate(sc.primary_keyword, _safe_int(sc.total_volume))
+
+        # From keyword_metrics: top by volume
+        if context.keyword_metrics:
+            for key, data in context.keyword_metrics.metrics.items():
+                vol = _safe_int(data.search_volume)
+                if vol > 0:
+                    _add_candidate(data.keyword, vol)
+
+        # Sort by volume descending, take top N
+        sorted_kws = sorted(norm_candidates.values(), key=lambda x: x[1], reverse=True)
+        selected = [display for display, _ in sorted_kws[:max_keywords]]
+
+        # Always include topic if not already present
+        topic_lower = context.topic.lower().strip()
+        if topic_lower not in norm_candidates:
+            selected.insert(0, context.topic)
+            if len(selected) > max_keywords:
+                selected = selected[:max_keywords]
+
+        logger.info(f"Monitoring keywords selected: {len(selected)}")
+        return selected
