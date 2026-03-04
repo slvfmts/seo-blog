@@ -6,9 +6,12 @@ import json
 import hmac
 import hashlib
 import base64
+import logging
 import re
 import httpx
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class GhostPublisher:
@@ -355,6 +358,8 @@ class GhostPublisher:
         if all_scripts.strip():
             post_data["posts"][0]["codeinjection_foot"] = all_scripts
 
+        self._validate_meta(post_data)
+
         try:
             with httpx.Client() as client:
                 response = client.post(
@@ -386,3 +391,21 @@ class GhostPublisher:
                 "success": False,
                 "error": str(e)
             }
+
+    def _validate_meta(self, post_data: dict) -> None:
+        """Log warnings for missing or oversized meta fields before Ghost publish."""
+        post = post_data["posts"][0]
+        checks = {
+            "meta_title": 60,
+            "meta_description": 160,
+            "og_title": 95,
+            "og_description": 200,
+            "custom_excerpt": 300,
+            "slug": 80,
+        }
+        for field_name, max_len in checks.items():
+            value = post.get(field_name)
+            if not value:
+                logger.warning("Publish: missing %s", field_name)
+            elif len(value) > max_len:
+                logger.warning("Publish: %s too long (%d/%d)", field_name, len(value), max_len)

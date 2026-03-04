@@ -41,7 +41,7 @@ class MetaStage(WritingStage):
                 raise ValueError("Structure stage must be completed before meta generation")
 
             # Step 1: LLM-generated meta (title, description, slug)
-            prompt_template = self._load_prompt("meta_v1")
+            prompt_template = self._load_prompt("meta_v2")
 
             # Use brief's target_keyword when available (matches SEO lint validation)
             brief = context.config.get("brief")
@@ -73,11 +73,20 @@ class MetaStage(WritingStage):
                 meta.meta_title = meta.meta_title[:57] + "..."
             if len(meta.meta_description) > 160:
                 meta.meta_description = meta.meta_description[:157] + "..."
+            if meta.og_title and len(meta.og_title) > 95:
+                meta.og_title = meta.og_title[:92] + "..."
+            if meta.og_description and len(meta.og_description) > 200:
+                meta.og_description = meta.og_description[:197] + "..."
+            if meta.custom_excerpt and len(meta.custom_excerpt) > 300:
+                meta.custom_excerpt = meta.custom_excerpt[:297] + "..."
 
-            # Derive OG/excerpt from meta (no extra LLM call)
-            meta.og_title = meta.meta_title
-            meta.og_description = meta.meta_description
-            meta.custom_excerpt = meta.meta_description
+            # Fallback: if LLM didn't return OG fields, derive from meta
+            if not meta.og_title:
+                meta.og_title = meta.meta_title
+            if not meta.og_description:
+                meta.og_description = meta.meta_description
+            if not meta.custom_excerpt:
+                meta.custom_excerpt = meta.meta_description
 
             # Step 2: Build Schema.org JSON-LD (programmatic, no LLM)
             schema_json_ld = self._build_schema_jsonld(context, meta)
@@ -102,6 +111,8 @@ class MetaStage(WritingStage):
                 metadata={
                     "meta_title_len": len(meta.meta_title),
                     "meta_description_len": len(meta.meta_description),
+                    "og_title_len": len(meta.og_title) if meta.og_title else 0,
+                    "custom_excerpt_len": len(meta.custom_excerpt) if meta.custom_excerpt else 0,
                     "slug": meta.slug,
                     "has_schema": schema_json_ld is not None,
                 }
