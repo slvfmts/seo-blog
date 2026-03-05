@@ -158,7 +158,7 @@ class MetaStage(WritingStage):
             schemas.append(blog_posting)
 
             # 2. FAQPage (if outline has faq blocks)
-            faq_pairs = self._extract_faq_pairs(context.edited_md)
+            faq_pairs = self._extract_faq_pairs(context.edited_md, context)
             if faq_pairs:
                 faq_schema = {
                     "@context": "https://schema.org",
@@ -208,32 +208,118 @@ class MetaStage(WritingStage):
         except Exception:
             return None
 
-    def _extract_faq_pairs(self, markdown: str) -> List[tuple]:
+    def _extract_faq_pairs(self, markdown: str, context: WritingContext) -> List[tuple]:
         """
-        Extract FAQ question-answer pairs from markdown.
+        Extract FAQ question-answer pairs from three sources:
+        1. Regex patterns in article markdown (bold + heading questions)
+        2. must_answer_questions from IntentResult
+        3. PAA questions from search_results
 
-        Looks for patterns like:
-        **Question text?**
-        Answer text.
-
-        Returns list of (question, answer) tuples.
+        Returns list of (question, answer) tuples, deduplicated, max 5.
         """
-        pairs = []
-        # Pattern: bold text ending with ? followed by non-bold answer
-        pattern = re.compile(
-            r'\*\*(.+?\?)\*\*\s*\n\s*(.+?)(?=\n\s*\*\*|\n\s*#{1,3}\s|\n\s*\n\s*\n|\Z)',
+        seen_keys: set = set()
+        pairs: List[tuple] = []
+
+        def _norm_key(q: str) -> str:
+            return q.lower().rstrip("? ").strip()
+
+        def _add_pair(question: str, answer: str) -> None:
+            key = _norm_key(question)
+            if key in seen_keys:
+                return
+            answer = answer.split("\n\n")[0].strip()
+            if len(answer) > 300:
+                # Cut at last sentence boundary within 300 chars
+                cut = answer[:300].rfind(".")
+                answer = answer[: cut + 1] if cut > 50 else answer[:300]
+            if len(answer) > 10:
+                seen_keys.add(key)
+                pairs.append((question.strip(), answer))
+
+        # Source 1: Regex from article markdown
+        # 1a: **Question?**\nAnswer
+        bold_pattern = re.compile(
+            r'\*\*(.+?\?)\*\*\s*\n\s*(.+?)(?=\n\s*\*\*|\n\s*#{1,4}\s|\n\s*\n\s*\n|\Z)',
             re.DOTALL,
         )
+        for m in bold_pattern.finditer(markdown):
+            _add_pair(m.group(1), m.group(2))
 
-        for match in pattern.finditer(markdown):
-            question = match.group(1).strip()
-            answer = match.group(2).strip()
-            # Clean up answer: take first paragraph, limit length
-            answer_lines = answer.split("\n\n")[0].strip()
-            if answer_lines and len(answer_lines) > 10:
-                pairs.append((question, answer_lines))
+        # 1b: ### Question? / #### Question? — heading with question mark
+        heading_pattern = re.compile(
+            r'^#{3,4}\s+(.+?\?)\s*$\n([\s\S]+?)(?=\n#{1,4}\s|\Z)',
+            re.MULTILINE,
+        )
+        for m in heading_pattern.finditer(markdown):
+            _add_pair(m.group(1), m.group(2))
 
-        return pairs[:10]  # Limit to 10 FAQ items
+        # Source 2: must_answer_questions from IntentResult
+        if context.intent and context.intent.must_answer_questions:
+            for q in context.intent.must_answer_questions:
+                answer = self._find_answer_in_article(q, markdown)
+                if answer:
+                    # Ensure question ends with ?
+                    q_text = q.strip()
+                    if not q_text.endswith("?"):
+                        q_text += "?"
+                    _add_pair(q_text, answer)
+
+        # Source 3: PAA from search_results
+        paa_questions = self._collect_paa_questions(context)
+        for q in paa_questions:
+            answer = self._find_answer_in_article(q, markdown)
+            if answer:
+                q_text = q.strip()
+                if not q_text.endswith("?"):
+                    q_text += "?"
+                _add_pair(q_text, answer)
+
+        return pairs[:5]
+
+    def _find_answer_in_article(self, question: str, markdown: str) -> Optional[str]:
+        """
+        Find an answer to a question in article text by matching heading keywords.
+
+        Looks for H2/H3 headings with >=50% word overlap with the question,
+        then returns the first paragraph after the heading.
+        """
+        q_words = set(re.findall(r'[a-zA-Zа-яА-ЯёЁ]{3,}', question.lower()))
+        if not q_words:
+            return None
+
+        # Find all headings with their content
+        heading_pattern = re.compile(
+            r'^(#{2,3})\s+(.+?)\s*$\n([\s\S]*?)(?=\n#{1,3}\s|\Z)',
+            re.MULTILINE,
+        )
+
+        for m in heading_pattern.finditer(markdown):
+            heading_text = m.group(2)
+            h_words = set(re.findall(r'[a-zA-Zа-яА-ЯёЁ]{3,}', heading_text.lower()))
+            if not h_words:
+                continue
+            overlap = len(q_words & h_words) / len(q_words)
+            if overlap >= 0.5:
+                content = m.group(3).strip()
+                # Take first non-empty paragraph
+                for para in content.split("\n\n"):
+                    para = para.strip()
+                    # Skip sub-headings, lists starting with -, empty
+                    if para and not para.startswith("#") and len(para) > 20:
+                        return para
+        return None
+
+    def _collect_paa_questions(self, context: WritingContext) -> List[str]:
+        """Collect People Also Ask questions from search_results."""
+        questions: List[str] = []
+        if not context.search_results:
+            return questions
+        for result in context.search_results:
+            for paa in result.get("peopleAlsoAsk", []):
+                q = paa.get("question", "") if isinstance(paa, dict) else str(paa)
+                if q and q not in questions:
+                    questions.append(q)
+        return questions
 
     def _extract_howto_steps(self, markdown: str) -> List[tuple]:
         """
