@@ -1,10 +1,12 @@
-"""Tests for formatting stage — DALL-E prompt length, diagram insertion."""
+"""Tests for formatting stage — cover prompt, diagram insertion."""
 
 import re
 import pytest
 from unittest.mock import MagicMock
 
-from src.services.writing_pipeline.stages.formatting import FormattingStage, COVER_PROMPT
+from src.services.writing_pipeline.stages.formatting import (
+    FormattingStage, COVER_SCENE_PROMPT, COVER_STYLE_PREFIX,
+)
 from src.services.writing_pipeline.contracts import FormattingAsset
 
 
@@ -23,41 +25,28 @@ def stage():
 
 
 # =============================================================================
-# DALL-E prompt length — regression: commit 76c3925
+# Cover prompt sanity checks — two-stage architecture (scene + style)
 # =============================================================================
 
 class TestCoverPromptLength:
-    def test_prompt_base_under_4000(self):
-        """The COVER_PROMPT alone must leave room for article content."""
-        assert len(COVER_PROMPT) < 3500, "COVER_PROMPT too long for 4000 char limit"
-
-    def test_prompt_with_long_article_stays_under_4000(self, stage):
-        """Even with a very long article, the final prompt must be <= 4000 chars."""
-        # Simulate the prompt construction logic from _generate_cover
-        article_md = "Слово " * 5000  # ~30k chars
-        headings = re.findall(r'^#{1,3}\s+(.+)$', article_md, re.MULTILINE)
-        headings_text = "\n\nЗаголовки: " + " | ".join(headings) if headings else ""
-        base_len = len(COVER_PROMPT) + len(headings_text)
-        max_article = 4000 - base_len - 50
-        article_summary = article_md[:max(500, max_article)]
-        prompt = COVER_PROMPT + article_summary + headings_text
-
-        assert len(prompt) <= 4000, f"Prompt is {len(prompt)} chars, exceeds 4000"
-
-    def test_prompt_with_many_headings(self, stage):
-        """Article with many H2 headings should not blow up prompt length."""
-        sections = "\n\n".join(
-            f"## Раздел {i}\n\nТекст раздела {i}." for i in range(20)
+    def test_scene_prompt_reasonable_length(self):
+        """COVER_SCENE_PROMPT should leave room for article text."""
+        assert len(COVER_SCENE_PROMPT) < 2000, (
+            f"COVER_SCENE_PROMPT is {len(COVER_SCENE_PROMPT)} chars"
         )
-        article_md = f"# Заголовок\n\n{sections}"
-        headings = re.findall(r'^#{1,3}\s+(.+)$', article_md, re.MULTILINE)
-        headings_text = "\n\nЗаголовки: " + " | ".join(headings) if headings else ""
-        base_len = len(COVER_PROMPT) + len(headings_text)
-        max_article = 4000 - base_len - 50
-        article_summary = article_md[:max(500, max_article)]
-        prompt = COVER_PROMPT + article_summary + headings_text
 
-        assert len(prompt) <= 4000
+    def test_style_prefix_under_dalle_limit(self):
+        """COVER_STYLE_PREFIX + a long scene description must fit DALL-E limit."""
+        # gpt-image-1 allows up to 32k chars, but we want scene < 500 chars
+        long_scene = "A detailed pixel art scene. " * 20  # ~560 chars
+        prompt = COVER_STYLE_PREFIX + long_scene
+        assert len(prompt) < 4000, f"Style + scene is {len(prompt)} chars"
+
+    def test_scene_prompt_contains_key_constraints(self):
+        """Scene prompt must include no-people and no-text rules."""
+        lower = COVER_SCENE_PROMPT.lower()
+        assert "no people" in lower
+        assert "no text" in lower
 
 
 # =============================================================================
@@ -120,12 +109,9 @@ class TestInsertDiagrams:
         # This is architectural: FormattingStage.run() sets cover_ghost_url
         # on the result but does NOT call _insert_diagrams for cover assets.
         # We verify by checking that _insert_diagrams is only called for diagrams.
-        article = "# Test\n\nBody text.\n\n## Section 1\n\nContent."
         cover = FormattingAsset(
             type="cover", filename="cover.png", path="/tmp/cover.png",
             alt="Cover", ghost_url="http://ghost/cover.png",
         )
-        # _insert_diagrams should not be called for covers in the real pipeline
-        # but even if accidentally called, the cover should be treated as any asset.
         # The key assertion is in the stage's run() method which only passes diagrams.
         assert cover.type == "cover"
