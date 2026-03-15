@@ -217,24 +217,8 @@ def _make_volume_provider(bs: dict, region: str = "ru"):
 
 def _make_topvisor_client(bs: dict = None):
     """Create a TopvisorClient from blog settings (with global fallback), or None."""
-    if bs:
-        token = bs.get("topvisor_access_token", "")
-        user_id = bs.get("topvisor_user_id", "")
-        project_id = bs.get("topvisor_project_id", 0)
-    else:
-        from src.config.settings import get_settings
-        settings = get_settings()
-        token = settings.topvisor_access_token
-        user_id = settings.topvisor_user_id
-        project_id = settings.topvisor_project_id
-    if token and user_id and project_id:
-        from src.services.writing_pipeline.data_sources.topvisor_client import TopvisorClient
-        return TopvisorClient(
-            user_id=user_id,
-            access_token=token,
-            project_id=project_id,
-        )
-    return None
+    from src.services.monitoring import make_topvisor_client
+    return make_topvisor_client(bs)
 
 
 def _render(request: Request, db: Session, template: str, ctx: dict):
@@ -2063,6 +2047,18 @@ async def publish_draft(request: Request, draft_id: UUID, db: Session = Depends(
                         )
             except Exception:
                 pass  # Graceful degradation — publish succeeds even if linking fails
+
+            # Register keywords for Topvisor position tracking
+            try:
+                tv_client = _make_topvisor_client(bs)
+                if tv_client:
+                    from src.services.monitoring.topvisor_positions import TopvisorPositionTracker
+                    tv_tracker = TopvisorPositionTracker(tv_client)
+                    tv_result = await tv_tracker.register_keywords_for_tracking(draft, post, db)
+                    logger.info("Topvisor keyword registration for %s: %s", draft.slug, tv_result)
+            except Exception as e:
+                logger.warning("Topvisor keyword registration failed for %s: %s", draft.slug, e)
+                # Graceful degradation — publish succeeds even if Topvisor fails
 
             # Ping IndexNow (Yandex + Bing)
             try:

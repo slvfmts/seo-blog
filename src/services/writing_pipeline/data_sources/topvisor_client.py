@@ -405,6 +405,96 @@ class TopvisorClient:
 
         return result
 
+    # ── Position Checking ─────────────────────────────────────────────
+
+    async def get_searcher_regions(self) -> list[dict]:
+        """
+        Get configured searcher+region pairs for the project.
+
+        POST /v2/json/get/positions_2/searchers
+
+        Returns: list of {id, searcher_key, region_key, enabled, ...}
+        """
+        body = {"project_id": self.project_id}
+        result = await self._post("get/positions_2/searchers", body)
+        return result.get("result", []) if isinstance(result, dict) else result
+
+    async def start_position_check(self, regions_indexes: list[int]) -> dict:
+        """
+        Trigger async position check for all keywords in the project.
+
+        POST /v2/json/add/positions_2/check
+
+        Args:
+            regions_indexes: list of searcher-region indexes from get_searcher_regions()
+
+        Returns: check result (may contain task info)
+        """
+        body = {
+            "project_id": self.project_id,
+            "regions_indexes": regions_indexes,
+        }
+        result = await self._post("add/positions_2/check", body)
+        logger.info(f"Topvisor position check started: regions={regions_indexes}")
+        return result.get("result", result) if isinstance(result, dict) else result
+
+    async def get_position_summary(
+        self,
+        date_from: str,
+        date_to: str,
+        regions_indexes: list[int],
+        show_tops: int = 100,
+        fields: Optional[list[str]] = None,
+    ) -> list[dict]:
+        """
+        Get current positions for keywords.
+
+        POST /v2/json/get/positions_2/summary
+
+        Args:
+            date_from: "YYYY-MM-DD"
+            date_to: "YYYY-MM-DD"
+            regions_indexes: list of searcher-region indexes
+            show_tops: max position to show (100 = top-100)
+
+        Returns: list of keyword dicts with position data
+        """
+        body = {
+            "project_id": self.project_id,
+            "regions_indexes": regions_indexes,
+            "date_from": date_from,
+            "date_to": date_to,
+            "show_tops": show_tops,
+            "fields": fields or ["id", "name", "group_id", "group_name"],
+        }
+        result = await self._post("get/positions_2/summary", body)
+        return result.get("result", []) if isinstance(result, dict) else result
+
+    async def get_position_history(
+        self,
+        date_from: str,
+        date_to: str,
+        regions_indexes: list[int],
+        show_tops: int = 100,
+    ) -> list[dict]:
+        """
+        Get position history for keywords.
+
+        POST /v2/json/get/positions_2/history
+
+        Returns: list of keyword dicts with date→position history
+        """
+        body = {
+            "project_id": self.project_id,
+            "regions_indexes": regions_indexes,
+            "date_from": date_from,
+            "date_to": date_to,
+            "show_tops": show_tops,
+            "fields": ["id", "name", "group_id"],
+        }
+        result = await self._post("get/positions_2/history", body)
+        return result.get("result", []) if isinstance(result, dict) else result
+
     # ── Utility ──────────────────────────────────────────────────────
 
     async def get_volume_check_price(

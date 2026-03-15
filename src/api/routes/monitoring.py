@@ -1,7 +1,10 @@
 """
 API routes for position monitoring.
+
+Supports dual-source position checks: Topvisor (primary) and Serper (fallback).
 """
 
+import logging
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -10,6 +13,8 @@ from sqlalchemy import desc
 from src.db.session import get_db, SessionLocal
 from src.db import models
 from src.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -66,6 +71,7 @@ async def keyword_history(
                 "position": r.position,
                 "url": r.url,
                 "serp_features": r.serp_features,
+                "source": r.source,
             }
             for r in rankings
         ],
@@ -78,7 +84,7 @@ async def trigger_check(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    """Manually trigger position check for a site."""
+    """Manually trigger position check for a site (Serper)."""
     settings = get_settings()
 
     site = db.query(models.Site).filter(models.Site.id == site_id).first()
@@ -114,6 +120,47 @@ async def trigger_check(
             }
             for s in signals
         ],
+    }
+
+
+@router.post("/check/topvisor")
+async def trigger_topvisor_check(
+    site_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """
+    Manually trigger Topvisor position check for a site.
+
+    Triggers async check → polls for results → saves to keyword_rankings.
+    """
+    from src.services.monitoring import make_topvisor_client
+    from src.services.monitoring.topvisor_positions import TopvisorPositionTracker
+
+    site = db.query(models.Site).filter(models.Site.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    blog = site.blog if site.blog_id else None
+    settings = get_settings()
+    bs = {
+        "topvisor_user_id": (blog.topvisor_user_id if blog and blog.topvisor_user_id else None) or settings.topvisor_user_id,
+        "topvisor_access_token": (blog.topvisor_access_token if blog and blog.topvisor_access_token else None) or settings.topvisor_access_token,
+        "topvisor_project_id": (blog.topvisor_project_id if blog and blog.topvisor_project_id else None) or settings.topvisor_project_id,
+    }
+
+    tv_client = make_topvisor_client(bs)
+    if not tv_client:
+        raise HTTPException(status_code=400, detail="Topvisor not configured for this site")
+
+    tracker = TopvisorPositionTracker(tv_client)
+
+    logger.info("Manual Topvisor position check triggered for site %s", site.name)
+
+    result = await tracker.run_daily_check(site.id, db)
+
+    return {
+        "source": "topvisor",
+        "check_result": result,
     }
 
 

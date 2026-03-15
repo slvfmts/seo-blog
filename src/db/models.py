@@ -286,6 +286,9 @@ class Keyword(Base):
     serp_features = Column(JSON)  # ["featured_snippet", "paa", "video"]
     current_position = Column(Integer)  # наша позиция (null если не ранжируемся)
 
+    # Topvisor position tracking
+    topvisor_keyword_id = Column(Integer, nullable=True)  # Topvisor keyword ID for position checks
+
     # Связи
     competitor_id = Column(UUID(as_uuid=True), ForeignKey("competitors.id"), nullable=True)
     cluster_id = Column(UUID(as_uuid=True), ForeignKey("clusters.id"), nullable=True)
@@ -419,7 +422,7 @@ class KeywordRanking(Base):
     post = relationship("Post", back_populates="rankings")
 
     __table_args__ = (
-        UniqueConstraint('keyword_id', 'date', name='uq_keyword_date'),
+        UniqueConstraint('keyword_id', 'date', 'source', name='uq_keyword_date_source'),
     )
 
 
