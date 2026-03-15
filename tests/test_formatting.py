@@ -1,11 +1,14 @@
-"""Tests for formatting stage — cover prompt, diagram insertion."""
+"""Tests for formatting stage — cover prompt, SVG chart rendering, diagram insertion."""
 
+import os
 import re
+import tempfile
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.services.writing_pipeline.stages.formatting import (
     FormattingStage, COVER_SCENE_PROMPT, COVER_STYLE_PREFIX,
+    _HAS_CAIROSVG, _sanitize_chart_id,
 )
 from src.services.writing_pipeline.contracts import FormattingAsset
 
@@ -106,12 +109,124 @@ class TestInsertDiagrams:
 
     def test_cover_not_in_body(self):
         """Cover image must go to feature_image, NOT inserted into article body."""
-        # This is architectural: FormattingStage.run() sets cover_ghost_url
-        # on the result but does NOT call _insert_diagrams for cover assets.
-        # We verify by checking that _insert_diagrams is only called for diagrams.
         cover = FormattingAsset(
             type="cover", filename="cover.png", path="/tmp/cover.png",
             alt="Cover", ghost_url="http://ghost/cover.png",
         )
-        # The key assertion is in the stage's run() method which only passes diagrams.
         assert cover.type == "cover"
+
+
+# =============================================================================
+# SVG → PNG rendering via cairosvg
+# =============================================================================
+
+VALID_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 380"'
+    ' font-family="DejaVu Sans, system-ui, sans-serif">'
+    '<rect width="800" height="380" rx="16" fill="#F8FAFC"/>'
+    '<text x="400" y="200" text-anchor="middle" font-size="24" '
+    'font-weight="700" fill="#1E293B">Тестовый график</text>'
+    '</svg>'
+)
+
+INVALID_SVG = '<svg><broken'
+
+CYRILLIC_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"'
+    ' font-family="DejaVu Sans, system-ui, sans-serif">'
+    '<rect width="400" height="200" fill="#F8FAFC"/>'
+    '<text x="200" y="100" text-anchor="middle" font-size="18" '
+    'fill="#1E293B">Кириллица: Привет мир</text>'
+    '</svg>'
+)
+
+
+@pytest.mark.skipif(not _HAS_CAIROSVG, reason="cairosvg not installed")
+class TestRenderSvgToPng:
+    @pytest.mark.asyncio
+    async def test_valid_svg_renders_to_png(self, stage):
+        """Valid SVG should produce a non-empty PNG file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = os.path.join(tmpdir, "test.png")
+            result = await stage._render_svg_to_png(VALID_SVG, output)
+            assert result is True
+            assert os.path.exists(output)
+            assert os.path.getsize(output) > 100  # PNG header is ~100 bytes
+
+    @pytest.mark.asyncio
+    async def test_invalid_svg_returns_false(self, stage):
+        """Broken SVG should return False, not raise."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = os.path.join(tmpdir, "bad.png")
+            result = await stage._render_svg_to_png(INVALID_SVG, output)
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_cyrillic_text_renders(self, stage):
+        """SVG with Cyrillic text should render successfully."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = os.path.join(tmpdir, "cyrillic.png")
+            result = await stage._render_svg_to_png(CYRILLIC_SVG, output)
+            assert result is True
+            assert os.path.getsize(output) > 100
+
+
+# =============================================================================
+# Graceful degradation when cairosvg is not available
+# =============================================================================
+
+class TestSvgChartsGracefulDegradation:
+    @pytest.mark.asyncio
+    async def test_no_cairosvg_skips_charts(self, stage):
+        """When cairosvg is unavailable, charts should be skipped gracefully."""
+        with patch("src.services.writing_pipeline.stages.formatting._HAS_CAIROSVG", False):
+            assets, tokens, errors, in_t, out_t = await stage._generate_svg_charts(
+                "# Article\n## Section\nText.", "test-slug", "/tmp", None,
+            )
+            assert assets == []
+            assert tokens == 0
+            assert any("cairosvg" in e for e in errors)
+
+
+# =============================================================================
+# _sanitize_chart_id — safe filename from LLM output
+# =============================================================================
+
+class TestSanitizeChartId:
+    def test_normal_id(self):
+        assert _sanitize_chart_id("chart-1", "fallback") == "chart-1"
+
+    def test_strips_unsafe_chars(self):
+        assert _sanitize_chart_id("../../etc/passwd", "fb") == "etcpasswd"
+
+    def test_empty_returns_fallback(self):
+        assert _sanitize_chart_id("", "chart-0") == "chart-0"
+        assert _sanitize_chart_id("!!!???", "chart-0") == "chart-0"
+
+    def test_truncates_long_id(self):
+        result = _sanitize_chart_id("a" * 100, "fb")
+        assert len(result) == 30
+
+    def test_unicode_stripped(self):
+        assert _sanitize_chart_id("диаграмма-1", "fb") == "-1"
+
+
+# =============================================================================
+# HTML escaping in _insert_diagrams
+# =============================================================================
+
+class TestInsertDiagramsHtmlEscaping:
+    def test_alt_and_caption_escaped(self, stage):
+        """Alt and caption with special chars must be HTML-escaped."""
+        article = "# Title\n\n## Section\n\nText.\n"
+        asset = FormattingAsset(
+            type="diagram", filename="d.png", path="/tmp/d.png",
+            alt='<script>alert("xss")</script>',
+            caption='A & B "test"',
+            ghost_url="http://img/d.png",
+        )
+        asset._after_heading = "Section"
+        result = stage._insert_diagrams(article, [asset])
+        assert "<script>" not in result
+        assert "&lt;script&gt;" in result
+        assert "A &amp; B" in result

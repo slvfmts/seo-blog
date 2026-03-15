@@ -1,10 +1,12 @@
 """
-Formatting Stage - Generates cover image and Mermaid diagrams.
+Formatting Stage - Generates cover image and SVG charts.
 
 Cover → DALL-E 3 → upload to Ghost → feature_image (not in body).
-Diagrams → LLM → kroki.io PNG → upload to Ghost → inline <figure> blocks.
+Charts → LLM SVG → cairosvg PNG → upload to Ghost → inline <figure> blocks.
 """
 
+import asyncio
+import html
 import json
 import os
 import logging
@@ -13,7 +15,14 @@ from typing import Optional
 from difflib import SequenceMatcher
 
 import anthropic
-import httpx
+
+_MAX_SVG_BYTES = 200_000  # 200KB safety cap for LLM-generated SVG
+
+try:
+    import cairosvg
+    _HAS_CAIROSVG = True
+except ImportError:
+    _HAS_CAIROSVG = False
 
 from ..core.stage import WritingStage
 from ..core.context import WritingContext
@@ -46,37 +55,13 @@ COVER_STYLE_PREFIX = (
     "Scene: "
 )
 
-DIAGRAM_PROMPT = """Ты — генератор смысловых визуализаций для статьи. На входе текст статьи. Сгенерируй 2–3 диаграммы, которые помогают понять материал: взаимодействие сущностей, последовательность этапов, причинно-следственные связи метрик. Это НЕ креативные иллюстрации и НЕ инфографика со статистикой — только ясные схемы.
+SVG_CHARTS_PROMPT_FILE = "svg_charts_v1"
 
-Ограничения:
-- Диаграммы должны быть пригодны для рендера в Mermaid и читаться в PNG.
-- Без людей/персонажей/эмодзи/клипарта.
-- Без длинных абзацев в узлах: 2–5 слов на узел.
-- Не больше 12 узлов на диаграмму.
-- Никаких чисел/процентов на диаграммах, если это не строго необходимо для смысла.
-- Выбери разные типы: (1) процесс/этапы, (2) взаимодействие сущностей, (3) опционально причинность метрик.
-- НЕ используй subgraph — он часто ломает рендер. Используй простые graph TD, flowchart TD или sequenceDiagram.
-- В текстах узлов не используй кавычки и спецсимволы (&, <, >, #). Только буквы, цифры, пробелы, тире.
 
-Для каждой диаграммы укажи `after_heading` — текст заголовка H2 из статьи, после которого диаграмма должна быть размещена. Выбирай H2, к которому диаграмма семантически относится.
-
-Верни СТРОГО JSON (без markdown-блока, просто JSON):
-{
-  "diagrams": [
-    {
-      "id": "diagram-1",
-      "type": "process|interaction|metrics",
-      "after_heading": "Точный текст H2 заголовка",
-      "title": "Короткий заголовок",
-      "caption": "1 предложение пояснения",
-      "alt": "alt-текст для доступности",
-      "mermaid": "mermaid-код одной диаграммы"
-    }
-  ]
-}
-
-[ТЕКСТ СТАТЬИ]
-"""
+def _sanitize_chart_id(raw_id: str, fallback: str) -> str:
+    """Sanitize LLM-provided chart ID to safe filename component."""
+    cleaned = re.sub(r'[^a-z0-9-]', '', raw_id.lower().strip())
+    return cleaned[:30] if cleaned else fallback
 
 
 class FormattingStage(WritingStage):
@@ -85,7 +70,7 @@ class FormattingStage(WritingStage):
 
     Generates:
     - Cover image via DALL-E 3 → uploaded to Ghost as feature_image
-    - 2-3 Mermaid diagrams rendered via kroki.io → uploaded to Ghost → inline <figure>
+    - 2-3 SVG charts rendered via cairosvg → PNG → uploaded to Ghost → inline <figure>
     """
 
     def __init__(
@@ -161,8 +146,8 @@ class FormattingStage(WritingStage):
             elif cover_error:
                 result.errors.append(f"Cover: {cover_error}")
 
-            # B) Generate diagrams
-            diagrams, diagram_tokens, diagram_errors, diag_in, diag_out = await self._generate_diagrams(
+            # B) Generate SVG charts
+            diagrams, diagram_tokens, diagram_errors, diag_in, diag_out = await self._generate_svg_charts(
                 article_md, slug, assets_dir, publisher
             )
             tokens_total += diagram_tokens
@@ -187,6 +172,13 @@ class FormattingStage(WritingStage):
                 with open(report_path, "w", encoding="utf-8") as f:
                     json.dump(result.to_dict(), f, ensure_ascii=False, indent=2)
 
+            # Collect chart diagnostics
+            chart_types = []
+            chart_placements = []
+            for asset in diagrams:
+                chart_types.append(getattr(asset, '_chart_type', 'unknown'))
+                chart_placements.append(getattr(asset, '_after_heading', ''))
+
             context.complete_stage(
                 input_tokens=total_in,
                 output_tokens=total_out,
@@ -194,6 +186,8 @@ class FormattingStage(WritingStage):
                     "cover_generated": result.cover_generated,
                     "cover_ghost_url": result.cover_ghost_url,
                     "diagrams_count": result.diagrams_count,
+                    "chart_types": chart_types,
+                    "chart_placements": chart_placements,
                     "errors": len(result.errors),
                 },
             )
@@ -289,123 +283,155 @@ class FormattingStage(WritingStage):
             logger.error(f"Cover generation failed: {e}")
             return None, str(e), 0, 0
 
-    async def _generate_diagrams(
+    async def _generate_svg_charts(
         self, article_md: str, slug: str, assets_dir: str, publisher,
     ) -> tuple[list[FormattingAsset], int, list[str], int, int]:
-        """Generate Mermaid diagrams via LLM, render via kroki.io, upload to Ghost."""
+        """Generate SVG charts via LLM, render to PNG via cairosvg, upload to Ghost."""
         assets = []
         errors = []
         tokens_total = 0
         total_in = 0
         total_out = 0
 
-        # Get diagram specs from LLM
-        prompt = DIAGRAM_PROMPT + article_md[:8000]
+        if not _HAS_CAIROSVG:
+            logger.warning("cairosvg not available — skipping chart generation")
+            return assets, 0, ["cairosvg not installed, charts skipped"], 0, 0
+
+        # Load prompt and inject article text
         try:
-            response_text, in_t, out_t = self._call_llm(prompt, max_tokens=4096, temperature=0.4)
+            prompt_template = self._load_prompt(SVG_CHARTS_PROMPT_FILE)
+        except Exception as e:
+            return assets, 0, [f"Failed to load chart prompt: {e}"], 0, 0
+        prompt = prompt_template.replace("{{article_md}}", article_md[:8000])
+
+        try:
+            response_text, in_t, out_t = self._call_llm(prompt, max_tokens=16384, temperature=0.4)
             tokens_total += in_t + out_t
             total_in += in_t
             total_out += out_t
         except Exception as e:
-            return assets, 0, [f"Diagram LLM call failed: {e}"], 0, 0
+            return assets, 0, [f"Chart LLM call failed: {e}"], 0, 0
 
-        # Parse diagram specs
+        # Parse chart specs
         try:
             data = self._parse_json_response(response_text)
-            diagrams = data.get("diagrams", [])
+            charts = data.get("charts", [])
         except Exception as e:
-            return assets, tokens_total, [f"Failed to parse diagram specs: {e}"], total_in, total_out
+            return assets, tokens_total, [f"Failed to parse chart specs: {e}"], total_in, total_out
 
-        # Render each diagram via kroki.io
-        for i, diagram in enumerate(diagrams[:3]):
-            diagram_id = diagram.get("id", f"diagram-{i+1}")
-            mermaid_code = diagram.get("mermaid", "")
-            title = diagram.get("title", "")
-            caption = diagram.get("caption", "")
-            alt = diagram.get("alt", title)
-            after_heading = diagram.get("after_heading", "")
+        # Render each chart: SVG → PNG
+        for i, chart in enumerate(charts[:3]):
+            try:
+                chart_id = _sanitize_chart_id(chart.get("id", ""), f"chart-{i+1}")
+                chart_type = chart.get("type", "unknown")
+                svg_code = chart.get("svg", "")
+                title = chart.get("title", "")
+                caption = chart.get("caption", "")
+                alt = chart.get("alt", title)
+                after_heading = chart.get("after_heading", "")
 
-            if not mermaid_code:
-                errors.append(f"{diagram_id}: empty mermaid code")
-                continue
+                if not svg_code:
+                    errors.append(f"{chart_id}: empty SVG code")
+                    continue
 
-            filename = f"{slug}__{diagram_id}.png"
-            filepath = os.path.join(assets_dir, filename)
+                if len(svg_code.encode("utf-8")) > _MAX_SVG_BYTES:
+                    errors.append(f"{chart_id}: SVG exceeds {_MAX_SVG_BYTES} bytes, skipped")
+                    continue
 
-            # Attempt 1: render via kroki.io
-            success = await self._render_mermaid_kroki(mermaid_code, filepath)
+                # Save raw SVG for debugging
+                svg_filename = f"{slug}__{chart_id}.svg"
+                svg_filepath = os.path.join(assets_dir, svg_filename)
+                with open(svg_filepath, "w", encoding="utf-8") as f:
+                    f.write(svg_code)
 
-            if not success:
-                # Retry: ask LLM to fix the mermaid code
-                logger.info(f"Retrying {diagram_id} with LLM fix")
-                try:
-                    fix_prompt = (
-                        f"The following Mermaid code failed to render via kroki.io. Fix the syntax errors "
-                        f"and return ONLY the corrected Mermaid code, nothing else. "
-                        f"Do NOT use subgraph. Avoid special characters in node text.\n\n{mermaid_code}"
+                # Render SVG → PNG
+                png_filename = f"{slug}__{chart_id}.png"
+                png_filepath = os.path.join(assets_dir, png_filename)
+
+                success = await self._render_svg_to_png(svg_code, png_filepath)
+
+                if not success:
+                    # Retry: ask LLM to fix the SVG
+                    logger.info(f"Retrying {chart_id} with LLM fix")
+                    try:
+                        fix_prompt = (
+                            f"The following SVG failed to render via cairosvg. "
+                            f"Common issues: emoji characters, ₽ symbol, → character, "
+                            f"marker-end without defined marker, external images, CSS @import. "
+                            f"Fix the SVG and return ONLY the corrected SVG code, nothing else.\n\n{svg_code}"
+                        )
+                        fixed_svg, fix_in, fix_out = self._call_llm(fix_prompt, max_tokens=8192, temperature=0.1)
+                        tokens_total += fix_in + fix_out
+                        total_in += fix_in
+                        total_out += fix_out
+                        fixed_svg = fixed_svg.strip()
+                        if fixed_svg.startswith("```"):
+                            fixed_svg = re.sub(r'^```\w*\n?', '', fixed_svg)
+                            fixed_svg = re.sub(r'```$', '', fixed_svg).strip()
+                        # Save fixed SVG (with size cap)
+                        if len(fixed_svg.encode("utf-8")) <= _MAX_SVG_BYTES:
+                            with open(svg_filepath, "w", encoding="utf-8") as f:
+                                f.write(fixed_svg)
+                            success = await self._render_svg_to_png(fixed_svg, png_filepath)
+                        else:
+                            logger.warning(f"Fixed SVG for {chart_id} exceeds size cap")
+                    except Exception as e:
+                        logger.warning(f"Retry failed for {chart_id}: {e}")
+
+                if success:
+                    # Upload PNG to Ghost (never raw SVG)
+                    ghost_url = ""
+                    if publisher:
+                        uploaded_url = publisher.upload_image(png_filepath, ref=f"{slug}-{chart_id}")
+                        if uploaded_url:
+                            ghost_url = uploaded_url
+                            logger.info(f"Chart uploaded to Ghost: {ghost_url}")
+                        else:
+                            logger.warning(f"Chart {chart_id} upload to Ghost failed")
+
+                    asset = FormattingAsset(
+                        type="diagram",  # backward compat with DB
+                        filename=png_filename,
+                        path=png_filepath,
+                        alt=alt,
+                        caption=caption,
+                        ghost_url=ghost_url,
                     )
-                    fixed_code, fix_in, fix_out = self._call_llm(fix_prompt, max_tokens=2048, temperature=0.1)
-                    tokens_total += fix_in + fix_out
-                    total_in += fix_in
-                    total_out += fix_out
-                    fixed_code = fixed_code.strip()
-                    if fixed_code.startswith("```"):
-                        fixed_code = re.sub(r'^```\w*\n?', '', fixed_code)
-                        fixed_code = re.sub(r'```$', '', fixed_code).strip()
-                    success = await self._render_mermaid_kroki(fixed_code, filepath)
-                except Exception as e:
-                    logger.warning(f"Retry failed for {diagram_id}: {e}")
+                    asset._after_heading = after_heading
+                    asset._chart_type = chart_type
+                    assets.append(asset)
+                    logger.info(f"Chart rendered: {png_filepath} (type={chart_type})")
+                else:
+                    errors.append(f"{chart_id}: SVG render failed after retry")
 
-            if success:
-                # Upload to Ghost
-                ghost_url = ""
-                if publisher:
-                    uploaded_url = publisher.upload_image(filepath, ref=f"{slug}-{diagram_id}")
-                    if uploaded_url:
-                        ghost_url = uploaded_url
-                        logger.info(f"Diagram uploaded to Ghost: {ghost_url}")
-                    else:
-                        logger.warning(f"Diagram {diagram_id} upload to Ghost failed")
-
-                asset = FormattingAsset(
-                    type="diagram",
-                    filename=filename,
-                    path=filepath,
-                    alt=alt,
-                    caption=caption,
-                    ghost_url=ghost_url,
-                )
-                # Store after_heading as metadata for insertion
-                asset._after_heading = after_heading
-                assets.append(asset)
-                logger.info(f"Diagram rendered: {filepath}")
-            else:
-                errors.append(f"{diagram_id}: render failed after retry")
+            except Exception as e:
+                cid = f"chart-{i+1}"
+                errors.append(f"{cid}: unexpected error: {e}")
+                logger.warning(f"Chart {cid} failed: {e}")
 
         return assets, tokens_total, errors, total_in, total_out
 
-    async def _render_mermaid_kroki(self, mermaid_code: str, output_path: str) -> bool:
-        """Render Mermaid code to PNG via kroki.io."""
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    "https://kroki.io/mermaid/png",
-                    content=mermaid_code.encode("utf-8"),
-                    headers={"Content-Type": "text/plain"},
-                )
+    async def _render_svg_to_png(self, svg_code: str, output_path: str) -> bool:
+        """Render SVG string to PNG via cairosvg (CPU-bound, run in thread)."""
+        if not _HAS_CAIROSVG:
+            return False
 
-            if response.status_code != 200:
-                logger.warning(f"kroki.io returned {response.status_code}: {response.text[:300]}")
+        def _do_render():
+            try:
+                svg_bytes = svg_code.encode("utf-8")
+                # unsafe=False (default) blocks external resource fetches
+                cairosvg.svg2png(
+                    bytestring=svg_bytes,
+                    write_to=output_path,
+                    output_width=1600,
+                    unsafe=False,
+                )
+                return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+            except Exception as e:
+                logger.warning(f"cairosvg render failed: {e}")
                 return False
 
-            with open(output_path, "wb") as f:
-                f.write(response.content)
-
-            return os.path.exists(output_path) and os.path.getsize(output_path) > 0
-
-        except Exception as e:
-            logger.warning(f"kroki.io request failed: {e}")
-            return False
+        return await asyncio.to_thread(_do_render)
 
     def _insert_diagrams(
         self, article_md: str, diagrams: list[FormattingAsset]
@@ -479,12 +505,14 @@ class FormattingStage(WritingStage):
                     break
 
             # Use Ghost URL if available, otherwise local path
-            img_src = diagram.ghost_url if diagram.ghost_url else f"/assets/{diagram.filename}"
-
+            raw_src = diagram.ghost_url if diagram.ghost_url else f"/assets/{diagram.filename}"
+            safe_src = html.escape(raw_src, quote=True)
+            safe_alt = html.escape(diagram.alt, quote=True)
+            safe_caption = html.escape(diagram.caption)
             figure_html = (
                 f'\n<figure>\n'
-                f'  <img src="{img_src}" alt="{diagram.alt}">\n'
-                f'  <figcaption>{diagram.caption}</figcaption>\n'
+                f'  <img src="{safe_src}" alt="{safe_alt}">\n'
+                f'  <figcaption>{safe_caption}</figcaption>\n'
                 f'</figure>\n'
             )
             insertions[insert_at] = figure_html

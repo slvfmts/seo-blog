@@ -49,6 +49,10 @@ pymorphy3==2.0.2
 pdfplumber==0.11.0
 python-docx==1.1.0
 
+# SVG → PNG rendering (charts in articles)
+cairosvg>=2.7.0
+Pillow>=10.0
+
 # Testing
 pytest>=8.0
 pytest-asyncio>=0.23
