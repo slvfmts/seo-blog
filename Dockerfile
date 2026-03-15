@@ -3,10 +3,14 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Cairo + fonts for SVG → PNG rendering via cairosvg
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Graceful: if apt repos unreachable, skip — cairosvg will be unavailable,
+# pipeline degrades (charts skipped, covers still work)
+RUN for i in 1 2 3; do apt-get update && break || sleep 5; done \
+    && apt-get install -y --no-install-recommends \
     libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
     libffi-dev shared-mime-info fonts-dejavu-core \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    || echo "WARNING: Cairo libs install failed — SVG charts will be disabled"
 
 # Копируем requirements и устанавливаем зависимости
 COPY requirements.txt .
