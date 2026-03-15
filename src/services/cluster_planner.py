@@ -103,8 +103,27 @@ class ClusterPlanner:
         topic_prefixes = _make_topic_words(big_topic)
         logger.info(f"Topic prefixes for relevance filter: {topic_prefixes}")
 
+        # Compute niche qualifier for search query enrichment
+        niche_qualifier = ""
+        if niche_context:
+            raw = (niche_context.include_topics[0] if niche_context.include_topics
+                   else niche_context.site_name)
+            # Sanitize: strip punctuation, cap 4 words
+            words = raw.strip(".,!?\"'()[]{}:").split()[:4]
+            niche_qualifier = " ".join(words) if words else ""
+            if niche_qualifier.lower() in big_topic.lower():
+                niche_qualifier = ""  # Already in topic, no need to qualify
+            if niche_qualifier:
+                logger.info(f"Niche qualifier: '{niche_qualifier}'")
+
+        # Niche-qualified seed for VolumeProvider/Topvisor
+        niche_seed = f"{big_topic} {niche_qualifier}".strip() if niche_qualifier else big_topic
+
         # Step 1: Discover real keywords from search
-        search_data = await self._discover_keywords(big_topic, region, topic_prefixes=topic_prefixes)
+        search_data = await self._discover_keywords(
+            big_topic, region, topic_prefixes=topic_prefixes,
+            niche_qualifier=niche_qualifier,
+        )
         logger.info(
             f"Step 1: discovered {len(search_data['keywords'])} keywords, "
             f"{len(search_data['paa_questions'])} PAA questions, "
@@ -125,9 +144,9 @@ class ClusterPlanner:
 
         # Step 2c: VolumeProvider suggestions (Wordstat/Rush associations)
         if self.volume_provider:
-            # Pick 3 seed keywords: the topic + 2 related queries
-            suggestion_seeds = [big_topic]
-            search_queries_list = list(search_data["keywords"] - {big_topic})[:2]
+            # Pick 3 seed keywords: the topic + 2 related queries (deterministic)
+            suggestion_seeds = [niche_seed]
+            search_queries_list = sorted(search_data["keywords"] - {big_topic})[:2]
             suggestion_seeds.extend(search_queries_list)
 
             for seed in suggestion_seeds[:3]:
@@ -148,7 +167,7 @@ class ClusterPlanner:
         # Step 2d: Topvisor keyword research (deep expansion)
         if self.topvisor_client:
             try:
-                top_seeds = [big_topic] + list(list(search_data["keywords"] - {big_topic})[:2])
+                top_seeds = [niche_seed] + sorted(search_data["keywords"] - {big_topic})[:2]
                 logger.info(f"Topvisor research: expanding {len(top_seeds)} seeds")
                 await self.topvisor_client.import_keywords(
                     keywords=top_seeds,
@@ -216,6 +235,10 @@ class ClusterPlanner:
         all_keywords = set(filtered_list)
         logger.info(f"Step 2.5: filtered to {len(all_keywords)} keywords")
 
+        # Step 2.6: Niche gate + exclude filter
+        if niche_context:
+            all_keywords = _apply_niche_gate(all_keywords, niche_context, topic_prefixes)
+
         # Step 3: Volume enrichment via VolumeProvider (Wordstat + Rush for RU)
         kw_with_volumes = await self._enrich_volumes(
             list(all_keywords), region,
@@ -239,10 +262,15 @@ class ClusterPlanner:
 
         return plan
 
-    async def _discover_keywords(self, big_topic: str, region: str, topic_prefixes: set[str] | None = None) -> dict:
+    async def _discover_keywords(
+        self, big_topic: str, region: str,
+        topic_prefixes: set[str] | None = None,
+        niche_qualifier: str = "",
+    ) -> dict:
         """
         Step 1: Discover real keywords from Serper search.
-        Runs 3-5 search queries + autocomplete around the topic.
+        Runs 8 search queries + autocomplete around the topic.
+        If niche_qualifier is provided, 6/8 queries include it for niche relevance.
         Returns keywords, PAA questions, top organic URLs.
         """
         gl = "ru" if region.lower() in ["ru", "russia", "kz"] else "us"
@@ -256,26 +284,29 @@ class ClusterPlanner:
         if not self.serper_api_key:
             return {"keywords": all_keywords, "paa_questions": paa_questions, "top_urls": top_urls}
 
-        # Generate search queries around the topic (8-10 patterns for more coverage)
+        # Generate search queries: 6 niche-qualified + 2 generic (for PAA coverage)
+        # When no niche_qualifier, all queries use just big_topic
+        nq = niche_qualifier
+        t_nq = f"{big_topic} {nq}" if nq else big_topic  # topic with qualifier
         if hl == "ru":
             search_queries = [
-                big_topic,
-                f"{big_topic} для начинающих",
-                f"как {big_topic}",
-                f"{big_topic} советы",
-                f"лучший {big_topic}",
-                f"{big_topic} примеры",
+                t_nq,
+                f"{t_nq} для начинающих",
+                f"как {t_nq}",
+                f"{t_nq} советы",
+                f"лучший {t_nq}",
+                f"{t_nq} примеры",
                 f"{big_topic} что это",
                 f"{big_topic} пошаговая инструкция",
             ]
         else:
             search_queries = [
-                big_topic,
-                f"{big_topic} for beginners",
-                f"how to {big_topic}",
-                f"{big_topic} tips",
-                f"best {big_topic}",
-                f"{big_topic} examples",
+                t_nq,
+                f"{t_nq} for beginners",
+                f"how to {t_nq}",
+                f"{t_nq} tips",
+                f"best {t_nq}",
+                f"{t_nq} examples",
                 f"what is {big_topic}",
                 f"{big_topic} step by step",
             ]
@@ -329,17 +360,18 @@ class ClusterPlanner:
                     if url and url not in seen_urls:
                         seen_urls.add(url)
                         top_urls.append({"url": url, "title": item.get("title", ""), "snippet": item.get("snippet", "")})
-                # Related searches → keywords
+                # Related searches → keywords (only topic-relevant)
                 for item in result.get("relatedSearches", []):
                     q = item.get("query", "").strip()
-                    if q:
+                    if q and _has_topic_relevance(q, topic_prefixes):
                         all_keywords.add(q)
-                # PAA → questions + keywords
+                # PAA → always add to paa_questions, but only topic-relevant to keywords
                 for item in result.get("peopleAlsoAsk", []):
                     q = item.get("question", "").strip()
                     if q:
                         paa_questions.append(q)
-                        all_keywords.add(q)
+                        if _has_topic_relevance(q, topic_prefixes):
+                            all_keywords.add(q)
             elif task_type == "autocomplete":
                 for item in result.get("suggestions", []):
                     q = item.get("value", "").strip()
@@ -1121,6 +1153,41 @@ class ClusterPlanner:
         db_session.commit()
         logger.info(f"Saved cluster plan: {cluster.id} with 1 pillar + {len(plan.cluster_articles)} cluster briefs")
         return str(cluster.id)
+
+
+def _apply_niche_gate(
+    all_keywords: set[str],
+    niche_context: "NicheContext",
+    topic_prefixes: set[str],
+) -> set[str]:
+    """Filter keywords by niche relevance and exclude blacklisted terms."""
+    niche_prefixes = _make_topic_words(niche_context.site_name)
+    for inc in niche_context.include_topics:
+        niche_prefixes |= _make_topic_words(inc)
+
+    # Exclude: substring match by words/phrases from exclude_topics
+    exclude_words = set()
+    for exc in niche_context.exclude_topics:
+        exc_clean = exc.lower().strip(".,!?\"'()[]{}:")
+        if exc_clean:
+            exclude_words.add(exc_clean)
+
+    if not niche_prefixes and not exclude_words:
+        return all_keywords
+
+    before = len(all_keywords)
+    filtered = set()
+    for kw in all_keywords:
+        kw_lower = kw.lower()
+        # Reject if contains any exclude word/phrase (substring match)
+        if exclude_words and any(ew in kw_lower for ew in exclude_words):
+            continue
+        # Keep if matches topic OR niche prefixes
+        if _has_topic_relevance(kw, topic_prefixes) or _has_topic_relevance(kw, niche_prefixes):
+            filtered.add(kw)
+
+    logger.info(f"Step 2.6: niche gate {before} → {len(filtered)}")
+    return filtered
 
 
 def _make_topic_words(big_topic: str) -> set[str]:

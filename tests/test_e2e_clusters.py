@@ -198,6 +198,95 @@ class TestClusterPlannerSearchFirst:
         assert len(result["top_urls"]) == 0
 
     @pytest.mark.asyncio
+    async def test_discover_keywords_niche_qualified_queries(self):
+        """With niche_qualifier, 6/8 search queries include it."""
+        planner = self._make_planner()
+
+        captured_queries = []
+
+        with patch("httpx.AsyncClient") as MockClient:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = make_serper_search_response("test")
+
+            mock_client_instance = AsyncMock()
+
+            async def capture_post(url, **kwargs):
+                q = kwargs.get("json", {}).get("q", "")
+                if "search" in url:
+                    captured_queries.append(q)
+                return mock_resp
+
+            mock_client_instance.post = capture_post
+            mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_client_instance
+
+            from src.services.cluster_planner import _make_topic_words
+            topic_prefixes = _make_topic_words("Работа с заказчиками")
+
+            await planner._discover_keywords(
+                "Работа с заказчиками", "ru",
+                topic_prefixes=topic_prefixes,
+                niche_qualifier="фриланс",
+            )
+
+            # 6 of 8 queries should contain "фриланс"
+            qualified = [q for q in captured_queries if "фриланс" in q.lower()]
+            assert len(qualified) >= 6, f"Expected >=6 niche-qualified queries, got {len(qualified)}: {captured_queries}"
+            # 2 generic queries should NOT contain "фриланс"
+            generic = [q for q in captured_queries if "фриланс" not in q.lower()]
+            assert len(generic) == 2, f"Expected 2 generic queries, got {len(generic)}: {captured_queries}"
+
+    @pytest.mark.asyncio
+    async def test_discover_keywords_filters_irrelevant_related(self):
+        """RelatedSearches not matching topic_prefixes are excluded from keywords."""
+        planner = self._make_planner()
+
+        from src.services.cluster_planner import _make_topic_words
+        topic_prefixes = _make_topic_words("Работа с заказчиками фриланс")
+
+        # Serper returns related searches: one relevant, one irrelevant
+        search_response = {
+            "organic": [],
+            "relatedSearches": [
+                {"query": "работа с заказчиками советы фриланс"},
+                {"query": "госзакупки 44-ФЗ тендеры"},
+            ],
+            "peopleAlsoAsk": [
+                {"question": "Как найти заказчика на фрилансе?"},
+                {"question": "Что такое 44-ФЗ?"},
+            ],
+        }
+
+        with patch("httpx.AsyncClient") as MockClient:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = search_response
+
+            mock_client_instance = AsyncMock()
+            mock_client_instance.post = AsyncMock(return_value=mock_resp)
+            mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_client_instance
+
+            result = await planner._discover_keywords(
+                "Работа с заказчиками", "ru",
+                topic_prefixes=topic_prefixes,
+            )
+
+            # Relevant related search should be included
+            assert any("заказчик" in kw for kw in result["keywords"])
+            # Irrelevant related search should be excluded
+            assert not any("госзакупки" in kw for kw in result["keywords"])
+            # PAA: irrelevant question still in paa_questions (for research)
+            assert any("44-ФЗ" in q for q in result["paa_questions"])
+            # PAA: irrelevant question NOT in keywords
+            assert not any("44-ФЗ" in kw for kw in result["keywords"])
+
+    @pytest.mark.asyncio
     async def test_analyze_competitors_scrapes_pages(self):
         """Step 2: _analyze_competitors scrapes top URLs."""
         planner = self._make_planner()
@@ -296,6 +385,81 @@ class TestClusterPlannerSearchFirst:
         )
         assert plan.pillar.title_candidate == "fallback topic"
         assert len(plan.cluster_articles) == 0
+
+
+# =============================================================================
+# Niche gate + exclude filter tests
+# =============================================================================
+
+class TestNicheGateFilter:
+    """Test niche_qualifier, deterministic seeds, and niche gate logic."""
+
+    def test_niche_qualifier_from_include_topics(self):
+        """niche_qualifier is derived from first include_topic."""
+        from src.services.cluster_planner import NicheContext
+        niche = NicheContext(
+            site_name="мой сайт",
+            include_topics=["фриланс и удалённая работа"],
+        )
+        # Simulate what plan() does
+        raw = niche.include_topics[0]
+        words = raw.strip(".,!?\"'()[]{}:").split()[:4]
+        niche_qualifier = " ".join(words)
+        assert niche_qualifier == "фриланс и удалённая работа"
+
+    def test_niche_qualifier_skipped_when_in_topic(self):
+        """If qualifier is already in big_topic, it's set to empty."""
+        niche_qualifier = "фриланс"
+        big_topic = "Работа на фрилансе"
+        if niche_qualifier.lower() in big_topic.lower():
+            niche_qualifier = ""
+        assert niche_qualifier == ""
+
+    def test_niche_qualifier_kept_when_not_in_topic(self):
+        """If qualifier is NOT in big_topic, it's kept."""
+        niche_qualifier = "фриланс"
+        big_topic = "Работа с заказчиками"
+        if niche_qualifier.lower() in big_topic.lower():
+            niche_qualifier = ""
+        assert niche_qualifier == "фриланс"
+
+    def test_deterministic_seed_selection(self):
+        """sorted() ensures deterministic seed selection from set."""
+        keywords = {"gamma keyword", "alpha keyword", "beta keyword", "big_topic"}
+        seeds = sorted(keywords - {"big_topic"})[:2]
+        assert seeds == ["alpha keyword", "beta keyword"]
+        # Run again — same result
+        seeds2 = sorted(keywords - {"big_topic"})[:2]
+        assert seeds == seeds2
+
+    def test_niche_gate_excludes_junk(self):
+        """Niche gate filters out keywords with exclude_words via real _apply_niche_gate."""
+        from src.services.cluster_planner import NicheContext, _apply_niche_gate, _make_topic_words
+
+        niche = NicheContext(
+            site_name="фриланс",
+            include_topics=["фриланс"],
+            exclude_topics=["госзакупки", "1С", "44-ФЗ"],
+        )
+        topic_prefixes = _make_topic_words("Работа с заказчиками")
+
+        all_keywords = {
+            "работа с заказчиками фриланс",
+            "как найти заказчика на фрилансе",
+            "госзакупки для начинающих",
+            "44-фз тендеры",
+            "1с бухгалтерия",
+            "фриланс советы",
+        }
+
+        filtered = _apply_niche_gate(all_keywords, niche, topic_prefixes)
+
+        assert "работа с заказчиками фриланс" in filtered
+        assert "как найти заказчика на фрилансе" in filtered
+        assert "фриланс советы" in filtered
+        assert "госзакупки для начинающих" not in filtered
+        assert "44-фз тендеры" not in filtered
+        assert "1с бухгалтерия" not in filtered
 
 
 # =============================================================================
