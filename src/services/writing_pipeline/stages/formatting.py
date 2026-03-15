@@ -21,7 +21,7 @@ _MAX_SVG_BYTES = 200_000  # 200KB safety cap for LLM-generated SVG
 try:
     import cairosvg
     _HAS_CAIROSVG = True
-except ImportError:
+except (ImportError, OSError):
     _HAS_CAIROSVG = False
 
 from ..core.stage import WritingStage
